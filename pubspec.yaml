@@ -1,0 +1,142 @@
+name: faro
+description: "Faro — Consulta multi-bodega: ejecuta una consulta SQL contra muchas bases de datos distribuidas a la vez."
+publish_to: 'none'
+version: 0.1.0+1
+
+# NOTA: este pubspec fue escrito a mano porque el Flutter SDK todavía se está
+# instalando en esta máquina. En cuanto `flutter` esté disponible en PATH:
+#   1. Corre `flutter create --platforms=windows,macos,linux .` en la raíz del
+#      proyecto para generar las carpetas nativas (windows/, macos/, linux/).
+#      Ese comando puede intentar sobreescribir este pubspec.yaml — si pregunta,
+#      dile que no, o vuelve a aplicar los `dependencies` de abajo después.
+#   2. Corre `flutter pub get`.
+#   3. Agrega los archivos de fuente reales en assets/fonts/ (ver ese folder).
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Manejo de estado
+  flutter_riverpod: ^2.5.1
+
+  # Conectividad a bases de datos
+  postgres: ^3.3.0 # driver para PostgreSQL.
+  # driver para SQL Server: FFI + FreeTDS, multiplataforma (incluye Windows
+  # desktop). Es un singleton global (una sola conexión activa a la vez en
+  # toda la app) — ver el comentario de cabecera en sqlserver_connector.dart
+  # sobre por qué las consultas a SQL Server corren secuenciales, no en
+  # paralelo como Postgres.
+  mssql_connection: ^3.0.0
+  # Para forzar FreeTDS a negociar UTF-8 (ver sqlserver_connector.dart) —
+  # ya eran dependencias transitivas, se declaran directas para poder llamar
+  # SetEnvironmentVariable antes de la primera conexión.
+  win32: ^5.5.0
+  ffi: ^2.1.0
+
+  # Persistencia local (config de servidores, tema/acento, favoritos, historial — todo sobrevive reinicios)
+  shared_preferences: ^2.2.3
+
+  # Set de íconos del rediseño 2026-07-17 (design_system/design_handoff_faro):
+  # Lucide, trazo uniforme 2px, en vez de Material Icons. Se mantuvieron
+  # Material Icons durante el rediseño (decisión explícita del usuario de
+  # diferir este cambio a una pasada aparte) — este es esa pasada.
+  flutter_lucide: ^1.11.0
+
+  # Grid virtualizado en 2 ejes para la tabla de resultados de Consulta
+  # (miles de filas x columnas anchas) — reemplaza la tabla armada a mano
+  # (ListView.builder + SingleChildScrollView horizontal), que no podía dar
+  # una barra de scroll vertical propiamente fija al viewport visible.
+  # Paquete oficial del equipo de Flutter.
+  two_dimensional_scrollables: ^0.5.3
+
+  # Almacén seguro del SO (Windows Credential Manager / Keychain / libsecret)
+  # para usuario+contraseña de bases de datos — nunca deben tocar el JSON
+  # plano de shared_preferences.
+  flutter_secure_storage: ^9.2.2
+
+  # Ventanas de Windows reales adicionales (una por base de datos, estilo
+  # SSMS/pgAdmin) — cada una corre su propio motor Flutter/aislado, sin
+  # memoria compartida con la ventana principal (ver query_window_bootstrap.dart).
+  desktop_multi_window: ^0.3.0
+  # desktop_multi_window por sí solo solo crea/destruye la ventana nativa —
+  # título/tamaño/posición se controlan desde ADENTRO de cada ventana con
+  # este paquete (confirmado leyendo el código fuente instalado de ambos,
+  # no la documentación web).
+  window_manager: ^0.4.3
+
+  # Utilidades
+  file_picker: ^8.0.0 # "Cargar" consulta desde .sql/.txt, y ubicar destino de export CSV
+  csv: ^6.0.0 # export de resultados a CSV
+  intl: ^0.19.0 # formato de fecha/hora en Historial
+  uuid: ^4.4.0 # ids de servidores/bases de datos/favoritos
+
+  # SOLO EVALUACIÓN, 2026-07-24 — motor de edición de código real (líneas,
+  # resaltado de sintaxis, buscar/reemplazar, autocompletado), en vez del
+  # TextField armado a mano en features/consulta/presentation/widgets/
+  # sql_editor.dart. Prototipo aislado en
+  # features/consulta/presentation/re_editor_prototype_screen.dart,
+  # alcanzable desde un botón temporal en Apariencia — no está conectado al
+  # editor real todavía. Quitar esta dependencia (y el archivo del
+  # prototipo) si se decide no migrar.
+  re_editor: ^0.10.0
+  # Transitiva de re_editor, pero se importa directo en el prototipo para
+  # el resaltado de PostgreSQL (langPgsql) y el tema de colores.
+  re_highlight: ^0.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+# Vendored fork of mssql_connection 3.0.0 (third_party/mssql_connection) —
+# its NVARCHAR/NTEXT decoder (freetds_bindings.dart) unconditionally treats
+# bytes as raw UTF-16LE, which corrupts accented/ñ characters no matter what
+# FreeTDS charset config is used (see sqlserver_connector.dart's history
+# comment). Patched to fall back to UTF-8 when the UTF-16LE decode contains
+# the Unicode replacement character. Re-check this override whenever
+# mssql_connection publishes a new version — drop it if upstream fixes this.
+dependency_overrides:
+  mssql_connection:
+    path: third_party/mssql_connection
+
+flutter:
+  uses-material-design: true
+
+  # 2026-07-17 redesign (design_system/design_handoff_faro): Sora
+  # (headings, 600/700) + Manrope (body/UI, 400/500/600/700) replace
+  # Caprasimo/Figtree. Both ship from Google Fonts only as a single
+  # variable-weight file — same file registered once per nominal weight so
+  # TextTheme weight lookups resolve predictably even where the engine
+  # doesn't render the variable axis at runtime.
+  fonts:
+    - family: Sora
+      fonts:
+        - asset: assets/fonts/Sora-Variable.ttf
+          weight: 600
+        - asset: assets/fonts/Sora-Variable.ttf
+          weight: 700
+    - family: Manrope
+      fonts:
+        - asset: assets/fonts/Manrope-Variable.ttf
+          weight: 400
+        - asset: assets/fonts/Manrope-Variable.ttf
+          weight: 500
+        - asset: assets/fonts/Manrope-Variable.ttf
+          weight: 600
+        - asset: assets/fonts/Manrope-Variable.ttf
+          weight: 700
+    # Editor de SQL — antes usaba el nombre genérico 'monospace', que no
+    # resuelve a ninguna fuente real en Windows/Flutter (cae al fallback del
+    # sistema, más delgado y sin look de editor de código). JetBrains Mono
+    # también solo se distribuye como un archivo de peso variable.
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Variable.ttf
+        - asset: assets/fonts/JetBrainsMono-Variable.ttf
+          weight: 700
+
+  assets:
+    - assets/icons/

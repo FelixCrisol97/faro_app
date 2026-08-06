@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; font-weight: 500; }
+    ::selection { background: var(--accent-soft); }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-hover); }
+    textarea.faro-sql { font-family: 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 13.5px; line-height: 1.55; }
+    @keyframes dialogIn { from { opacity: 0; transform: scale(0.96) translateY(4px); } to { opacity: 1; transform: none; } }
+    @keyframes backdropIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeInUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    @keyframes pulseWarn { 0%, 100% { box-shadow: 0 0 0 0 rgba(180,83,9,0.35); } 50% { box-shadow: 0 0 0 6px rgba(180,83,9,0); } }
+    .spin-icon { animation: spin 0.8s linear infinite; }
+  </style>
+</helmet>
+
+<div style="{{ rootStyle }}">
+
+  <nav style="display:flex; align-items:center; gap:28px; height:60px; padding:0 28px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0;">
+    <span style="font-family:'Sora',sans-serif; font-weight:700; font-size:19px; color:var(--text); letter-spacing:-0.01em;">Faro</span>
+    <a href="#" onClick="{{ goConsulta }}" style="{{ navConsultaStyle }}">Consulta</a>
+    <a href="#" onClick="{{ goHistorial }}" style="{{ navHistorialStyle }}">Historial</a>
+    <a href="#" onClick="{{ goFavoritos }}" style="{{ navFavoritosStyle }}">Favoritos</a>
+    <a href="#" onClick="{{ goAdmin }}" style="{{ navAdminStyle }}">Administración</a>
+    <a href="#" onClick="{{ goApariencia }}" style="{{ navAparienciaStyle }}">Apariencia</a>
+  </nav>
+
+  <sc-if value="{{ isConsulta }}" hint-placeholder-val="{{ true }}">
+  <div style="display:flex; flex:1; min-height:0;">
+
+    <aside style="width:272px; flex-shrink:0; background:var(--surface); border-right:1px solid var(--border); padding:20px; overflow-y:auto; display:flex; flex-direction:column; gap:28px;">
+      <div>
+        <div style="font-family:'Manrope',sans-serif; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-muted); margin-bottom:10px;">Servidores</div>
+        <div style="display:flex; flex-direction:column; gap:4px;">
+          <sc-for list="{{ serverList }}" as="srv" hint-placeholder-count="4">
+            <div onClick="{{ srv.selectClick }}" style="{{ srv.rowStyle }}" role="button" tabIndex="0" style-hover="background:var(--surface-2);" style-focus="outline:2px solid var(--accent); outline-offset:2px;">
+              <div style="display:flex; align-items:center; gap:8px; justify-content:space-between;">
+                <span style="font-family:'Sora',sans-serif; font-weight:600; font-size:14px;">{{ srv.name }}</span>
+                <sc-if value="{{ srv.isDev }}" hint-placeholder-val="{{ false }}">
+                  <span style="background:var(--warn); color:#fff; font-size:9.5px; font-weight:700; letter-spacing:0.03em; padding:2px 7px; border-radius:5px;">DEV</span>
+                </sc-if>
+              </div>
+              <div style="font-family:'Manrope',sans-serif; font-size:11.5px; color:var(--text-muted); margin-top:2px;">{{ srv.engineLabel }} · {{ srv.dbCountLabel }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div>
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+          <span style="font-family:'Manrope',sans-serif; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-muted);">Bases de datos</span>
+          <button onClick="{{ toggleSelectAll }}" style="background:transparent; border:none; color:var(--accent); font-family:'Manrope',sans-serif; font-weight:600; font-size:11.5px; padding:2px 8px; border-radius:6px; cursor:pointer;" style-hover="background:var(--accent-soft);">{{ selectAllLabel }}</button>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px;">
+          <sc-for list="{{ activeDatabases }}" as="db" hint-placeholder-count="4">
+            <label style="display:flex; align-items:center; gap:9px; padding:7px 8px; border-radius:8px; cursor:pointer; font-family:'Manrope',sans-serif; font-weight:500; font-size:13.5px; color:var(--text);" style-hover="background:var(--surface-2);">
+              <input type="checkbox" checked="{{ db.selected }}" onChange="{{ db.toggleClick }}" style="width:16px;height:16px; accent-color:var(--accent);" style-focus="outline:2px solid var(--accent); outline-offset:2px;">
+              {{ db.name }}
+            </label>
+          </sc-for>
+        </div>
+      </div>
+    </aside>
+
+    <main style="flex:1; min-width:0; overflow-y:auto; padding:28px; display:flex; flex-direction:column; gap:20px; background:var(--bg);">
+
+      <sc-if value="{{ devBannerShow }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex; align-items:center; gap:10px; background:var(--warn); color:#fff; padding:12px 18px; border-radius:10px; font-family:'Manrope',sans-serif; font-weight:600; font-size:13.5px; animation: pulseWarn 2.4s ease-in-out infinite;">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          Modo Desarrollo activo en {{ activeServerName }} — sin restricción de solo lectura.
+        </div>
+      </sc-if>
+
+      <div style="background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px; box-shadow:0 1px 2px rgba(15,23,42,0.04),0 4px 12px rgba(15,23,42,0.04); display:flex; flex-direction:column; gap:16px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-family:'Sora',sans-serif; font-weight:600; font-size:17px; color:var(--text);">{{ activeServerName }}</span>
+            <sc-if value="{{ activeServerIsDev }}" hint-placeholder-val="{{ false }}">
+              <span style="background:var(--warn-soft); color:var(--warn-soft-text); font-family:'Manrope',sans-serif; font-weight:600; font-size:11.5px; padding:3px 9px; border-radius:6px;">Desarrollo</span>
+            </sc-if>
+            <sc-if value="{{ activeServerIsReadOnly }}" hint-placeholder-val="{{ true }}">
+              <span style="background:var(--surface-2); color:var(--text-muted); font-family:'Manrope',sans-serif; font-weight:600; font-size:11.5px; padding:3px 9px; border-radius:6px;">Solo lectura</span>
+            </sc-if>
+            <span style="font-family:'Manrope',sans-serif; font-size:12.5px; color:var(--text-muted); white-space:nowrap;">{{ selectedCountLabel }}</span>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <input type="file" ref="{{ fileInputRef }}" onChange="{{ onFileChange }}" accept=".sql,.txt" style="display:none;">
+            <button style="{{ runButtonStyle }}" disabled="{{ runDisabled }}" onClick="{{ runOrCancelClick }}">
+              <sc-if value="{{ isRunning }}" hint-placeholder-val="{{ false }}">
+                <svg class="spin-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9"></path></svg>
+              </sc-if>
+              <sc-if value="{{ isNotRunning }}" hint-placeholder-val="{{ true }}">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>
+              </sc-if>
+              {{ runLabel }}
+            </button>
+            <button style="display:inline-flex;align-items:center;gap:8px;background:transparent;color:var(--text);border:1px solid var(--border);border-radius:9px;padding:10px 16px;font-family:'Manrope',sans-serif;font-weight:600;font-size:13.5px;cursor:pointer;" style-hover="background:var(--surface-2);" onClick="{{ triggerFileInput }}">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><polyline points="7 8 12 3 17 8"></polyline><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"></path></svg>
+              Cargar
+            </button>
+            <button style="display:inline-flex;align-items:center;gap:8px;background:transparent;color:var(--text);border:1px solid var(--border);border-radius:9px;padding:10px 16px;font-family:'Manrope',sans-serif;font-weight:600;font-size:13.5px;cursor:pointer;" style-hover="background:var(--surface-2);" onClick="{{ formatClick }}">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="14" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>
+              Formatear
+            </button>
+            <button style="display:inline-flex;align-items:center;gap:8px;background:transparent;color:var(--text);border:1px solid var(--border);border-radius:9px;padding:10px 16px;font-family:'Manrope',sans-serif;font-weight:600;font-size:13.5px;cursor:pointer;" style-hover="background:var(--surface-2);" onClick="{{ openSaveFav }}">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+              Favorito
+            </button>
+          </div>
+        </div>
+
+        <div style="position:relative;">
+          <textarea class="faro-sql" ref="{{ sqlRef }}" value="{{ sqlText }}" onChange="{{ onSqlChange }}" onKeyUp="{{ onSqlKeyUp }}" onClick="{{ onSqlKeyUp }}" rows="6" spellcheck="false" style="width:100%; box-sizing:border-box; background:var(--surface-2); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:14px; outline:none; resize:vertical;" style-focus="border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft);"></textarea>
+          <sc-if value="{{ showAutocomplete }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute; left:14px; top:100%; margin-top:4px; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 10px 30px rgba(15,23,42,0.15); z-index:5; overflow:hidden; min-width:180px;">
+              <sc-for list="{{ autocompleteOptions }}" as="tbl" hint-placeholder-count="2">
+                <div onClick="{{ tbl.pickClick }}" style="padding:8px 12px; font-size:13.5px; cursor:pointer; font-family: monospace; color:var(--text);" style-hover="background:var(--accent-soft); color:var(--accent-soft-text);">{{ tbl.name }}</div>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+
+      <div style="background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px; box-shadow:0 1px 2px rgba(15,23,42,0.04),0 4px 12px rgba(15,23,42,0.04); display:flex; flex-direction:column; gap:16px; flex:1; min-height:220px;">
+        <sc-if value="{{ showEmptyState }}" hint-placeholder-val="{{ true }}">
+          <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; color:var(--text-muted); font-family:'Manrope',sans-serif; font-size:13.5px; text-align:center; padding:32px;">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14a9 3 0 0 0 18 0V5"></path><path d="M3 12a9 3 0 0 0 18 0"></path></svg>
+            Escribe una consulta y presiona Ejecutar para ver resultados combinados de las bases de datos seleccionadas.
+          </div>
+        </sc-if>
+        <sc-if value="{{ isRunning }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:1; display:flex; align-items:center; justify-content:center; gap:8px; color:var(--text-muted); font-family:'Manrope',sans-serif; font-size:13.5px;">
+            <svg class="spin-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9"></path></svg>
+            {{ runningLabel }}
+          </div>
+        </sc-if>
+        <sc-if value="{{ showResults }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; animation: fadeInUp 0.25s ease-out;">
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <sc-for list="{{ perDbSummary }}" as="d" hint-placeholder-count="2">
+                <span style="{{ d.chipStyle }}">
+                  <sc-if value="{{ d.ok }}" hint-placeholder-val="{{ true }}">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                  </sc-if>
+                  <sc-if value="{{ d.errored }}" hint-placeholder-val="{{ false }}">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                  </sc-if>
+                  {{ d.label }}
+                </span>
+              </sc-for>
+            </div>
+            <button style="display:inline-flex;align-items:center;gap:8px;background:transparent;color:var(--text);border:1px solid var(--border);border-radius:9px;padding:9px 15px;font-family:'Manrope',sans-serif;font-weight:600;font-size:13px;cursor:pointer;" style-hover="background:var(--surface-2);" onClick="{{ exportClick }}" disabled="{{ exportDisabled }}">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><polyline points="7 12 12 17 17 12"></polyline><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"></path></svg>
+              Exportar CSV
+            </button>
+          </div>
+          <div style="overflow:auto; border:1px solid var(--border); border-radius:10px; animation: fadeInUp 0.3s ease-out;">
+            <table style="width:100%; border-collapse:collapse;">
+              <thead><tr>
+                <sc-for list="{{ resultColumns }}" as="col" hint-placeholder-count="3">
+                  <th style="text-align:left; padding:10px 14px; font-family:'Manrope',sans-serif; font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-muted); background:var(--surface-2); border-bottom:1px solid var(--border);">{{ col }}</th>
+                </sc-for>
+              </tr></thead>
+              <tbody>
+                <sc-for list="{{ resultRows }}" as="row" hint-placeholder-count="3">
+                  <tr style-hover="background:var(--surface-2);">
+                    <sc-for list="{{ row.cells }}" as="cell" hint-placeholder-count="3">
+                      <td style="padding:10px 14px; font-family:'Manrope',sans-serif; font-weight:500; font-size:13.5px; color:var(--text); border-bottom:1px solid var(--border);">{{ cell }}</td>
+                    </sc-for>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+        </sc-if>
+      </div>
+    </main>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isHistorial }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1; overflow-y:auto; padding:28px; background:var(--bg);">
+      <h2 style="font-family:'Sora',sans-serif; font-weight:700; font-size:22px; color:var(--text); margin:0 0 20px 0;">Historial de ejecuciones</h2>
+      <div style="background:var(--surface); border:1px solid var(--border); border-radius:16px; overflow:auto; box-shadow:0 1px 2px rgba(15,23,42,0.04),0 4px 12px rgba(15,23,42,0.04);">
+        <table style="width:100%; border-collapse:collapse;">
+          <thead><tr>
+            <th style="text-align:left; padding:10px 14px; font-family:'Manrope',sans-serif; font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-muted); background:var(--surface-2); border-bottom:1px solid var(--border);">Hora</th>
+            <th style="text-align:left; padding:10px 14px; font-family:'Manrope',sans-serif; font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-muted); background:var(--surface-2); border-bottom:1px solid var(--border);">Consulta</th>
+            <th style="text-align:left; padding:10px 14px; font-family:'Manrope',sans-serif; font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-muted); background:var(--surface-2); border-bottom:1px solid var(--border);">Servidor</th>
+            <th style="text-align:left; padding:10px 14px; font-family:'Manrope',sans-serif; font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-muted); background:var(--surface-2); border-bottom:1px solid var(--border);">BDs</th>
+            <th style="text-align:left; padding:10px 14px; font-family:'Manrope',sans-serif; font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-muted); background:var(--surface-2); border-bottom:1px solid var(--border);">Filas</th>
+            <th style="text-align:left; padding:10px 14px; font-family:'Manrope',sans-serif; font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-muted); background:var(--surface-2); border-bottom:1px solid var(--border);">Estado</th>
+            <th style="background:var(--surface-2); border-bottom:1px solid var(--border);"></th>
+          </tr></thead>
+          <tbody>
+            <sc-for list="{{ historyList }}" as="h" hint-placeholder-count="3">
+              <tr style-hover="background:var(--surface-2);">
+                <td style="padding:10px 14px; font-family:'Manrope',sans-serif; font-weight:500; font-size:13.5px; color:var(--text); border-bottom:1px solid var(--border);">{{ h.time }}</td>
+                <td style="padding:10px 14px; font-family:monospace; font-size:12.5px; color:var(--text); border-bottom:1px solid var(--border); max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ h.queryPreview }}</td>
+                <td style="padding:10px 14px; font-family:'Manrope',sans-serif; font-weight:500; font-size:13.5px; color:var(--text); border-bottom:1px solid var(--border);">{{ h.serverName }}</td>
+                <td style="padding:10px 14px; font-family:'Manrope',sans-serif; font-weight:500; font-size:13.5px; color:var(--text); border-bottom:1px solid var(--border);">{{ h.dbCount }}</td>
+                <td style="padding:10px 14px; font-family:'Manrope',sans-serif; font-weight:500; font-size:13.5px; color:var(--text); border-bottom:1px solid var(--border);">{{ h.totalRowsLabel }}</td>
+                <td style="padding:10px 14px; border-bottom:1px solid var(--border);"><span style="{{ h.chipStyle }}">{{ h.statusLabel }}</span></td>
+                <td style="padding:10px 14px; border-bottom:1px solid var(--border);"><button style="background:transparent;border:none;color:var(--accent);font-family:'Manrope',sans-serif;font-weight:600;font-size:12.5px;padding:5px 10px;border-radius:7px;cursor:pointer;" style-hover="background:var(--accent-soft);" onClick="{{ h.reuseClick }}">Reusar</button></td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isFavoritos }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1; overflow-y:auto; padding:28px; background:var(--bg);">
+      <h2 style="font-family:'Sora',sans-serif; font-weight:700; font-size:22px; color:var(--text); margin:0 0 20px 0;">Consultas favoritas</h2>
+      <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:20px;">
+        <sc-for list="{{ favoritesList }}" as="f" hint-placeholder-count="2">
+          <div style="background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:18px; box-shadow:0 1px 2px rgba(15,23,42,0.04),0 4px 12px rgba(15,23,42,0.04); display:flex; flex-direction:column; gap:12px;">
+            <div style="font-family:'Sora',sans-serif; font-weight:600; font-size:15px; color:var(--text);">{{ f.name }}</div>
+            <p style="font-family:monospace; font-size:12px; color:var(--text-muted); white-space:pre-wrap; margin:0; max-height:90px; overflow:hidden;">{{ f.queryPreview }}</p>
+            <div style="display:flex; gap:8px;">
+              <button style="flex:1; display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--accent);color:#fff;border:none;border-radius:9px;padding:10px 16px;font-family:'Manrope',sans-serif;font-weight:600;font-size:13.5px;cursor:pointer;box-shadow:0 1px 2px rgba(15,23,42,0.08);" style-hover="background:var(--accent-hover);" style-active="background:var(--accent-active);" onClick="{{ f.useClick }}">Usar</button>
+              <button style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;background:transparent;border:1px solid var(--border);border-radius:9px;color:var(--text-muted);cursor:pointer;" style-hover="background:var(--error-soft); color:var(--error-soft-text); border-color:var(--error-soft-text);" onClick="{{ f.deleteClick }}">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path></svg>
+              </button>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isAdmin }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1; overflow-y:auto; padding:28px; background:var(--bg);">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+        <h2 style="font-family:'Sora',sans-serif; font-weight:700; font-size:22px; color:var(--text); margin:0;">Servidores y bases de datos</h2>
+        <button style="display:inline-flex;align-items:center;gap:8px;background:var(--accent);color:#fff;border:none;border-radius:9px;padding:10px 18px;font-family:'Manrope',sans-serif;font-weight:600;font-size:14px;cursor:pointer;box-shadow:0 1px 2px rgba(15,23,42,0.08);" style-hover="background:var(--accent-hover);" style-active="background:var(--accent-active);" onClick="{{ openAddServer }}">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          Agregar servidor
+        </button>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:20px;">
+        <sc-for list="{{ adminServers }}" as="srv" hint-placeholder-count="3">
+          <div style="background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px; box-shadow:0 1px 2px rgba(15,23,42,0.04),0 4px 12px rgba(15,23,42,0.04); display:flex; flex-direction:column; gap:14px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"></rect><rect x="2" y="13" width="20" height="8" rx="2"></rect><line x1="6" y1="7" x2="6.01" y2="7"></line><line x1="6" y1="17" x2="6.01" y2="17"></line></svg>
+                <input value="{{ srv.name }}" onChange="{{ srv.renameChange }}" style="font-family:'Sora',sans-serif; font-weight:600; font-size:16px; color:var(--text); border:1px solid transparent; background:transparent; padding:4px 8px; border-radius:8px;" style-hover="border-color:var(--border);" style-focus="border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); background:var(--bg);">
+                <span style="background:var(--surface-2); color:var(--text-muted); font-family:'Manrope',sans-serif; font-weight:600; font-size:11.5px; padding:3px 9px; border-radius:6px;">{{ srv.engineLabel }}</span>
+                <span style="font-family:monospace; font-size:12px; color:var(--text-muted);">{{ srv.hostLabel }}</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:10px;">
+                <span style="font-family:'Manrope',sans-serif; font-size:12.5px; color:var(--text-muted);">{{ srv.modeStatusLabel }}</span>
+                <div style="display:flex; gap:4px; background:var(--surface-2); padding:3px; border-radius:10px;">
+                  <button style="{{ srv.readOnlyBtnStyle }}" onClick="{{ srv.setReadOnlyClick }}">Solo lectura</button>
+                  <button style="{{ srv.devBtnStyle }}" onClick="{{ srv.requestDevClick }}">Desarrollo</button>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:4px;">
+              <sc-for list="{{ srv.databases }}" as="db" hint-placeholder-count="2">
+                <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-radius:10px; background:var(--surface-2);">
+                  <input value="{{ db.name }}" onChange="{{ db.renameChange }}" style="font-family:monospace; font-size:13.5px; color:var(--text); border:1px solid transparent; background:transparent; padding:4px 8px; border-radius:8px;" style-hover="border-color:var(--border);" style-focus="border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); background:var(--surface);">
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <sc-if value="{{ db.testLabel }}" hint-placeholder-val="{{ false }}">
+                      <span style="{{ db.testChipStyle }}">{{ db.testLabel }}</span>
+                    </sc-if>
+                    <button style="background:transparent;border:1px solid var(--border);color:var(--text);font-family:'Manrope',sans-serif;font-weight:600;font-size:12.5px;padding:6px 12px;border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;" style-hover="background:var(--surface);" onClick="{{ db.testClick }}">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M18 8v3a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"></path></svg>
+                      Probar conexión
+                    </button>
+                  </div>
+                </div>
+              </sc-for>
+              <button style="align-self:flex-start; margin-top:4px; background:transparent; border:none; color:var(--accent); font-family:'Manrope',sans-serif; font-weight:600; font-size:13px; padding:6px 8px; border-radius:7px; cursor:pointer;" style-hover="background:var(--accent-soft);" onClick="{{ srv.openAddDbClick }}">+ Agregar base de datos</button>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isApariencia }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1; overflow-y:auto; padding:28px; background:var(--bg); max-width:520px;">
+      <h2 style="font-family:'Sora',sans-serif; font-weight:700; font-size:22px; color:var(--text); margin:0 0 20px 0;">Apariencia</h2>
+      <div style="background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px; box-shadow:0 1px 2px rgba(15,23,42,0.04),0 4px 12px rgba(15,23,42,0.04); display:flex; flex-direction:column; gap:12px; margin-bottom:20px;">
+        <div style="font-family:'Sora',sans-serif; font-weight:600; font-size:15px; color:var(--text);">Tema</div>
+        <div style="display:flex; gap:4px; background:var(--surface-2); padding:3px; border-radius:10px; align-self:flex-start;">
+          <button style="{{ themeLightBtnStyle }}" onClick="{{ setLight }}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><line x1="12" y1="2" x2="12" y2="4"></line><line x1="12" y1="20" x2="12" y2="22"></line><line x1="4" y1="12" x2="2" y2="12"></line><line x1="22" y1="12" x2="20" y2="12"></line></svg>
+            Claro
+          </button>
+          <button style="{{ themeDarkBtnStyle }}" onClick="{{ setDark }}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"></path></svg>
+            Oscuro
+          </button>
+        </div>
+      </div>
+      <div style="background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px; box-shadow:0 1px 2px rgba(15,23,42,0.04),0 4px 12px rgba(15,23,42,0.04); display:flex; flex-direction:column; gap:12px;">
+        <div style="font-family:'Sora',sans-serif; font-weight:600; font-size:15px; color:var(--text);">Color de acento</div>
+        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <sc-for list="{{ accentSwatches }}" as="sw" hint-placeholder-count="6">
+            <button onClick="{{ sw.click }}" style="{{ sw.style }}" style-hover="transform: scale(1.08);" style-focus="outline:2px solid var(--text); outline-offset:3px;" aria-label="{{ sw.label }}"></button>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ favDialogOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed; inset:0; display:grid; place-items:center; padding:24px; background:rgba(15,23,42,0.55); backdrop-filter:blur(2px); animation: backdropIn 0.15s ease-out;">
+      <div style="background:var(--surface); border-radius:16px; padding:24px; box-shadow:0 20px 50px rgba(15,23,42,0.25); width:min(440px,92vw); display:flex; flex-direction:column; gap:16px; animation: dialogIn 0.18s ease-out;">
+        <div style="font-family:'Sora',sans-serif; font-weight:600; font-size:18px; color:var(--text);">Guardar consulta favorita</div>
+        <div>
+          <label style="display:block; font-family:'Manrope',sans-serif; font-weight:600; font-size:12.5px; color:var(--text-muted); margin-bottom:6px;">Nombre</label>
+          <input value="{{ newFavName }}" onChange="{{ onNewFavNameChange }}" placeholder="Ej. Stock bajo" style="width:100%; box-sizing:border-box; background:var(--bg); border:1px solid var(--border); border-radius:9px; padding:9px 12px; font-family:'Manrope',sans-serif; font-size:14px; color:var(--text); outline:none;" style-focus="border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft);">
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:10px;">
+          <button style="background:transparent;color:var(--text);border:1px solid var(--border);border-radius:9px;padding:9px 16px;font-family:'Manrope',sans-serif;font-weight:600;font-size:13.5px;cursor:pointer;" style-hover="background:var(--surface-2);" onClick="{{ closeSaveFav }}">Cancelar</button>
+          <button style="background:var(--accent);color:#fff;border:none;border-radius:9px;padding:9px 18px;font-family:'Manrope',sans-serif;font-weight:600;font-size:13.5px;cursor:pointer;box-shadow:0 1px 2px rgba(15,23,42,0.08);" style-hover="background:var(--accent-hover);" onClick="{{ confirmSaveFav }}" disabled="{{ newFavNameEmpty }}">Guardar</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ devConfirmOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed; inset:0; display:grid; place-items:center; padding:24px; background:rgba(15,23,42,0.55); backdrop-filter:blur(2px); animation: backdropIn 0.15s ease-out;">
+      <div style="background:var(--surface); border-radius:16px; padding:24px; box-shadow:0 20px 50px rgba(15,23,42,0.25); width:min(440px,92vw); display:flex; flex-direction:column; gap:16px; animation: dialogIn 0.18s ease-out;">
+        <div style="font-family:'Sora',sans-serif; font-weight:600; font-size:18px; color:var(--text);">¿Marcar como Desarrollo?</div>
+        <div style="font-family:'Manrope',sans-serif; font-weight:500; font-size:14.5px; color:var(--text-muted); line-height:1.5;">{{ devConfirmServerName }} dejará de estar en modo solo lectura: se podrán ejecutar consultas que modifiquen datos (INSERT, UPDATE, DELETE, DDL). Se mostrará una advertencia permanente mientras esté activo.</div>
+        <div style="display:flex; justify-content:flex-end; gap:10px;">
+          <button style="background:transparent;color:var(--text);border:1px solid var(--border);border-radius:9px;padding:9px 16px;font-family:'Manrope',sans-serif;font-weight:600;font-size:13.5px;cursor:pointer;" style-hover="background:var(--surface-2);" onClick="{{ cancelDevConfirm }}">Cancelar</button>
+          <button style="background:var(--warn);color:#fff;border:none;border-radius:9px;padding:9px 18px;font-family:'Manrope',sans-serif;font-weight:600;font-size:13.5px;cursor:pointer;" onClick="{{ confirmDevMode }}">Sí, activar Desarrollo</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ addServerOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed; inset:0; display:grid; place-items:center; padding:24px; background:rgba(15,23,42,0.55); backdrop-filter:blur(2px); animation: backdropIn 0.15s ease-out;">
+      <div style="background:var(--surface); border-radius:16px; padding:24px; box-shadow:0 20px 50px rgba(15,23,42,0.25); width:min(440px,92vw); display:flex; flex-direction:column; gap:16px; animation: dialogIn 0.18s ease-out;">
+        <div style="font-family:'Sora',sans-serif; font-weight:600; font-size:18px; color:var(--text);">Agregar servidor</div>
+        <div>
+          <label style="display:block; font-family:'Manrope',sans-serif; font-weight:600; font-size:12.5px; color:var(--text-muted); margin-bottom:6px;">Nombre</label>
+          <input value="{{ newServerName }}" onChange="{{ onNewServerNameChange }}" placeholder="Ej. Sucursales Sur" style="width:100%; box-sizing:border-box; background:var(--bg); border:1px solid var(--border); border-radius:9px; padding:9px 12px; font-family:'Manrope',sans-serif; font-size:14px; color:var(--text); outline:none;" style-focus="border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft);">
+        </div>
+        <div>
+          <label style="display:block; font-family:'Manrope',sans-serif; font-weight:600; font-size:12.5px; color:var(--text-muted); margin-bottom:6px;">Motor</label>
+          <div style="display:flex; gap:4px; background:var(--surface-2); padding:3px; border-radius:10px; align-self:flex-start;">
+            <button style="{{ enginePgBtnStyle }}" onClick="{{ setNewServerPg }}">PostgreSQL</button>
+            <button style="{{ engineSqlBtnStyle }}" onClick="{{ setNewServerSql }}">SQL Server</button>
+          </div>
+        </div>
+        <div>
+          <label style="display:block; font-family:'Manrope',sans-serif; font-weight:600; font-size:12.5px; color:var(--text-muted); margin-bottom:6px;">Host / IP</label>
+          <input value="{{ newServerHost }}" onChange="{{ onNewServerHostChange }}" placeholder="Ej. 10.20.0.9" style="width:100%; box-sizing:border-box; background:var(--bg); border:1px solid var(--border); border-radius:9px; padding:9px 12px; font-family:'Manrope',sans-serif; font-size:14px; color:var(--text); outline:none;" style-focus="border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft);">
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:10px;">
+          <button style="background:transparent;color:var(--text);border:1px solid var(--border);border-radius:9px;padding:9px 16px;font-family:'Manrope',sans-serif;font-weight:600;font-size:13.5px;cursor:pointer;" style-hover="background:var(--surface-2);" onClick="{{ closeAddServer }}">Cancelar</button>
+          <button style="background:var(--accent);color:#fff;border:none;border-radius:9px;padding:9px 18px;font-family:'Manrope',sans-serif;font-weight:600;font-size:13.5px;cursor:pointer;box-shadow:0 1px 2px rgba(15,23,42,0.08);" style-hover="background:var(--accent-hover);" onClick="{{ submitAddServer }}" disabled="{{ newServerNameEmpty }}">Agregar</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ addDbOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed; inset:0; display:grid; place-items:center; padding:24px; background:rgba(15,23,42,0.55); backdrop-filter:blur(2px); animation: backdropIn 0.15s ease-out;">
+      <div style="background:var(--surface); border-radius:16px; padding:24px; box-shadow:0 20px 50px rgba(15,23,42,0.25); width:min(440px,92vw); display:flex; flex-direction:column; gap:16px; animation: dialogIn 0.18s ease-out;">
+        <div style="font-family:'Sora',sans-serif; font-weight:600; font-size:18px; color:var(--text);">Agregar base de datos a {{ addDbServerName }}</div>
+        <div>
+          <label style="display:block; font-family:'Manrope',sans-serif; font-weight:600; font-size:12.5px; color:var(--text-muted); margin-bottom:6px;">Nombre</label>
+          <input value="{{ newDbName }}" onChange="{{ onNewDbNameChange }}" placeholder="Ej. bodega_queretaro" style="width:100%; box-sizing:border-box; background:var(--bg); border:1px solid var(--border); border-radius:9px; padding:9px 12px; font-family:'Manrope',sans-serif; font-size:14px; color:var(--text); outline:none;" style-focus="border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft);">
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:10px;">
+          <button style="background:transparent;color:var(--text);border:1px solid var(--border);border-radius:9px;padding:9px 16px;font-family:'Manrope',sans-serif;font-weight:600;font-size:13.5px;cursor:pointer;" style-hover="background:var(--surface-2);" onClick="{{ closeAddDb }}">Cancelar</button>
+          <button style="background:var(--accent);color:#fff;border:none;border-radius:9px;padding:9px 18px;font-family:'Manrope',sans-serif;font-weight:600;font-size:13.5px;cursor:pointer;box-shadow:0 1px 2px rgba(15,23,42,0.08);" style-hover="background:var(--accent-hover);" onClick="{{ submitAddDb }}" disabled="{{ newDbNameEmpty }}">Agregar</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  static TABLES = ['inventario','ventas','clientes','proveedores','movimientos','ordenes_compra'];
+  static FAKE_ROWS = {
+    d1: [['A-1042','Filtro de aceite','3'],['B-2210','Bomba de agua','7']],
+    d2: [['A-1042','Filtro de aceite','1'],['C-3305','Correa de distribución','5']],
+    d3: [['B-2210','Bomba de agua','9'],['D-4090','Sensor de oxígeno','2']],
+    d4: [['A-1042','Filtro de aceite','6'],['E-5120','Amortiguador delantero','4']],
+    d5: [['F-6001','Batería 12V','8'],['C-3305','Correa de distribución','3']],
+    d6: [['B-2210','Bomba de agua','5'],['G-7015','Radiador aluminio','1']],
+    d7: [['F-6001','Batería 12V','2'],['A-1042','Filtro de aceite','9']],
+    d10: [['H-8200','Kit de embrague','6'],['I-9010','Disco de freno','3']],
+    d11: [['Z-0001','Producto de prueba','0']]
+  };
+
+  state = {
+    screen: 'consulta',
+    servers: [
+      { id:'s1', name:'Sucursales Norte', engine:'postgresql', host:'IP por sucursal', mode:'read-only',
+        databases:[{id:'d1',name:'bodega_tijuana',selected:true},{id:'d2',name:'bodega_mexicali',selected:true},{id:'d3',name:'bodega_ensenada',selected:false},{id:'d4',name:'bodega_hermosillo',selected:true}] },
+      { id:'s2', name:'Sucursales Centro', engine:'postgresql', host:'IP por sucursal', mode:'read-only',
+        databases:[{id:'d5',name:'bodega_cdmx',selected:true},{id:'d6',name:'bodega_puebla',selected:true},{id:'d7',name:'bodega_toluca',selected:false}] },
+      { id:'s3', name:'Corporativo', engine:'sqlserver', host:'10.20.0.5', mode:'read-only',
+        databases:[{id:'d8',name:'rrhh',selected:false},{id:'d9',name:'finanzas',selected:false},{id:'d10',name:'inventario_central',selected:true}] },
+      { id:'s4', name:'QA / Pruebas', engine:'sqlserver', host:'192.168.1.50', mode:'dev',
+        databases:[{id:'d11',name:'bodega_test',selected:true}] }
+    ],
+    selectedServerId: 's1',
+    sqlText: 'SELECT sku, nombre, existencia\nFROM inventario\nWHERE existencia < 10\nORDER BY existencia ASC;',
+    isRunning: false,
+    results: null,
+    showAutocomplete: false,
+    autocompleteOptions: [],
+    history: [
+      { id:'h1', time:'09:12', query:'SELECT sku, nombre, existencia FROM inventario WHERE existencia < 10 ORDER BY existencia ASC;', serverName:'Sucursales Norte', dbCount:3, totalRows:6, status:'ok' },
+      { id:'h2', time:'08:47', query:'SELECT * FROM ventas WHERE fecha = CURRENT_DATE;', serverName:'Sucursales Centro', dbCount:2, totalRows:143, status:'ok' },
+      { id:'h3', time:'08:20', query:"UPDATE inventario SET existencia = 0 WHERE sku='A-1042';", serverName:'Corporativo', dbCount:1, totalRows:0, status:'error' }
+    ],
+    favorites: [
+      { id:'f1', name:'Stock bajo (<10)', query:'SELECT sku, nombre, existencia\nFROM inventario\nWHERE existencia < 10\nORDER BY existencia ASC;' },
+      { id:'f2', name:'Ventas del día', query:'SELECT * FROM ventas WHERE fecha = CURRENT_DATE;' }
+    ],
+    theme: 'light',
+    accent: 'accent',
+    favDialogOpen: false, newFavName: '',
+    devConfirmOpen: false, devConfirmServerId: null,
+    addServerOpen: false, newServerName: '', newServerEngine: 'postgresql', newServerHost: '',
+    addDbOpen: false, addDbServerId: null, newDbName: '',
+    testStatus: {}
+  };
+
+  constructor(props) {
+    super(props);
+    this.sqlRef = React.createRef();
+    this.fileInputRef = React.createRef();
+  }
+
+  findServer(id) { return this.state.servers.find(s => s.id === id); }
+
+  goScreen = (screen) => (e) => { e && e.preventDefault(); this.setState({ screen }); };
+
+  selectServer = (id) => () => this.setState({ selectedServerId: id });
+
+  toggleDb = (serverId, dbId) => () => {
+    this.setState(s => ({ servers: s.servers.map(srv => srv.id !== serverId ? srv : {
+      ...srv, databases: srv.databases.map(db => db.id !== dbId ? db : { ...db, selected: !db.selected })
+    }) }));
+  };
+
+  toggleSelectAll = () => {
+    const srv = this.findServer(this.state.selectedServerId);
+    const allSelected = srv.databases.every(d => d.selected);
+    this.setState(s => ({ servers: s.servers.map(sv => sv.id !== srv.id ? sv : {
+      ...sv, databases: sv.databases.map(db => ({ ...db, selected: !allSelected }))
+    }) }));
+  };
+
+  onSqlChange = (e) => {
+    const val = e.target.value;
+    const cursorPos = e.target.selectionStart;
+    const before = val.slice(0, cursorPos);
+    const m = before.match(/FROM\s+([a-zA-Z0-9_]*)$/i);
+    if (m) {
+      const prefix = m[1].toLowerCase();
+      const opts = Component.TABLES.filter(t => t.startsWith(prefix));
+      this.setState({ sqlText: val, showAutocomplete: opts.length > 0, autocompleteOptions: opts });
+    } else {
+      this.setState({ sqlText: val, showAutocomplete: false });
+    }
+  };
+
+  onSqlKeyUp = () => {
+    const ta = this.sqlRef.current;
+    if (!ta) return;
+    const cursorPos = ta.selectionStart;
+    const before = ta.value.slice(0, cursorPos);
+    const m = before.match(/FROM\s+([a-zA-Z0-9_]*)$/i);
+    if (m) {
+      const prefix = m[1].toLowerCase();
+      const opts = Component.TABLES.filter(t => t.startsWith(prefix));
+      this.setState({ showAutocomplete: opts.length > 0, autocompleteOptions: opts });
+    } else if (this.state.showAutocomplete) {
+      this.setState({ showAutocomplete: false });
+    }
+  };
+
+  pickTable = (name) => () => {
+    const ta = this.sqlRef.current;
+    const val = this.state.sqlText;
+    const cursorPos = ta ? ta.selectionStart : val.length;
+    const before = val.slice(0, cursorPos).replace(/([a-zA-Z0-9_]*)$/, name + ' ');
+    const after = val.slice(cursorPos);
+    const newVal = before + after;
+    this.setState({ sqlText: newVal, showAutocomplete: false });
+    requestAnimationFrame(() => { if (ta) { ta.focus(); const pos = before.length; ta.setSelectionRange(pos, pos); } });
+  };
+
+  formatClick = () => {
+    let s = this.state.sqlText.trim().replace(/\s+/g, ' ');
+    ['SELECT','FROM','WHERE','ORDER BY','GROUP BY','HAVING','LEFT JOIN','INNER JOIN','JOIN','LIMIT','AND','OR'].forEach(k => {
+      s = s.replace(new RegExp('\\b' + k + '\\b', 'gi'), '\n' + k.toUpperCase());
+    });
+    this.setState({ sqlText: s.trim() });
+  };
+
+  triggerFileInput = () => { if (this.fileInputRef.current) this.fileInputRef.current.click(); };
+  onFileChange = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => this.setState({ sqlText: ev.target.result });
+    reader.readAsText(file);
+  };
+
+  openSaveFav = () => this.setState({ favDialogOpen: true, newFavName: '' });
+  closeSaveFav = () => this.setState({ favDialogOpen: false });
+  onNewFavNameChange = (e) => this.setState({ newFavName: e.target.value });
+  confirmSaveFav = () => {
+    const name = this.state.newFavName.trim();
+    if (!name) return;
+    this.setState(s => ({ favorites: [...s.favorites, { id: 'f' + Date.now(), name, query: s.sqlText }], favDialogOpen: false }));
+  };
+
+  useFavorite = (fav) => () => this.setState({ sqlText: fav.query, screen: 'consulta' });
+  deleteFavorite = (id) => () => this.setState(s => ({ favorites: s.favorites.filter(f => f.id !== id) }));
+
+  reuseHistory = (h) => () => {
+    const srv = this.state.servers.find(s => s.name === h.serverName);
+    this.setState({ sqlText: h.query, screen: 'consulta', selectedServerId: srv ? srv.id : this.state.selectedServerId });
+  };
+
+  pickStatement(sqlText) {
+    const ta = this.sqlRef.current;
+    if (ta && ta.selectionStart !== ta.selectionEnd) {
+      return sqlText.slice(ta.selectionStart, ta.selectionEnd).trim();
+    }
+    const parts = sqlText.split(';').map(p => p.trim()).filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : sqlText.trim();
+  }
+
+  runClick = () => {
+    const srv = this.findServer(this.state.selectedServerId);
+    const selectedDbs = srv.databases.filter(d => d.selected);
+    if (!selectedDbs.length) return;
+    const query = this.pickStatement(this.state.sqlText);
+    this.setState({ isRunning: true, results: null });
+    this.runTimer = setTimeout(() => {
+      const perDb = selectedDbs.map(db => {
+        const rows = Component.FAKE_ROWS[db.id];
+        return rows ? { db, ok: true, rows } : { db, ok: false, rows: [] };
+      });
+      const multi = selectedDbs.length > 1;
+      const columns = multi ? ['origen_bd', 'sku', 'nombre', 'existencia'] : ['sku', 'nombre', 'existencia'];
+      const rows = [];
+      perDb.forEach(p => { if (p.ok) p.rows.forEach(r => rows.push(multi ? [p.db.name, ...r] : r)); });
+      const totalRows = rows.length;
+      const anyError = perDb.some(p => !p.ok);
+      const allError = perDb.every(p => !p.ok);
+      this.setState(s => ({
+        isRunning: false,
+        results: { columns, rows, perDb, multi },
+        history: [{ id: 'h' + Date.now(), time: new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+          query, serverName: srv.name, dbCount: selectedDbs.length, totalRows,
+          status: allError ? 'error' : anyError ? 'parcial' : 'ok' }, ...s.history]
+      }));
+    }, 900);
+  };
+
+  cancelClick = () => { clearTimeout(this.runTimer); this.setState({ isRunning: false }); };
+  runOrCancelClick = () => { if (this.state.isRunning) this.cancelClick(); else this.runClick(); };
+
+  exportClick = () => {
+    const r = this.state.results;
+    if (!r) return;
+    const csv = [r.columns.join(','), ...r.rows.map(row => row.map(c => `"${String(c).replace(/"/g,'""')}"`).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'resultados_faro.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  requestDevMode = (serverId) => () => this.setState({ devConfirmOpen: true, devConfirmServerId: serverId });
+  cancelDevConfirm = () => this.setState({ devConfirmOpen: false, devConfirmServerId: null });
+  confirmDevMode = () => {
+    const id = this.state.devConfirmServerId;
+    this.setState(s => ({ servers: s.servers.map(sv => sv.id !== id ? sv : { ...sv, mode: 'dev' }), devConfirmOpen: false, devConfirmServerId: null }));
+  };
+  setReadOnly = (serverId) => () => this.setState(s => ({ servers: s.servers.map(sv => sv.id !== serverId ? sv : { ...sv, mode: 'read-only' }) }));
+
+  renameServer = (serverId) => (e) => {
+    const name = e.target.value;
+    this.setState(s => ({ servers: s.servers.map(sv => sv.id !== serverId ? sv : { ...sv, name }) }));
+  };
+  renameDb = (serverId, dbId) => (e) => {
+    const name = e.target.value;
+    this.setState(s => ({ servers: s.servers.map(sv => sv.id !== serverId ? sv : {
+      ...sv, databases: sv.databases.map(db => db.id !== dbId ? db : { ...db, name })
+    }) }));
+  };
+
+  testConnection = (serverId, dbId) => () => {
+    this.setState(s => ({ testStatus: { ...s.testStatus, [dbId]: 'testing' } }));
+    setTimeout(() => this.setState(s => ({ testStatus: { ...s.testStatus, [dbId]: 'ok' } })), 800);
+  };
+
+  openAddServer = () => this.setState({ addServerOpen: true, newServerName: '', newServerEngine: 'postgresql', newServerHost: '' });
+  closeAddServer = () => this.setState({ addServerOpen: false });
+  onNewServerNameChange = (e) => this.setState({ newServerName: e.target.value });
+  onNewServerHostChange = (e) => this.setState({ newServerHost: e.target.value });
+  setNewServerPg = () => this.setState({ newServerEngine: 'postgresql' });
+  setNewServerSql = () => this.setState({ newServerEngine: 'sqlserver' });
+  submitAddServer = () => {
+    const name = this.state.newServerName.trim();
+    if (!name) return;
+    this.setState(s => ({ servers: [...s.servers, { id: 'srv' + Date.now(), name, engine: s.newServerEngine, host: s.newServerHost || 'sin definir', mode: 'read-only', databases: [] }], addServerOpen: false }));
+  };
+
+  openAddDb = (serverId) => () => this.setState({ addDbOpen: true, addDbServerId: serverId, newDbName: '' });
+  closeAddDb = () => this.setState({ addDbOpen: false });
+  onNewDbNameChange = (e) => this.setState({ newDbName: e.target.value });
+  submitAddDb = () => {
+    const name = this.state.newDbName.trim();
+    if (!name) return;
+    this.setState(s => ({ servers: s.servers.map(sv => sv.id !== s.addDbServerId ? sv : { ...sv, databases: [...sv.databases, { id: 'db' + Date.now(), name, selected: false }] }), addDbOpen: false }));
+  };
+
+  static ACCENTS = [
+    { id: 'indigo', label: 'Acento índigo', swatch: '#6366F1', light: { base:'#6366F1', hover:'#4F46E5', active:'#4338CA', soft:'#EEF2FF', softText:'#4338CA' }, dark: { base:'#818CF8', hover:'#A5B4FC', active:'#6366F1', soft:'rgba(129,140,248,0.18)', softText:'#C7D2FE' } },
+    { id: 'violet', label: 'Acento violeta', swatch: '#8B5CF6', light: { base:'#8B5CF6', hover:'#7C3AED', active:'#6D28D9', soft:'#F5F3FF', softText:'#6D28D9' }, dark: { base:'#A78BFA', hover:'#C4B5FD', active:'#8B5CF6', soft:'rgba(167,139,250,0.18)', softText:'#DDD6FE' } },
+    { id: 'blue', label: 'Acento azul', swatch: '#2563EB', light: { base:'#2563EB', hover:'#1D4ED8', active:'#1E40AF', soft:'#EFF6FF', softText:'#1D4ED8' }, dark: { base:'#60A5FA', hover:'#93C5FD', active:'#3B82F6', soft:'rgba(96,165,250,0.18)', softText:'#BFDBFE' } },
+    { id: 'teal', label: 'Acento teal', swatch: '#0D9488', light: { base:'#0D9488', hover:'#0F766E', active:'#115E59', soft:'#F0FDFA', softText:'#0F766E' }, dark: { base:'#2DD4BF', hover:'#5EEAD4', active:'#14B8A6', soft:'rgba(45,212,191,0.18)', softText:'#99F6E4' } },
+    { id: 'rose', label: 'Acento rosa', swatch: '#E11D48', light: { base:'#E11D48', hover:'#BE123C', active:'#9F1239', soft:'#FFF1F2', softText:'#BE123C' }, dark: { base:'#FB7185', hover:'#FDA4AF', active:'#F43F5E', soft:'rgba(251,113,133,0.18)', softText:'#FECDD3' } },
+    { id: 'amber', label: 'Acento ámbar', swatch: '#D97706', light: { base:'#D97706', hover:'#B45309', active:'#92400E', soft:'#FFFBEB', softText:'#B45309' }, dark: { base:'#FBBF24', hover:'#FCD34D', active:'#F59E0B', soft:'rgba(251,191,36,0.18)', softText:'#FDE68A' } }
+  ];
+
+  setLight = () => this.setState({ theme: 'light' });
+  setDark = () => this.setState({ theme: 'dark' });
+  setAccent = (id) => () => this.setState({ accent: id });
+
+  segBtnStyle(selected) {
+    return {
+      padding: '6px 14px', borderRadius: '7px', fontFamily: "'Manrope',sans-serif", fontWeight: 600, fontSize: '12.5px',
+      border: 'none', cursor: 'pointer',
+      background: selected ? 'var(--surface)' : 'transparent',
+      color: selected ? 'var(--accent-soft-text)' : 'var(--text-muted)',
+      boxShadow: selected ? '0 1px 2px rgba(15,23,42,0.08)' : 'none'
+    };
+  }
+
+  renderVals() {
+    const s = this.state;
+    const srv = this.findServer(s.selectedServerId);
+    const engineLabel = (e) => e === 'postgresql' ? 'PostgreSQL' : 'SQL Server';
+    const selectedDbs = srv.databases.filter(d => d.selected);
+    const allSelected = srv.databases.length > 0 && srv.databases.every(d => d.selected);
+
+    const dark = s.theme === 'dark';
+    const activeAccentDef = Component.ACCENTS.find(a => a.id === s.accent) || Component.ACCENTS[0];
+    const accentSet = dark ? activeAccentDef.dark : activeAccentDef.light;
+    const successSet = dark ? { base:'#34D399', soft:'rgba(52,211,153,0.16)', softText:'#6EE7B7' } : { base:'#059669', soft:'#ECFDF5', softText:'#047857' };
+    const errorSet = dark ? { base:'#F87171', soft:'rgba(248,113,113,0.16)', softText:'#FCA5A5' } : { base:'#DC2626', soft:'#FEF2F2', softText:'#B91C1C' };
+    const warnSoft = dark ? 'rgba(180,83,9,0.22)' : '#FEF3C7';
+    const warnSoftText = dark ? '#FCD34D' : '#92400E';
+
+    const rootStyle = {
+      minHeight: '100vh', display: 'flex', flexDirection: 'column', fontFamily: "'Manrope',sans-serif",
+      '--bg': dark ? '#0F172A' : '#F8FAFC',
+      '--surface': dark ? '#1E293B' : '#FFFFFF',
+      '--surface-2': dark ? '#334155' : '#F1F5F9',
+      '--text': dark ? '#F1F5F9' : '#0F172A',
+      '--text-muted': dark ? '#AEBACB' : '#475569',
+      '--border': dark ? '#334155' : '#E2E8F0',
+      '--accent': accentSet.base, '--accent-hover': accentSet.hover, '--accent-active': accentSet.active,
+      '--accent-soft': accentSet.soft, '--accent-soft-text': accentSet.softText,
+      '--success': successSet.base, '--success-soft': successSet.soft, '--success-soft-text': successSet.softText,
+      '--error': errorSet.base, '--error-soft': errorSet.soft, '--error-soft-text': errorSet.softText,
+      '--warn': '#B45309', '--warn-soft': warnSoft, '--warn-soft-text': warnSoftText,
+      background: 'var(--bg)', color: 'var(--text)',
+      transition: 'background 0.25s ease, color 0.25s ease'
+    };
+
+    const navStyle = (active) => ({
+      fontFamily: "'Manrope',sans-serif", fontWeight: 500, fontSize: '14.5px', padding: '8px 2px',
+      color: active ? 'var(--accent)' : 'var(--text-muted)',
+      borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
+      transition: 'color .15s ease'
+    });
+
+    const results = s.results;
+    const showResults = !!results && !s.isRunning;
+
+    const chip = (bg, color) => ({ display:'inline-flex', alignItems:'center', gap:'5px', fontFamily:"'Manrope',sans-serif", fontWeight:600, fontSize:'11.5px', padding:'4px 10px', borderRadius:'6px', background:bg, color });
+
+    return {
+      rootStyle,
+      isConsulta: s.screen === 'consulta', isHistorial: s.screen === 'historial', isFavoritos: s.screen === 'favoritos',
+      isAdmin: s.screen === 'admin', isApariencia: s.screen === 'apariencia',
+      navConsultaStyle: navStyle(s.screen === 'consulta'), navHistorialStyle: navStyle(s.screen === 'historial'),
+      navFavoritosStyle: navStyle(s.screen === 'favoritos'), navAdminStyle: navStyle(s.screen === 'admin'),
+      navAparienciaStyle: navStyle(s.screen === 'apariencia'),
+      goConsulta: this.goScreen('consulta'), goHistorial: this.goScreen('historial'), goFavoritos: this.goScreen('favoritos'),
+      goAdmin: this.goScreen('admin'), goApariencia: this.goScreen('apariencia'),
+
+      serverList: s.servers.map(sv => ({
+        id: sv.id, name: sv.name, engineLabel: engineLabel(sv.engine), isDev: sv.mode === 'dev',
+        dbCountLabel: sv.databases.length + (sv.databases.length === 1 ? ' base' : ' bases'),
+        selectClick: this.selectServer(sv.id),
+        rowStyle: { padding: '8px 10px', borderRadius: '10px', cursor: 'pointer',
+          transition: 'background 0.15s ease, color 0.15s ease',
+          background: sv.id === s.selectedServerId ? 'var(--accent-soft)' : 'transparent',
+          color: sv.id === s.selectedServerId ? 'var(--accent-soft-text)' : 'var(--text)' }
+      })),
+
+      activeDatabases: srv.databases.map(db => ({ id: db.id, name: db.name, selected: db.selected, toggleClick: this.toggleDb(srv.id, db.id) })),
+      selectAllLabel: allSelected ? 'Ninguna' : 'Todas',
+
+      activeServerName: srv.name, activeServerIsDev: srv.mode === 'dev', activeServerIsReadOnly: srv.mode !== 'dev',
+      devBannerShow: srv.mode === 'dev',
+      selectedCountLabel: selectedDbs.length + ' de ' + srv.databases.length + ' bases seleccionadas',
+
+      fileInputRef: this.fileInputRef, onFileChange: this.onFileChange, triggerFileInput: this.triggerFileInput,
+      formatClick: this.formatClick, openSaveFav: this.openSaveFav,
+
+      sqlRef: this.sqlRef, sqlText: s.sqlText, onSqlChange: this.onSqlChange, onSqlKeyUp: this.onSqlKeyUp,
+      showAutocomplete: s.showAutocomplete,
+      autocompleteOptions: s.autocompleteOptions.map(t => ({ name: t, pickClick: this.pickTable(t) })),
+
+      runDisabled: !s.isRunning && (!selectedDbs.length || !s.sqlText.trim()),
+      runButtonStyle: { display:'inline-flex', alignItems:'center', gap:'8px', border:'none', borderRadius:'9px', padding:'10px 18px',
+        fontFamily:"'Manrope',sans-serif", fontWeight:600, fontSize:'14px', cursor:'pointer',
+        background: s.isRunning ? 'var(--surface-2)' : 'var(--accent)', color: s.isRunning ? 'var(--text)' : '#fff',
+        boxShadow: s.isRunning ? 'none' : '0 1px 2px rgba(15,23,42,0.08)' },
+      runOrCancelClick: this.runOrCancelClick, runLabel: s.isRunning ? 'Cancelar' : 'Ejecutar',
+      isRunning: s.isRunning, isNotRunning: !s.isRunning, cancelClick: this.cancelClick,
+      runningLabel: 'Ejecutando en ' + selectedDbs.length + (selectedDbs.length === 1 ? ' base de datos…' : ' bases de datos en paralelo…'),
+
+      showEmptyState: !results && !s.isRunning,
+      showResults,
+      exportDisabled: !results || !results.rows.length,
+      exportClick: this.exportClick,
+      resultColumns: showResults ? results.columns : [],
+      resultRows: showResults ? results.rows.map(r => ({ cells: r })) : [],
+      perDbSummary: showResults ? results.perDb.map(p => ({
+        label: p.db.name + (p.ok ? ' · ' + p.rows.length + ' filas' : ' · error'),
+        ok: p.ok, errored: !p.ok, chipStyle: p.ok ? chip(successSet.soft, successSet.softText) : chip(errorSet.soft, errorSet.softText)
+      })) : [],
+
+      historyList: s.history.map(h => ({
+        id: h.id, time: h.time, queryPreview: h.query, serverName: h.serverName, dbCount: h.dbCount,
+        totalRowsLabel: String(h.totalRows),
+        statusLabel: h.status === 'ok' ? 'Éxito' : h.status === 'parcial' ? 'Parcial' : 'Bloqueada',
+        chipStyle: h.status === 'ok' ? chip(successSet.soft, successSet.softText) : h.status === 'parcial' ? chip(warnSoft, warnSoftText) : chip(errorSet.soft, errorSet.softText),
+        reuseClick: this.reuseHistory(h)
+      })),
+
+      favoritesList: s.favorites.map(f => ({ id: f.id, name: f.name, queryPreview: f.query, useClick: this.useFavorite(f), deleteClick: this.deleteFavorite(f.id) })),
+
+      newFavName: s.newFavName, onNewFavNameChange: this.onNewFavNameChange, favDialogOpen: s.favDialogOpen,
+      closeSaveFav: this.closeSaveFav, confirmSaveFav: this.confirmSaveFav, newFavNameEmpty: !s.newFavName.trim(),
+
+      adminServers: s.servers.map(sv => ({
+        id: sv.id, name: sv.name, engineLabel: engineLabel(sv.engine), hostLabel: sv.host,
+        modeStatusLabel: sv.mode === 'dev' ? 'Sin restricciones' : 'Solo lectura',
+        readOnlyBtnStyle: this.segBtnStyle(sv.mode !== 'dev'), devBtnStyle: this.segBtnStyle(sv.mode === 'dev'),
+        setReadOnlyClick: this.setReadOnly(sv.id), requestDevClick: this.requestDevMode(sv.id),
+        openAddDbClick: this.openAddDb(sv.id), renameChange: this.renameServer(sv.id),
+        databases: sv.databases.map(db => ({
+          id: db.id, name: db.name,
+          testLabel: s.testStatus[db.id] === 'testing' ? 'Probando…' : s.testStatus[db.id] === 'ok' ? 'Conectado' : '',
+          testChipStyle: s.testStatus[db.id] === 'ok' ? chip(successSet.soft, successSet.softText) : chip('var(--surface)', 'var(--text-muted)'),
+          testClick: this.testConnection(sv.id, db.id), renameChange: this.renameDb(sv.id, db.id)
+        }))
+      })),
+
+      devConfirmOpen: s.devConfirmOpen,
+      devConfirmServerName: s.devConfirmServerId ? this.findServer(s.devConfirmServerId).name : '',
+      cancelDevConfirm: this.cancelDevConfirm, confirmDevMode: this.confirmDevMode,
+
+      addServerOpen: s.addServerOpen, newServerName: s.newServerName, newServerHost: s.newServerHost,
+      enginePgBtnStyle: this.segBtnStyle(s.newServerEngine === 'postgresql'), engineSqlBtnStyle: this.segBtnStyle(s.newServerEngine === 'sqlserver'),
+      setNewServerPg: this.setNewServerPg, setNewServerSql: this.setNewServerSql,
+      onNewServerNameChange: this.onNewServerNameChange, onNewServerHostChange: this.onNewServerHostChange,
+      closeAddServer: this.closeAddServer, submitAddServer: this.submitAddServer, newServerNameEmpty: !s.newServerName.trim(),
+      openAddServer: this.openAddServer,
+
+      addDbOpen: s.addDbOpen, addDbServerName: s.addDbServerId ? this.findServer(s.addDbServerId).name : '',
+      newDbName: s.newDbName, onNewDbNameChange: this.onNewDbNameChange, closeAddDb: this.closeAddDb,
+      submitAddDb: this.submitAddDb, newDbNameEmpty: !s.newDbName.trim(),
+
+      themeIsLight: s.theme === 'light', themeIsDark: s.theme === 'dark', setLight: this.setLight, setDark: this.setDark,
+      themeLightBtnStyle: { ...this.segBtnStyle(s.theme === 'light'), display:'inline-flex', alignItems:'center', gap:'6px' },
+      themeDarkBtnStyle: { ...this.segBtnStyle(s.theme === 'dark'), display:'inline-flex', alignItems:'center', gap:'6px' },
+      accentSwatches: Component.ACCENTS.map(a => ({
+        id: a.id, label: a.label, click: this.setAccent(a.id),
+        style: { width: 44, height: 44, borderRadius: '999px', background: a.swatch,
+          border: s.accent === a.id ? '3px solid var(--text)' : '3px solid transparent',
+          cursor: 'pointer', padding: 0, transition: 'transform 0.15s ease, border-color 0.15s ease' }
+      }))
+    };
+  }
+}
+
+</script>
+</body>
+</html>
