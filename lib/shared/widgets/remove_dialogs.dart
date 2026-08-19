@@ -47,9 +47,12 @@ Future<void> showRemoveServerDialog(
 
 /// "Eliminar base de datos" — confirms, then clears its saved credential
 /// override (if any) before removing it. Same extraction pattern as
-/// [showRemoveServerDialog].
+/// [showRemoveServerDialog]. [server] `null` (2026-08-13) removes a "Sin
+/// grupo" database instead of one inside a server — used to be two
+/// near-identical functions before `ServersNotifier.removeDatabase` itself
+/// grew a nullable `serverId`.
 Future<void> showRemoveDatabaseDialog(BuildContext context, WidgetRef ref,
-    Server server, DatabaseEntry database) async {
+    Server? server, DatabaseEntry database) async {
   final confirmed = await showAppDialog<bool>(
     context: context,
     title: 'Eliminar base de datos',
@@ -70,5 +73,5 @@ Future<void> showRemoveDatabaseDialog(BuildContext context, WidgetRef ref,
   if (confirmed != true) return;
 
   await ref.read(credentialsRepositoryProvider).clearDatabaseOverride(database.id);
-  ref.read(serversProvider.notifier).removeDatabase(server.id, database.id);
+  ref.read(serversProvider.notifier).removeDatabase(server?.id, database.id);
 }

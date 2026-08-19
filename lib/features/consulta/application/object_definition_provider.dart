@@ -8,7 +8,7 @@ import '../../../data/providers/servers_providers.dart';
 /// [SchemaObject] itself) so `.family` gets structural equality for free —
 /// [SchemaObject] doesn't override `==`/`hashCode`.
 typedef ObjectDefinitionKey = ({
-  String serverId,
+  String? serverId,
   String databaseId,
   String schema,
   String objectName,

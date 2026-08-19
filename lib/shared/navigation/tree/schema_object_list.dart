@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../../../../core/constants/db_engine.dart';
-import '../../../../../data/models/schema_object.dart';
-import '../../../application/schema_explorer_provider.dart';
+import '../../../core/constants/db_engine.dart';
+import '../../../data/models/schema_object.dart';
+import '../../../features/consulta/application/schema_explorer_provider.dart';
 import 'schema_object_row.dart';
 
 /// A category's (or search results') object list — bounded height,

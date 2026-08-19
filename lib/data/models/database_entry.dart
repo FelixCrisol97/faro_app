@@ -4,7 +4,8 @@ import '../../core/constants/db_engine.dart';
 /// state — not persisted).
 enum ConnectionTestStatus { idle, testing, connected, failed }
 
-/// One database within a servidor group.
+/// One database — optionally grouped under a `Server`, but never required
+/// to be (see [Server]'s doc comment).
 ///
 /// [name] is a free-form alias only Faro shows (list, results pills,
 /// `origen_bd`) — kept separate from [databaseName] (the real name the
@@ -20,12 +21,24 @@ enum ConnectionTestStatus { idle, testing, connected, failed }
 /// bodegas) this app exists to serve. When a servidor represents one
 /// central host with several databases, every entry in it just repeats the
 /// same host:puerto string.
+///
+/// [engine] lives here too, not on `Server` — **moved from `Server` to
+/// here 2026-08-13**, user-requested, same reasoning already applied to
+/// [mode] on 2026-07-18 ("el servidor o grupo solo es para agrupar"): a
+/// servidor being only a free-form grouping means it shouldn't force
+/// every database inside it to share an engine either. A database is
+/// fully creatable/connectable with no `Server` at all — grouping into
+/// one, and which databases end up in the same group, is entirely the
+/// user's later, optional choice (drag-and-drop — see
+/// `ServersNotifier.createServerFromTwoUngroupedDatabases`), never a
+/// prerequisite.
 class DatabaseEntry {
   const DatabaseEntry({
     required this.id,
     required this.name,
     required this.host,
     required this.databaseName,
+    required this.engine,
     this.mode = ServerMode.readOnly,
     this.selected = false,
     this.testStatus = ConnectionTestStatus.idle,
@@ -44,6 +57,11 @@ class DatabaseEntry {
   /// The real database name passed to the engine when connecting — unlike
   /// [name], this typically repeats across bodegas that share a schema.
   final String databaseName;
+
+  /// PostgreSQL / SQL Server — decides which driver connects to this
+  /// database. Set once when the database is created and editable
+  /// afterward (see `edit_database_dialog.dart`).
+  final DbEngine engine;
 
   /// Read protection, per database — NOT per servidor. A "servidor" is only
   /// a free-form grouping (see [Server]'s doc comment), so two databases in
@@ -68,6 +86,7 @@ class DatabaseEntry {
     String? name,
     String? host,
     String? databaseName,
+    DbEngine? engine,
     ServerMode? mode,
     bool? selected,
     ConnectionTestStatus? testStatus,
@@ -78,6 +97,7 @@ class DatabaseEntry {
       name: name ?? this.name,
       host: host ?? this.host,
       databaseName: databaseName ?? this.databaseName,
+      engine: engine ?? this.engine,
       mode: mode ?? this.mode,
       selected: selected ?? this.selected,
       testStatus: testStatus ?? this.testStatus,
@@ -95,6 +115,7 @@ class DatabaseEntry {
         'alias': name,
         'host': host,
         'databaseName': databaseName,
+        'engine': engine.name,
         'mode': mode.name,
       };
 
@@ -106,13 +127,30 @@ class DatabaseEntry {
   /// (pre-rename exports) as a fallback for `alias`. `mode` defaults to
   /// [ServerMode.readOnly] (the safe default) for entries persisted before
   /// mode moved here from `Server`.
-  factory DatabaseEntry.fromJson(Map<String, Object?> json) {
+  ///
+  /// [fallbackEngine] — **migration, 2026-08-13**: files persisted before
+  /// engine moved here had it on the parent `Server` instead, once per
+  /// group, not once per database. `Server.fromJson` passes its own
+  /// (now-removed-from-the-class, but still present in an old file's raw
+  /// JSON) `engine` value through here for any database entry that has
+  /// none of its own yet, so an old config doesn't silently revert every
+  /// database in it to some arbitrary default engine on first load after
+  /// upgrading. A database with genuinely no engine anywhere in the file
+  /// (only possible for a hand-edited or very old export) falls back to
+  /// PostgreSQL — a guess, correctable via `edit_database_dialog.dart`,
+  /// same "best-effort default" precedent already used when merging two
+  /// "Sin grupo" databases creates a brand-new group.
+  factory DatabaseEntry.fromJson(Map<String, Object?> json,
+      {DbEngine? fallbackEngine}) {
     final alias = json['alias'] as String? ?? json['name'] as String;
     return DatabaseEntry(
       id: json['id'] as String,
       name: alias,
       host: json['host'] as String? ?? '',
       databaseName: json['databaseName'] as String? ?? alias,
+      engine: json['engine'] != null
+          ? DbEngine.values.byName(json['engine'] as String)
+          : (fallbackEngine ?? DbEngine.postgres),
       mode: json['mode'] != null
           ? ServerMode.values.byName(json['mode'] as String)
           : ServerMode.readOnly,

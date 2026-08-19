@@ -8,18 +8,34 @@ import '../../core/theme/app_theme.dart';
 /// Mirrors styles.css `.dialog-backdrop`/`.dialog(-title/-body/-actions)`.
 /// README.md: "centered modals over a dimmed backdrop, with a quick
 /// fade+scale-in (~180ms)".
+const _transitionDuration = Duration(milliseconds: 180);
+
+/// Real bug found live 2026-08-13 (user screenshot: "A TextEditingController
+/// was used after being disposed", then a cascading `_dependents.isEmpty`
+/// assertion filling the whole screen): most callers of this function do
+/// `final result = await showAppDialog(...); ...; controller.dispose();`
+/// (`save_favorite_dialog.dart` and several others under this same
+/// `shared/widgets/` folder) — but `showGeneralDialog`'s returned `Future`
+/// resolves as soon as `Navigator.pop()` is called, **not** once the
+/// popped route's exit transition actually finishes. For those 180ms the
+/// dialog's own content (including any `TextField` in it) is still alive
+/// and can still rebuild while fading/scaling out — disposing its
+/// controller that early means that rebuild touches an already-disposed
+/// controller, which is exactly what crashed. Waiting out the transition
+/// here, once, fixes every dialog built on this helper instead of each
+/// one having to know to delay its own disposal.
 Future<T?> showAppDialog<T>({
   required BuildContext context,
   required String title,
   required Widget body,
   required List<Widget> actions,
-}) {
-  return showGeneralDialog<T>(
+}) async {
+  final result = await showGeneralDialog<T>(
     context: context,
     barrierDismissible: true,
     barrierLabel: title,
     barrierColor: AppShadows.backdrop,
-    transitionDuration: const Duration(milliseconds: 180),
+    transitionDuration: _transitionDuration,
     pageBuilder: (context, animation, secondaryAnimation) {
       final colors = context.appTheme.colors;
       final typography = context.appTheme.typography;
@@ -66,4 +82,11 @@ Future<T?> showAppDialog<T>({
       );
     },
   );
+  // See this function's doc comment — `Navigator.pop()` already happened
+  // by the time `showGeneralDialog` resolves, but the route is still
+  // playing its exit transition; a small safety margin on top of the
+  // transition's own duration so callers that dispose a controller right
+  // after `await`ing this never race the last frame of that transition.
+  await Future.delayed(_transitionDuration + const Duration(milliseconds: 50));
+  return result;
 }

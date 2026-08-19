@@ -15,7 +15,7 @@ import 'sql_guard.dart';
 /// Dart (no Riverpod dependency), same reasoning as
 /// `QueryExecutionService`'s injected `CredentialsResolver`.
 typedef ColumnsFetcher = Future<List<TableColumn>> Function(
-    String serverId, String databaseId, String schema, String table);
+    String? serverId, String databaseId, String schema, String table);
 
 /// The outcome of importing a CSV into one database — same shape/spirit as
 /// `DatabaseQueryOutcome` (`data/models/query_result.dart`): [success]
@@ -75,7 +75,7 @@ class CsvImportService {
   final Map<DbEngine, DbConnector> _connectors;
 
   Future<DatabaseImportOutcome> importInto({
-    required Server server,
+    required Server? server,
     required DatabaseEntry database,
     required String schema,
     required String table,
@@ -88,7 +88,7 @@ class CsvImportService {
         DatabaseImportOutcome(
           databaseId: database.id,
           databaseName: database.name,
-          serverName: server.name,
+          serverName: server?.name ?? 'Sin grupo',
           success: false,
           blocked: blocked,
           errorMessage: message,
@@ -105,14 +105,14 @@ class CsvImportService {
       );
     }
 
-    final connector = _connectors[server.engine];
+    final connector = _connectors[database.engine];
     if (connector == null) {
-      return fail('No hay conector registrado para ${server.engine.label}.');
+      return fail('No hay conector registrado para ${database.engine.label}.');
     }
 
     final List<TableColumn> columns;
     try {
-      columns = await fetchColumns(server.id, database.id, schema, table);
+      columns = await fetchColumns(server?.id, database.id, schema, table);
     } catch (e) {
       return fail('No se pudo leer la estructura de la tabla: $e');
     }
@@ -194,7 +194,7 @@ class CsvImportService {
           final rawValue =
               entry.key < csvRow.length ? csvRow[entry.key]?.toString() : null;
           rowMap[entry.value.name] =
-              coerceCsvValue(rawValue, entry.value, server.engine);
+              coerceCsvValue(rawValue, entry.value, database.engine);
         }
         rowsToInsert.add(rowMap);
         originalIndexOfSentRow.add(r);
@@ -206,7 +206,7 @@ class CsvImportService {
     var inserted = 0;
     if (rowsToInsert.isNotEmpty) {
       final config = DatabaseConnectionConfig.forDatabase(
-          server: server, database: database, credentials: credentials);
+          database: database, credentials: credentials);
       // Real bug fixed 2026-08-03 (AUDITORIA_CODIGO.md): an uncaught
       // exception here (e.g. a dropped connection mid-import) used to
       // propagate straight out of `importInto` — since the caller
@@ -234,7 +234,7 @@ class CsvImportService {
     return DatabaseImportOutcome(
       databaseId: database.id,
       databaseName: database.name,
-      serverName: server.name,
+      serverName: server?.name ?? 'Sin grupo',
       success: true,
       inserted: inserted,
       failures: failures,

@@ -4,7 +4,7 @@ import '../../features/query_window/application/query_window_bootstrap.dart';
 
 /// The one entry point every "Abrir en nueva ventana" action goes through
 /// (schema object context menu and database row context menu in
-/// `server_sidebar.dart`) — spawns a new native window, pinned to the given
+/// `shared/navigation/tree/`) — spawns a new native window, pinned to the given
 /// database, via `desktop_multi_window`. That window's own `main()` (see
 /// `main.dart`) detects it's a query window and boots it through
 /// `query_window_bootstrap.dart`'s `runQueryWindow`, which is what actually
@@ -20,7 +20,7 @@ import '../../features/query_window/application/query_window_bootstrap.dart';
 /// side is only for re-showing a window that already exists and finished
 /// initializing).
 Future<void> openQueryWindow({
-  required String serverId,
+  required String? serverId,
   required String databaseId,
 }) async {
   await WindowController.create(

@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../../core/constants/db_engine.dart';
-import '../../../../../core/theme/app_theme.dart';
-import '../../../../../data/models/schema_object.dart';
-import '../../../../../shared/widgets/app_button.dart';
-import '../../../application/schema_explorer_provider.dart';
+import '../../../core/constants/db_engine.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../data/models/schema_object.dart';
+import '../../../shared/widgets/app_button.dart';
+import '../../../features/consulta/application/schema_explorer_provider.dart';
 import 'schema_icons.dart';
 import 'schema_object_list.dart';
 

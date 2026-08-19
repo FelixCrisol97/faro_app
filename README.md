@@ -62,6 +62,8 @@ A single table, newest first: Hora, Consulta (truncated, monospace), Servidor, #
 A responsive card grid. Each card: favorite name (heading font), the saved query previewed in monospace, a primary "Usar" button (loads it into Consulta) and a ghost trash-icon button to delete it.
 
 ### 4. Administración
+**Superseded 2026-08-12** — no longer a separate screen; see the note under "Interactions & behavior" below. Kept here since the underlying "servidor" concept and per-field descriptions are still accurate, just relocated into the tree.
+
 A "servidor" is just a named, freely-defined grouping of databases that share one engine and one read-only/Desarrollo mode — a chain of bodega branches, a central host with several company databases, or any other grouping the user finds useful (by function, by schema, etc.). It deliberately has no host/IP of its own: IPs live per database, since bodegas typically each have a different one.
 
 List of server cards. Each card header: server icon, **server name is an inline-editable text field** (borderless until hover/focus, then shows a border) so the team can rename the group directly, an engine tag (PostgreSQL / SQL Server), a segmented control (Solo lectura / Desarrollo) to change that server's mode — switching TO Desarrollo requires a confirmation dialog explaining the consequence; switching back to read-only is immediate — a key-icon button opening a small dialog for that servidor's default login (username/password, used by every database in the group unless overridden below), and a trash-icon button to delete the whole servidor (confirm dialog; also clears its stored credentials).
@@ -71,7 +73,8 @@ Below, one row per database: **an alias (inline-editable text, free-form — onl
 A narrow settings column: a "Tema" card with a Claro/Oscuro segmented control (sun/moon icons), and a "Color de acento" card with two round swatch buttons (terracotta / sage) — the selected one gets a dark ring; clicking either re-themes the whole app's accent.
 
 ## Interactions & behavior
-- Top nav is a persistent 5-item link bar (Consulta / Historial / Favoritos / Administración / Apariencia); the active item is colored with the accent.
+- **Superseded 2026-08-12** — the 5-item top nav bar below and the standalone "4. Administración" screen above no longer exist in the live app: the server/database tree became a permanent left pane (shared across every panel, not just Consulta), server/database management moved into that same tree (right-click/inline icons instead of a separate card-per-server screen — including drag-and-drop reordering and "Sin grupo" databases not yet assigned to a server), and Historial/Favoritos/Apariencia became icon-triggered overlay panels drawn over the tree instead of full-screen tabs. Kept below for its still-accurate design tokens/interaction language (dialogs, hover/focus treatment, theme transitions) — not as a description of current navigation.
+- ~~Top nav is a persistent 5-item link bar (Consulta / Historial / Favoritos / Administración / Apariencia); the active item is colored with the accent.~~
 - All dialogs (favorite save, dev-mode confirm, add server, add database) are centered modals over a dimmed backdrop, with a quick fade+scale-in (~180ms).
 - Every interactive control has its own hover tint and focus ring (2px accent outline) — never a browser-default blue ring.
 - Theme and accent changes transition smoothly (~250ms color/background fade) instead of snapping.
@@ -79,7 +82,7 @@ A narrow settings column: a "Tema" card with a Claro/Oscuro segmented control (s
 
 ## State management
 Key pieces of state a Flutter implementation will need:
-- Current screen/tab (enum).
+- Current screen/tab (enum). **Superseded 2026-08-12**: replaced by the always-visible tree + an optional overlay `SidePanel` (`historial`/`favoritos`/`apariencia`/`null`) — see the note under "Interactions & behavior".
 - List of servers, each with: id, name, engine (postgres/sqlserver), host, mode (read-only/dev), list of databases (id, name, selected: bool).
 - Currently selected server id.
 - SQL editor text + cursor/selection.

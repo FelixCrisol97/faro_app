@@ -378,12 +378,24 @@ Future<void> _writeCsvFile(
 /// masiva". A true masiva export (several databases merged into one
 /// result) gets a count instead of every alias — listing all of them
 /// would make the filename unbounded for a large selection.
+///
+/// Real gap found 2026-08-06 (same client, testing in production): the
+/// 2026-08-05 round above only ever surfaced the table name — the actual
+/// ask was for the WHERE clause's filter values too (`SELECT * FROM
+/// facturas WHERE facturaid = 123 AND cliente = 456` should read as
+/// `..._facturas_facturaid_123_cliente_456_...`, not just `..._facturas_
+/// ...`), which never got built. [_whereConditionKeywords] covers that —
+/// same "best-effort, not exhaustive" philosophy as the table-name regex:
+/// only plain `column = value` equality checks (a real number or quoted
+/// string) are recognized, capped to the first 3 found so a WHERE clause
+/// with many conditions doesn't produce an unbounded filename.
 String _defaultExportFileName(QueryResult result, String? queryText) {
   final tableMatch = queryText == null
       ? null
       : RegExp(r'\bfrom\s+"?([a-zA-Z_][\w.]*)"?', caseSensitive: false)
           .firstMatch(queryText);
   final table = tableMatch?.group(1);
+  final conditions = _whereConditionKeywords(queryText);
 
   final now = DateTime.now();
   String two(int n) => n.toString().padLeft(2, '0');
@@ -400,11 +412,48 @@ String _defaultExportFileName(QueryResult result, String? queryText) {
   final parts = [
     'faro_export',
     if (table != null) table,
+    ...conditions,
     if (destination != null) destination,
     if (result.isMultiDatabase) 'masiva_${result.databasesQueried}bd',
     stamp,
   ];
   return '${parts.join('_')}.csv';
+}
+
+/// The WHERE clause's own text, stopping at whatever comes after it
+/// (`GROUP BY`/`ORDER BY`/`HAVING`/`LIMIT`/`OFFSET`, or end of string) —
+/// `dotAll` because a real query is routinely spread across several lines.
+final _whereClausePattern = RegExp(
+  r'\bwhere\b(.*?)(?:\bgroup\s+by\b|\border\s+by\b|\bhaving\b|\blimit\b|\boffset\b|$)',
+  caseSensitive: false,
+  dotAll: true,
+);
+
+/// `column = 123` / `column = 'texto'` / `column = "texto"` — deliberately
+/// only plain equality: the leading `\s*=\s*` (nothing else allowed
+/// between the column name and the `=`) already excludes `>=`/`<=`/`!=`/
+/// `<>` on its own, and a join condition like `a.id = b.id` fails to match
+/// too (`b.id` isn't a bare number or a quoted string), so this only ever
+/// picks up genuine filter values, not comparison operators or column-to-
+/// column joins.
+final _whereConditionPattern = RegExp(
+  r'''([a-zA-Z_][\w]*)\s*=\s*(?:'([^']*)'|"([^"]*)"|(\d+(?:\.\d+)?))''',
+);
+
+List<String> _whereConditionKeywords(String? queryText) {
+  if (queryText == null) return const [];
+  final whereClause = _whereClausePattern.firstMatch(queryText)?.group(1);
+  if (whereClause == null) return const [];
+
+  final keywords = <String>[];
+  for (final m in _whereConditionPattern.allMatches(whereClause)) {
+    if (keywords.length >= 3) break;
+    final column = m.group(1)!;
+    final value = m.group(2) ?? m.group(3) ?? m.group(4);
+    if (value == null || value.isEmpty) continue;
+    keywords.add('${column}_${_sanitizeForFileName(value)}');
+  }
+  return keywords;
 }
 
 /// Replaces characters a Windows filename can't contain — plus `.`, purely

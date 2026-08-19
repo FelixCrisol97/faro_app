@@ -26,7 +26,7 @@ El problema que resuelve: cuando alguien necesita revisar o analizar informació
 - **Consultas favoritas**: permite guardar consultas usadas con frecuencia, con un nombre, para reutilizarlas rápidamente durante la sesión sin tener que reescribirlas.
 - **Cargar y exportar**: se puede cargar una consulta desde un archivo de texto, y exportar los resultados obtenidos a un archivo CSV para usarlos en otra herramienta (como Excel).
 - **Cancelar una ejecución en curso**: si una consulta está tardando o se lanzó por error, se puede detener sin tener que cerrar la aplicación.
-- **Administración de servidores y bases de datos**: una pantalla de configuración donde se pueden agregar, editar o quitar servidores y las bases de datos que contiene cada uno, además de probar la conexión a una base de datos específica antes de usarla.
+- **Administración de servidores y bases de datos**: agregar, editar o quitar servidores y las bases de datos que contiene cada uno, además de probar la conexión a una base de datos específica antes de usarla — directamente desde el mismo árbol lateral que se usa para elegir qué consultar (2026-08-12: dejó de ser una pantalla aparte). También se pueden crear bases de datos "sin grupo" (sin asignar a ningún servidor todavía) y reorganizar todo — servidores y bases de datos, agrupadas o sueltas — arrastrando con el mouse.
 - **Apariencia personalizable**: tema claro u oscuro, y elección de color de acento, para adaptarse a la preferencia del usuario.
 
 ## A quién está dirigido

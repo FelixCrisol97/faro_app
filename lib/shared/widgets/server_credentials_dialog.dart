@@ -15,8 +15,7 @@ enum _CredentialsDialogResult { save, clear }
 /// only reachable from Administración's server card (key icon), now also
 /// offered from Consulta's sidebar so setting them up doesn't require
 /// leaving Consulta first. Extracted here (rather than duplicated) so both
-/// call sites share the exact same dialog/logic — same pattern as
-/// `add_server_dialog.dart`.
+/// call sites share the exact same dialog/logic.
 Future<void> showServerCredentialsDialog(
     BuildContext context, WidgetRef ref, Server server) async {
   final repo = ref.read(credentialsRepositoryProvider);
@@ -84,9 +83,13 @@ Future<void> showServerCredentialsDialog(
 /// default, for the one-off case where a single database needs a different
 /// login. Originally only reachable from Administración's `_DatabaseRow`
 /// (key icon), now also offered from Consulta's sidebar — same
-/// extraction pattern as [showServerCredentialsDialog].
+/// extraction pattern as [showServerCredentialsDialog]. [server] `null`
+/// (2026-08-13) — a "Sin grupo" database has no servidor default to fall
+/// back to (see `CredentialsRepository.resolve`'s doc comment), so
+/// whatever is typed here is this database's *only* credentials, not an
+/// override.
 Future<void> showDatabaseCredentialsDialog(BuildContext context, WidgetRef ref,
-    Server server, DatabaseEntry database) async {
+    Server? server, DatabaseEntry database) async {
   final repo = ref.read(credentialsRepositoryProvider);
   final current = await repo.databaseOverride(database.id);
   if (!context.mounted) return;
@@ -108,10 +111,12 @@ Future<void> showDatabaseCredentialsDialog(BuildContext context, WidgetRef ref,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            current != null
-                ? 'Sobreescribe las credenciales del servidor "${server.name}" solo para esta base de datos.'
-                : 'Vacío por defecto: usa las credenciales del servidor "${server.name}". Llena estos campos '
-                    'solo si esta base de datos necesita un usuario distinto.',
+            server == null
+                ? 'Esta base de datos no pertenece a ningún servidor, así que estas son sus únicas credenciales.'
+                : current != null
+                    ? 'Sobreescribe las credenciales del servidor "${server.name}" solo para esta base de datos.'
+                    : 'Vacío por defecto: usa las credenciales del servidor "${server.name}". Llena estos campos '
+                        'solo si esta base de datos necesita un usuario distinto.',
           ),
           const SizedBox(height: AppSpacing.space2),
           TextField(

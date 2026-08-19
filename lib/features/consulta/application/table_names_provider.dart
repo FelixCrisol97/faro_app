@@ -64,17 +64,15 @@ Future<List<String>> _fetchDistinctFirstColumn(
 
   final results = await Future.wait(targets.map((target) async {
     if (target.database.host.isEmpty) return const <String>[];
-    final connector = connectors[target.server.engine];
+    final connector = connectors[target.database.engine];
     if (connector == null) return const <String>[];
     try {
       final credentials = await credentialsRepository.resolve(
-          target.server.id, target.database.id);
+          target.server?.id, target.database.id);
       final config = DatabaseConnectionConfig.forDatabase(
-          server: target.server,
-          database: target.database,
-          credentials: credentials);
+          database: target.database, credentials: credentials);
       final result =
-          await connector.runQuery(config, queryFor(target.server.engine));
+          await connector.runQuery(config, queryFor(target.database.engine));
       if (result.columns.isEmpty) return const <String>[];
       return result.rows.map((row) => row[0].toString()).toList();
     } catch (_) {

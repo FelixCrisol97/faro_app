@@ -5,13 +5,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/providers/servers_providers.dart';
 import '../application/query_tabs_providers.dart';
 import 'widgets/query_tab_workspace.dart';
-import 'widgets/server_sidebar.dart';
 import 'widgets/toolbar_card.dart';
 
-/// README.md "1. Consulta (main / default screen)": fixed-width sidebar +
-/// flexible main content (toolbar card, results card) — or, once ≥1 query
-/// tab is open (`query_tab_workspace.dart`), a tab strip above that same
-/// content, one editor/results pane per tab.
+/// README.md "1. Consulta (main / default screen)": flexible main content
+/// (toolbar card, results card) — or, once ≥1 query tab is open
+/// (`query_tab_workspace.dart`), a tab strip above that same content, one
+/// editor/results pane per tab.
+///
+/// 2026-08-12: no longer renders its own sidebar — the server/database tree
+/// (`shared/navigation/tree/app_tree.dart`, formerly this screen's private
+/// `ServerSidebar`) moved up to [AppShell] as a permanent left pane shown
+/// behind every panel, not just Consulta's own content.
 class ConsultaScreen extends ConsumerWidget {
   const ConsultaScreen({super.key});
 
@@ -25,13 +29,7 @@ class ConsultaScreen extends ConsumerWidget {
       },
       child: const Focus(
         autofocus: true,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ServerSidebar(),
-            Expanded(child: QueryTabWorkspace()),
-          ],
-        ),
+        child: QueryTabWorkspace(),
       ),
     );
   }

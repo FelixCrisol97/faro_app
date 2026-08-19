@@ -45,14 +45,13 @@ const _uuid = Uuid();
 /// changes *when* the combined future rejects, not whether it does).
 Future<({List<String> found, String? error})> _discoverOn(
   WidgetRef ref, {
-  required Server server,
   required DatabaseEntry from,
   required DatabaseCredentials credentials,
 }) async {
-  final hostPort = parseHostPort(from.host, server.engine.defaultPort);
+  final hostPort = parseHostPort(from.host, from.engine.defaultPort);
   try {
     final found = await ref.read(databaseDiscoveryServiceProvider).discover(
-          engine: server.engine,
+          engine: from.engine,
           host: hostPort.host,
           port: hostPort.port,
           username: credentials.username,
@@ -98,8 +97,7 @@ Future<({String host, List<String> found})?> _promptAndDiscover(
         duration: const Duration(seconds: 30)),
   );
 
-  final result =
-      await _discoverOn(ref, server: server, from: from, credentials: credentials);
+  final result = await _discoverOn(ref, from: from, credentials: credentials);
   if (!context.mounted) return null;
   ScaffoldMessenger.of(context).clearSnackBars();
 
@@ -199,17 +197,25 @@ Future<void> showDiscoverDatabasesDialog(
     server.id,
     [
       for (final name in selected)
-        DatabaseEntry(id: _uuid.v4(), name: name, host: host, databaseName: name),
+        DatabaseEntry(
+            id: _uuid.v4(),
+            name: name,
+            host: host,
+            databaseName: name,
+            engine: from.engine),
     ],
   );
 }
 
 /// One (server, host) pair worth of discovery, run as part of
 /// [showDiscoverForMassQueryDialog]'s `Future.wait` batch. Never throws —
-/// see [_discoverOn]'s doc comment for why that matters here.
+/// see [_discoverOn]'s doc comment for why that matters here. [server]
+/// `null` — a "Sin grupo" database selected in "Consulta masiva": still
+/// fully discoverable (see [DatabaseCheckRow]'s doc comment), just with no
+/// servidor default to fall back to for credentials.
 Future<({List<String> found, String? error})> _discoverForMassGroup(
   WidgetRef ref, {
-  required Server server,
+  required Server? server,
   required DatabaseEntry anchor,
 }) async {
   if (anchor.host.isEmpty) {
@@ -218,9 +224,10 @@ Future<({List<String> found, String? error})> _discoverForMassGroup(
       error: 'Esta base de datos no tiene un host configurado todavía.',
     );
   }
-  final credentials =
-      await ref.read(credentialsRepositoryProvider).resolve(server.id, anchor.id);
-  return _discoverOn(ref, server: server, from: anchor, credentials: credentials);
+  final credentials = await ref
+      .read(credentialsRepositoryProvider)
+      .resolve(server?.id, anchor.id);
+  return _discoverOn(ref, from: anchor, credentials: credentials);
 }
 
 /// "Descubrir en todas las IPs seleccionadas" — the multi-host sibling of
@@ -245,11 +252,14 @@ Future<void> showDiscoverForMassQueryDialog(
 
   // One anchor per distinct (servidor, host) — same criterion
   // `host_group_node.dart` already uses (`databases.first`), just applied
-  // across the whole selection instead of one host group.
-  final groups = <(String, String), ({Server server, DatabaseEntry anchor})>{};
+  // across the whole selection instead of one host group. `server?.id` —
+  // several "Sin grupo" databases on different hosts are distinct groups
+  // too (`null` alone would collapse them all into one).
+  final groups =
+      <(String?, String), ({Server? server, DatabaseEntry anchor})>{};
   for (final target in targets) {
     groups.putIfAbsent(
-      (target.server.id, target.database.host),
+      (target.server?.id, target.database.host),
       () => (server: target.server, anchor: target.database),
     );
   }
@@ -264,8 +274,10 @@ Future<void> showDiscoverForMassQueryDialog(
   // Every group resolves without throwing (see _discoverForMassGroup), so
   // Future.wait can't lose successful results just because another group
   // failed.
-  final results = await Future.wait(entries.map(
-      (e) => _discoverForMassGroup(ref, server: e.value.server, anchor: e.value.anchor)));
+  final results = await Future.wait(entries.map((e) => _discoverForMassGroup(
+      ref,
+      server: e.value.server,
+      anchor: e.value.anchor)));
 
   if (!context.mounted) return;
   ScaffoldMessenger.of(context).clearSnackBars();
@@ -278,7 +290,9 @@ Future<void> showDiscoverForMassQueryDialog(
     final server = entries[i].value.server;
     final host = entries[i].key.$2;
     final existing = {
-      for (final db in server.databases) (db.databaseName, db.host)
+      for (final db
+          in server?.databases ?? ref.read(ungroupedDatabasesProvider))
+        (db.databaseName, db.host)
     };
     existingByGroup[i] = existing;
     selectedByGroup[i] = {
@@ -303,7 +317,7 @@ Future<void> showDiscoverForMassQueryDialog(
               for (var i = 0; i < entries.length; i++) ...[
                 if (i > 0) const SizedBox(height: 12),
                 Text(
-                  '${entries[i].value.server.name} · ${entries[i].key.$2}',
+                  '${entries[i].value.server?.name ?? 'Sin grupo'} · ${entries[i].key.$2}',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -366,22 +380,33 @@ Future<void> showDiscoverForMassQueryDialog(
   if (confirmed != true) return;
 
   final byServer = <String, List<DatabaseEntry>>{};
+  final ungroupedToAdd = <DatabaseEntry>[];
   for (var i = 0; i < entries.length; i++) {
     final server = entries[i].value.server;
+    final anchorEngine = entries[i].value.anchor.engine;
     final host = entries[i].key.$2;
     for (final name in selectedByGroup[i]!) {
-      byServer.putIfAbsent(server.id, () => []).add(DatabaseEntry(
+      final entry = DatabaseEntry(
           id: _uuid.v4(),
           name: name,
           host: host,
           databaseName: name,
-          selected: true));
+          engine: anchorEngine,
+          selected: true);
+      if (server == null) {
+        ungroupedToAdd.add(entry);
+      } else {
+        byServer.putIfAbsent(server.id, () => []).add(entry);
+      }
     }
   }
-  if (byServer.isEmpty) return;
+  if (byServer.isEmpty && ungroupedToAdd.isEmpty) return;
 
   final notifier = ref.read(serversProvider.notifier);
   for (final e in byServer.entries) {
     notifier.addDatabases(e.key, e.value);
+  }
+  for (final db in ungroupedToAdd) {
+    notifier.addUngroupedDatabase(db);
   }
 }

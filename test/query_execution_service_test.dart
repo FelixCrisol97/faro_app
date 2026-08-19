@@ -34,13 +34,18 @@ class _FakeConnector implements DbConnector {
   }
 
   @override
-  Future<BulkInsertOutcome> insertRows(DatabaseConnectionConfig config,
-          String schema, String table, List<String> columns,
-          List<Map<String, Object?>> rows, {CancellationToken? cancellationToken}) =>
+  Future<BulkInsertOutcome> insertRows(
+          DatabaseConnectionConfig config,
+          String schema,
+          String table,
+          List<String> columns,
+          List<Map<String, Object?>> rows,
+          {CancellationToken? cancellationToken}) =>
       throw UnimplementedError('not exercised by this test');
 }
 
-Future<DatabaseCredentials> _noCredentials(String serverId, String databaseId) async =>
+Future<DatabaseCredentials> _noCredentials(
+        String? serverId, String databaseId) async =>
     emptyCredentials;
 
 QueryTarget _targetFor(Server server) =>
@@ -55,20 +60,24 @@ void main() {
       const server = Server(
         id: 's1',
         name: 'Server',
-        engine: DbEngine.postgres,
         databases: [
           DatabaseEntry(
               id: 'db1',
               name: 'db',
               host: 'localhost',
               databaseName: 'db',
+              engine: DbEngine.postgres,
               mode: ServerMode.development)
         ],
       );
 
       final result = await service.run(
         targets: [_targetFor(server)],
-        statements: const ['UPDATE a SET x = 1', 'UPDATE b SET y = 2', 'SELECT 1'],
+        statements: const [
+          'UPDATE a SET x = 1',
+          'UPDATE b SET y = 2',
+          'SELECT 1'
+        ],
         resolveCredentials: _noCredentials,
       );
 
@@ -85,13 +94,13 @@ void main() {
       const server = Server(
         id: 's1',
         name: 'Server',
-        engine: DbEngine.postgres,
         databases: [
           DatabaseEntry(
               id: 'db1',
               name: 'db',
               host: 'localhost',
               databaseName: 'db',
+              engine: DbEngine.postgres,
               mode: ServerMode.development)
         ],
       );
@@ -99,7 +108,11 @@ void main() {
 
       await service.run(
         targets: [_targetFor(server)],
-        statements: const ['UPDATE a SET x = 1', 'UPDATE b SET y = 2', 'SELECT 1'],
+        statements: const [
+          'UPDATE a SET x = 1',
+          'UPDATE b SET y = 2',
+          'SELECT 1'
+        ],
         resolveCredentials: _noCredentials,
         onProgress: (completed, total) => progress.add((completed, total)),
       );
@@ -115,20 +128,24 @@ void main() {
       const server = Server(
         id: 's1',
         name: 'Server',
-        engine: DbEngine.postgres,
         databases: [
           DatabaseEntry(
               id: 'db1',
               name: 'db',
               host: 'localhost',
               databaseName: 'db',
+              engine: DbEngine.postgres,
               mode: ServerMode.development)
         ],
       );
 
       final result = await service.run(
         targets: [_targetFor(server)],
-        statements: const ['UPDATE a SET x = 1', 'UPDATE b SET y = 2', 'SELECT 1'],
+        statements: const [
+          'UPDATE a SET x = 1',
+          'UPDATE b SET y = 2',
+          'SELECT 1'
+        ],
         resolveCredentials: _noCredentials,
       );
 
@@ -140,7 +157,8 @@ void main() {
       expect(outcome.errorMessage, contains('boom: UPDATE b SET y = 2'));
     });
 
-    test('one database failing does not affect another database in the same run',
+    test(
+        'one database failing does not affect another database in the same run',
         () async {
       final failingConnector = _FakeConnector(failOn: 'UPDATE b SET y = 2');
       final okConnector = _FakeConnector();
@@ -151,33 +169,37 @@ void main() {
       const failingServer = Server(
         id: 's1',
         name: 'Postgres server',
-        engine: DbEngine.postgres,
         databases: [
           DatabaseEntry(
               id: 'db1',
               name: 'db1',
               host: 'localhost',
               databaseName: 'db1',
+              engine: DbEngine.postgres,
               mode: ServerMode.development)
         ],
       );
       const okServer = Server(
         id: 's2',
         name: 'SQL Server',
-        engine: DbEngine.sqlServer,
         databases: [
           DatabaseEntry(
               id: 'db2',
               name: 'db2',
               host: 'localhost',
               databaseName: 'db2',
+              engine: DbEngine.sqlServer,
               mode: ServerMode.development)
         ],
       );
 
       final result = await service.run(
         targets: [_targetFor(failingServer), _targetFor(okServer)],
-        statements: const ['UPDATE a SET x = 1', 'UPDATE b SET y = 2', 'SELECT 1'],
+        statements: const [
+          'UPDATE a SET x = 1',
+          'UPDATE b SET y = 2',
+          'SELECT 1'
+        ],
         resolveCredentials: _noCredentials,
       );
 
@@ -206,26 +228,26 @@ void main() {
       const serverA = Server(
         id: 's1',
         name: 'A',
-        engine: DbEngine.postgres,
         databases: [
           DatabaseEntry(
               id: 'db1',
               name: 'db1',
               host: '192.168.1.10:5432',
               databaseName: 'db1',
+              engine: DbEngine.postgres,
               mode: ServerMode.development)
         ],
       );
       const serverB = Server(
         id: 's2',
         name: 'B',
-        engine: DbEngine.sqlServer,
         databases: [
           DatabaseEntry(
               id: 'db2',
               name: 'db2',
               host: 'localhost',
               databaseName: 'db2',
+              engine: DbEngine.sqlServer,
               mode: ServerMode.development)
         ],
       );

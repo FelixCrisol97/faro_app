@@ -1,6 +1,6 @@
-/// The two database engines Faro talks to, configured once per servidor
-/// (README.md / PROYECTO_DEFINICION.md — transparent to the end user after
-/// that one-time setup in Administración).
+/// The two database engines Faro talks to, configured once per database
+/// (`DatabaseEntry.engine` — moved off `Server` 2026-08-13, since a
+/// servidor/group is only ever an optional grouping, never a shared driver).
 enum DbEngine {
   postgres,
   sqlServer;

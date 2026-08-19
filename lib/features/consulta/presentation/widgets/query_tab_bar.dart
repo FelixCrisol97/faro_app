@@ -97,7 +97,7 @@ class _QueryTabChip extends ConsumerWidget {
     final target = ref.watch(resolvedTabTargetProvider(tab.id));
     final label = target == null
         ? 'Base eliminada'
-        : '${target.server.name} · ${target.database.name}';
+        : '${target.server?.name ?? 'Sin grupo'} · ${target.database.name}';
 
     return _TabChipShell(
       active: active,
@@ -135,8 +135,8 @@ class _QueryTabChip extends ConsumerWidget {
           ),
           // Sibling InkWell, not nested inside the activate one above —
           // this codebase has hit the ambiguous-tap-target bug from
-          // nesting InkWells twice already (server_sidebar.dart), not
-          // repeating it here.
+          // nesting InkWells twice already (`database_check_row.dart`,
+          // `shared/navigation/tree/`), not repeating it here.
           InkWell(
             borderRadius: const BorderRadius.all(Radius.circular(4)),
             onTap: () => ref.read(queryTabsProvider.notifier).closeTab(tab.id),

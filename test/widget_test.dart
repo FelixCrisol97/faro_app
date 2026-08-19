@@ -5,8 +5,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  testWidgets('App boots to the Consulta screen with the nav bar visible',
-      (tester) async {
+  testWidgets(
+      'App boots with the tree visible and no servers configured yet '
+      '(2026-08-12: the tree is now the permanent left pane — see '
+      '`AppShell` — replacing the old 5-tab nav bar this test used to '
+      'check for)', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
 
@@ -18,6 +21,6 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Consulta'), findsWidgets);
+    expect(find.text('+ Agregar base de datos'), findsOneWidget);
   });
 }

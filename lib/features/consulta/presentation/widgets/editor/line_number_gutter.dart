@@ -31,7 +31,7 @@ class LineNumberGutter extends StatelessWidget {
       // doc) but Flutter's desktop ScrollBehavior still decorates any
       // Scrollable with a visible scrollbar regardless of physics — same
       // fix already applied to the schema tree's nested lists (see
-      // `widgets/sidebar/schema_object_list.dart`).
+      // `shared/navigation/tree/schema_object_list.dart`).
       child: ScrollConfiguration(
         behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
         child: SingleChildScrollView(

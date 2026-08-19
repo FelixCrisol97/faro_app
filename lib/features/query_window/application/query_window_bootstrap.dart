@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../../../data/models/database_entry.dart';
+import '../../../data/models/server.dart';
 import '../../../data/providers/core_providers.dart';
 import '../../../data/providers/servers_providers.dart';
 import '../../../data/repositories/servers_repository.dart';
@@ -22,7 +24,7 @@ const _serverIdKey = 'serverId';
 const _databaseIdKey = 'databaseId';
 
 String encodeQueryWindowArguments({
-  required String serverId,
+  required String? serverId,
   required String databaseId,
 }) =>
     jsonEncode({
@@ -68,12 +70,18 @@ Future<void> runQueryWindow(Map<String, Object?> args) async {
   await windowManager.ensureInitialized();
 
   final prefs = await SharedPreferences.getInstance();
-  final servers = ServersRepository(prefs).load();
-  final server = servers.where((s) => s.id == serverId).firstOrNull;
-  final database =
-      server?.databases.where((d) => d.id == databaseId).firstOrNull;
+  final loaded = ServersRepository(prefs).load();
+  Server? server;
+  DatabaseEntry? database;
+  if (serverId == null) {
+    database =
+        loaded.ungroupedDatabases.where((d) => d.id == databaseId).firstOrNull;
+  } else {
+    server = loaded.servers.where((s) => s.id == serverId).firstOrNull;
+    database = server?.databases.where((d) => d.id == databaseId).firstOrNull;
+  }
 
-  if (server == null || database == null) {
+  if (database == null) {
     // The database was deleted from Administración (in another window,
     // possibly before this one even finished opening) between the window
     // being created and this bootstrap running — show a small explanation

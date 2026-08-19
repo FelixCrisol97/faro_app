@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../../core/theme/app_theme.dart';
-import '../../../../../data/models/table_column.dart';
-import '../../../../../shared/widgets/app_button.dart';
-import '../../../application/table_columns_provider.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../data/models/table_column.dart';
+import '../../../shared/widgets/app_button.dart';
+import '../../../features/consulta/application/table_columns_provider.dart';
 
 /// Column list for one table/view, lazy-fetched on first "Ver estructura de
 /// campos" and kept cached for the rest of the session (same `.family`

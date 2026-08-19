@@ -2,12 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../../core/constants/db_engine.dart';
-import '../../../../../core/theme/app_spacing.dart';
-import '../../../../../core/theme/app_theme.dart';
-import '../../../../../data/models/database_entry.dart';
-import '../../../../../data/models/server.dart';
-import '../../../../../shared/widgets/discover_databases_dialog.dart';
+import '../../../core/theme/app_spacing.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../data/models/database_entry.dart';
+import '../../../data/models/server.dart';
+import '../../../shared/widgets/discover_databases_dialog.dart';
 import 'database_check_row.dart';
 
 /// One IP/host within a servidor, as a collapsible sub-node — user request,
@@ -28,13 +27,11 @@ class HostGroupNode extends ConsumerStatefulWidget {
     required this.server,
     required this.host,
     required this.databases,
-    required this.engine,
   });
 
   final Server server;
   final String host;
   final List<DatabaseEntry> databases;
-  final DbEngine engine;
 
   @override
   ConsumerState<HostGroupNode> createState() => _HostGroupNodeState();
@@ -113,7 +110,6 @@ class _HostGroupNodeState extends ConsumerState<HostGroupNode> {
               serverId: widget.server.id,
               server: widget.server,
               database: db,
-              engine: widget.engine,
             ),
       ],
     );

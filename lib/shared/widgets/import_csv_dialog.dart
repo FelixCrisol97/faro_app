@@ -8,6 +8,8 @@ import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/app_spacing.dart';
+import '../../data/models/database_entry.dart';
+import '../../data/models/server.dart';
 import '../../data/models/table_column.dart';
 import '../../data/providers/core_providers.dart';
 import '../../data/providers/servers_providers.dart';
@@ -24,19 +26,36 @@ import 'app_tag.dart';
 /// `CsvImportService.importInto` against each selected database in
 /// parallel — same "fan out, one outcome per database" shape
 /// `QueryExecutionService.run` already uses for multi-bodega queries.
+///
+/// [serverId] `null` (2026-08-13) — a "Sin grupo" database has no sibling
+/// databases to offer alongside it, so the destination checklist collapses
+/// to just that one (already-checked, undeselectable) database instead of
+/// a servidor's full list.
 Future<void> showImportCsvDialog(
   BuildContext context,
   WidgetRef ref, {
-  required String serverId,
+  required String? serverId,
   required String databaseId,
   required String schema,
   required String table,
 }) async {
-  final servers = ref.read(serversProvider);
-  final server = servers.where((s) => s.id == serverId).firstOrNull;
-  if (server == null) return;
+  Server? server;
+  final List<DatabaseEntry> candidateDatabases;
+  if (serverId == null) {
+    final originDatabase = ref
+        .read(ungroupedDatabasesProvider)
+        .where((db) => db.id == databaseId)
+        .firstOrNull;
+    if (originDatabase == null) return;
+    candidateDatabases = [originDatabase];
+  } else {
+    final servers = ref.read(serverListProvider);
+    server = servers.where((s) => s.id == serverId).firstOrNull;
+    if (server == null) return;
+    candidateDatabases = server.databases;
+  }
   final originDatabase =
-      server.databases.where((db) => db.id == databaseId).firstOrNull;
+      candidateDatabases.where((db) => db.id == databaseId).firstOrNull;
   if (originDatabase == null) return;
 
   final picked = await FilePicker.platform
@@ -102,7 +121,7 @@ Future<void> showImportCsvDialog(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (final db in server.databases)
+                  for (final db in candidateDatabases)
                     CheckboxListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
@@ -144,7 +163,7 @@ Future<void> showImportCsvDialog(
   final credentialsRepo = ref.read(credentialsRepositoryProvider);
   final importService = ref.read(csvImportServiceProvider);
   Future<List<TableColumn>> fetchColumns(
-          String serverId, String databaseId, String schema, String table) =>
+          String? serverId, String databaseId, String schema, String table) =>
       ref.read(tableColumnsProvider((
         serverId: serverId,
         databaseId: databaseId,
@@ -153,9 +172,9 @@ Future<void> showImportCsvDialog(
       )).future);
 
   final targets =
-      server.databases.where((db) => selected.contains(db.id)).toList();
+      candidateDatabases.where((db) => selected.contains(db.id)).toList();
   final outcomes = await Future.wait(targets.map((db) async {
-    final credentials = await credentialsRepo.resolve(server.id, db.id);
+    final credentials = await credentialsRepo.resolve(server?.id, db.id);
     return importService.importInto(
       server: server,
       database: db,
@@ -203,7 +222,8 @@ class _OutcomePill extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!outcome.success) {
       return Tooltip(
-        message: '${outcome.errorMessage ?? 'Error desconocido'}\n(clic para copiar)',
+        message:
+            '${outcome.errorMessage ?? 'Error desconocido'}\n(clic para copiar)',
         child: InkWell(
           onTap: () => _copyToClipboard(
               context, outcome.errorMessage ?? 'Error desconocido'),

@@ -1,12 +1,13 @@
 import '../../core/constants/db_engine.dart';
 import '../models/database_credentials.dart';
 import '../models/database_entry.dart';
-import '../models/server.dart';
 
 /// Everything a [DbConnector] needs to open a connection to one database.
-/// Built per-database from `Server` + `DatabaseEntry` (splitting
+/// Built per-database from just a `DatabaseEntry` (splitting
 /// `DatabaseEntry.host` into host/port) — connectors themselves stay
-/// stateless.
+/// stateless. No `Server` needed (2026-08-13: `engine` moved off `Server`
+/// onto `DatabaseEntry` — a database connects on its own, whether or not
+/// it's grouped into a servidor).
 class DatabaseConnectionConfig {
   const DatabaseConnectionConfig({
     required this.engine,
@@ -23,13 +24,12 @@ class DatabaseConnectionConfig {
   /// builds a connection for one database (running a query, "Probar
   /// conexión", table-name introspection).
   factory DatabaseConnectionConfig.forDatabase({
-    required Server server,
     required DatabaseEntry database,
     required DatabaseCredentials credentials,
   }) {
-    final hostPort = parseHostPort(database.host, server.engine.defaultPort);
+    final hostPort = parseHostPort(database.host, database.engine.defaultPort);
     return DatabaseConnectionConfig(
-      engine: server.engine,
+      engine: database.engine,
       host: hostPort.host,
       port: hostPort.port,
       databaseName: database.databaseName,

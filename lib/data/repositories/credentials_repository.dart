@@ -69,13 +69,16 @@ class CredentialsRepository {
   }
 
   /// Resolves the login to use for one database: its own override if set,
-  /// otherwise the parent servidor's default. Empty credentials if neither
-  /// is configured — connectors will then fail on login, which surfaces as
-  /// a normal connection error rather than a crash.
+  /// otherwise the parent servidor's default. [serverId] `null` — a "Sin
+  /// grupo" database (2026-08-13) has no servidor to fall back to, so it's
+  /// just the override or nothing. Empty credentials if neither is
+  /// configured — connectors will then fail on login, which surfaces as a
+  /// normal connection error rather than a crash.
   Future<DatabaseCredentials> resolve(
-      String serverId, String databaseId) async {
+      String? serverId, String databaseId) async {
     final override = await databaseOverride(databaseId);
     if (override != null) return override;
+    if (serverId == null) return emptyCredentials;
     return await serverCredentials(serverId) ?? emptyCredentials;
   }
 }

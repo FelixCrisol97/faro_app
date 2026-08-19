@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,248 +7,138 @@ import '../../../core/theme/app_radii.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/providers/settings_providers.dart';
-import '../../../shared/widgets/app_button.dart';
 import '../../../shared/widgets/app_card.dart';
 import '../../../shared/widgets/app_segmented_control.dart';
-import '../../consulta/presentation/re_editor_prototype_screen.dart';
 
-/// README.md "5. Apariencia": a narrow settings column.
-class AparienciaScreen extends ConsumerStatefulWidget {
+/// README.md "5. Apariencia": a settings column.
+///
+/// **Own resizable width column removed 2026-08-13** (real bug, user
+/// screenshot: "RIGHT OVERFLOWED BY 39 PIXELS") — this screen used to be a
+/// full top-level tab and carried its own `_width`/drag handle for that
+/// reason; once it moved inside `SidePanelOverlay` (2026-08-12), that
+/// panel already has its *own* independent resize handle, so this screen
+/// had two separate width states fighting each other — whichever was
+/// narrower is what actually got drawn, overflowing against the other.
+/// Now it just fills whatever width the panel gives it, same as
+/// `HistorialScreen`/`FavoritosScreen`.
+class AparienciaScreen extends ConsumerWidget {
   const AparienciaScreen({super.key});
 
   @override
-  ConsumerState<AparienciaScreen> createState() => _AparienciaScreenState();
-}
-
-class _AparienciaScreenState extends ConsumerState<AparienciaScreen> {
-  // Session-only (resets on restart), same drag-to-resize convention as
-  // `server_sidebar.dart`'s sidebar — user-requested 2026-08-02, this
-  // column used to be a hardcoded 340px with no way to widen it.
-  double _width = 340;
-  static const double _minWidth = 280;
-  static const double _maxWidth = 560;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.appTheme.colors;
+  Widget build(BuildContext context, WidgetRef ref) {
     final typography = context.appTheme.typography;
     final isDark = ref.watch(themeIsDarkProvider);
     final accent = ref.watch(accentProvider);
 
-    return Align(
-      alignment: Alignment.topLeft,
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.space4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.space4),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(
-              width: _width,
-              // Real bug, user-reported with a screenshot ("BOTTOM OVERFLOWED
-              // BY 112 PIXELS"): this column never scrolled, and kept growing
-              // this session (atajos de teclado card, then the re_editor
-              // prototype card) until it no longer fit a shorter window.
-              child: SingleChildScrollView(
-                child: Column(
+            AppCard(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-              AppCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Tema', style: typography.heading),
-                    const SizedBox(height: AppSpacing.space2),
-                    AppSegmentedControl<bool>(
-                      value: isDark,
-                      onChanged: (value) =>
-                          ref.read(themeIsDarkProvider.notifier).set(value),
-                      options: const [
-                        AppSegmentedOption(
-                            value: false,
-                            label: 'Claro',
-                            icon: LucideIcons.sun),
-                        AppSegmentedOption(
-                            value: true,
-                            label: 'Oscuro',
-                            icon: LucideIcons.moon),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: AppSpacing.space3),
-              AppCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Color de acento', style: typography.heading),
-                    const SizedBox(height: AppSpacing.space2),
-                    Row(
-                      children: [
-                        for (final option in AppAccent.values)
-                          Padding(
-                            padding:
-                                const EdgeInsets.only(right: AppSpacing.space2),
-                            child: _AccentSwatch(
-                              accent: option,
-                              selected: accent == option,
-                              onTap: () =>
-                                  ref.read(accentProvider.notifier).set(option),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: AppSpacing.space3),
-              AppCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Atajos de teclado', style: typography.heading),
-                    const SizedBox(height: AppSpacing.space2),
-                    const _ShortcutGroup(
-                      title: 'Consulta',
-                      rows: [
-                        _ShortcutRow(
-                            keys: 'F5', description: 'Ejecutar / cancelar'),
-                        _ShortcutRow(
-                            keys: 'Ctrl+G',
-                            description: 'Guardar el archivo abierto'),
-                      ],
-                    ),
-                    const _ShortcutGroup(
-                      title: 'Editor SQL',
-                      rows: [
-                        _ShortcutRow(
-                            keys: 'Ctrl+F',
-                            description: 'Buscar en el script'),
-                        _ShortcutRow(
-                            keys: 'Ctrl + / Ctrl+Rueda',
-                            description: 'Acercar (zoom)'),
-                        _ShortcutRow(
-                            keys: 'Ctrl - / Ctrl+Rueda',
-                            description: 'Alejar (zoom)'),
-                        _ShortcutRow(
-                            keys: 'Ctrl+0',
-                            description: 'Restablecer el zoom'),
-                        _ShortcutRow(
-                            keys: '↑ / ↓',
-                            description:
-                                'Moverse entre sugerencias de autocompletado'),
-                        _ShortcutRow(
-                            keys: 'Enter / Tab',
-                            description: 'Aceptar la sugerencia'),
-                        _ShortcutRow(
-                            keys: 'Esc',
-                            description: 'Cerrar las sugerencias'),
-                      ],
-                    ),
-                    const _ShortcutGroup(
-                      title: 'Buscador del editor (Ctrl+F)',
-                      rows: [
-                        _ShortcutRow(
-                            keys: 'Enter',
-                            description: 'Siguiente coincidencia'),
-                        _ShortcutRow(
-                            keys: 'Shift+Enter',
-                            description: 'Coincidencia anterior'),
-                        _ShortcutRow(
-                            keys: 'Esc', description: 'Cerrar el buscador'),
-                      ],
-                      isLast: true,
-                    ),
-                  ],
-                ),
-              ),
-              // Real bug fixed 2026-08-03 (AUDITORIA_CODIGO.md): esta tarjeta
-              // era alcanzable en builds de producción sin ningún gate — un
-              // usuario final podía llegar al prototipo de editor (sin tema
-              // Faro, en inglés, no conectado al editor real) solo abriendo
-              // Apariencia. Envuelta en `kDebugMode` para que solo aparezca en
-              // builds de desarrollo, sin borrar el prototipo todavía — la
-              // decisión de si se migra o no sigue pendiente.
-              if (kDebugMode) ...[
-                const SizedBox(height: AppSpacing.space3),
-                AppCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Prototipo (evaluación)', style: typography.heading),
-                      const SizedBox(height: AppSpacing.space1),
-                      Text(
-                        'Motor de edición real (re_editor) para el editor SQL — no conectado todavía al editor de verdad.',
-                        style: typography.bodySmall
-                            .copyWith(color: colors.textMuted),
-                      ),
-                      const SizedBox(height: AppSpacing.space2),
-                      AppButton(
-                        label: 'Probar editor nuevo',
-                        icon: LucideIcons.flask_conical,
-                        onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (context) =>
-                                const ReEditorPrototypeScreen(),
-                          ),
-                        ),
-                      ),
+                  Text('Tema', style: typography.heading),
+                  const SizedBox(height: AppSpacing.space2),
+                  AppSegmentedControl<bool>(
+                    value: isDark,
+                    onChanged: (value) =>
+                        ref.read(themeIsDarkProvider.notifier).set(value),
+                    options: const [
+                      AppSegmentedOption(
+                          value: false, label: 'Claro', icon: LucideIcons.sun),
+                      AppSegmentedOption(
+                          value: true, label: 'Oscuro', icon: LucideIcons.moon),
                     ],
                   ),
-                ),
-              ],
                 ],
-                ),
               ),
             ),
-            _ResizeHandle(
-              onDrag: (dx) => setState(() {
-                _width = (_width + dx).clamp(_minWidth, _maxWidth);
-              }),
+            const SizedBox(height: AppSpacing.space3),
+            AppCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Color de acento', style: typography.heading),
+                  const SizedBox(height: AppSpacing.space2),
+                  Row(
+                    children: [
+                      for (final option in AppAccent.values)
+                        Padding(
+                          padding:
+                              const EdgeInsets.only(right: AppSpacing.space2),
+                          child: _AccentSwatch(
+                            accent: option,
+                            selected: accent == option,
+                            onTap: () =>
+                                ref.read(accentProvider.notifier).set(option),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppSpacing.space3),
+            AppCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Atajos de teclado', style: typography.heading),
+                  const SizedBox(height: AppSpacing.space2),
+                  const _ShortcutGroup(
+                    title: 'Consulta',
+                    rows: [
+                      _ShortcutRow(
+                          keys: 'F5', description: 'Ejecutar / cancelar'),
+                      _ShortcutRow(
+                          keys: 'Ctrl+G',
+                          description: 'Guardar el archivo abierto'),
+                    ],
+                  ),
+                  const _ShortcutGroup(
+                    title: 'Editor SQL',
+                    rows: [
+                      _ShortcutRow(
+                          keys: 'Ctrl+F', description: 'Buscar en el script'),
+                      _ShortcutRow(
+                          keys: 'Ctrl + / Ctrl+Rueda',
+                          description: 'Acercar (zoom)'),
+                      _ShortcutRow(
+                          keys: 'Ctrl - / Ctrl+Rueda',
+                          description: 'Alejar (zoom)'),
+                      _ShortcutRow(
+                          keys: 'Ctrl+0', description: 'Restablecer el zoom'),
+                      _ShortcutRow(
+                          keys: '↑ / ↓',
+                          description:
+                              'Moverse entre sugerencias de autocompletado'),
+                      _ShortcutRow(
+                          keys: 'Enter / Tab',
+                          description: 'Aceptar la sugerencia'),
+                      _ShortcutRow(
+                          keys: 'Esc', description: 'Cerrar las sugerencias'),
+                    ],
+                  ),
+                  const _ShortcutGroup(
+                    title: 'Buscador del editor (Ctrl+F)',
+                    rows: [
+                      _ShortcutRow(
+                          keys: 'Enter', description: 'Siguiente coincidencia'),
+                      _ShortcutRow(
+                          keys: 'Shift+Enter',
+                          description: 'Coincidencia anterior'),
+                      _ShortcutRow(
+                          keys: 'Esc', description: 'Cerrar el buscador'),
+                    ],
+                    isLast: true,
+                  ),
+                ],
+              ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-/// A thin draggable strip at this column's right edge — same shape as
-/// `server_sidebar.dart`'s own `_ResizeHandle` (highlights on hover, wider
-/// invisible hit target than its visible 2px line), kept as its own copy
-/// rather than a shared widget since the two hosts don't have enough else
-/// in common to justify the extra parameterization.
-class _ResizeHandle extends StatefulWidget {
-  const _ResizeHandle({required this.onDrag});
-
-  final ValueChanged<double> onDrag;
-
-  @override
-  State<_ResizeHandle> createState() => _ResizeHandleState();
-}
-
-class _ResizeHandleState extends State<_ResizeHandle> {
-  bool _hovering = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.appTheme.colors;
-    return MouseRegion(
-      cursor: SystemMouseCursors.resizeLeftRight,
-      onEnter: (_) => setState(() => _hovering = true),
-      onExit: (_) => setState(() => _hovering = false),
-      child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onHorizontalDragUpdate: (details) => widget.onDrag(details.delta.dx),
-        child: SizedBox(
-          width: 6,
-          child: Center(
-            child: Container(
-              width: 2,
-              color: _hovering ? colors.accent.base : colors.border,
-            ),
-          ),
         ),
       ),
     );

@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/favorite_query.dart';
-import '../../../shared/navigation/app_screen.dart';
+import '../../../shared/navigation/side_panel/side_panel.dart';
 import '../../../shared/widgets/app_button.dart';
 import '../../../shared/widgets/app_card.dart';
 import '../../consulta/application/consulta_providers.dart';
@@ -78,10 +78,10 @@ class _FavoriteCard extends ConsumerWidget {
                       .loadText(favorite.queryText);
                   // Same reasoning as Historial "Reusar" — switch back to
                   // the "Consulta" home pane so the loaded text is
-                  // actually visible if a query tab was active.
+                  // actually visible if a query tab was active, and close
+                  // this panel so the editor underneath it is visible too.
                   ref.read(queryTabsProvider.notifier).activate(null);
-                  ref.read(currentScreenProvider.notifier).state =
-                      AppScreen.consulta;
+                  ref.read(activeSidePanelProvider.notifier).state = null;
                 },
               ),
               const Spacer(),

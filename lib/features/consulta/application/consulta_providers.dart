@@ -386,7 +386,9 @@ HistoryEntry historyEntryFor(
   // One server involved (the common case) keeps today's exact look (its
   // real name); several collapse into a count — HistoryEntry stays a
   // plain String rather than a real serverId list either way.
-  final serversInvolved = {for (final t in targets) t.server.id: t.server.name};
+  final serversInvolved = {
+    for (final t in targets) (t.server?.id ?? ''): (t.server?.name ?? 'Sin grupo')
+  };
   final singleServer =
       serversInvolved.length == 1 ? serversInvolved.entries.first : null;
   return HistoryEntry(
@@ -491,7 +493,7 @@ Future<QueryRunState> loadNextPage(Ref ref, QueryRunState current) async {
     return current.copyWith(loadingMore: false, hasMore: false);
   }
 
-  final wrapped = wrapForPage(original, target.server.engine,
+  final wrapped = wrapForPage(original, target.database.engine,
       offset: existing.rows.length, fetchCount: paginationPageSize + 1);
   final fetched = await ref.read(queryExecutionServiceProvider).run(
         targets: [target],
@@ -553,13 +555,59 @@ Future<QueryRunState> loadNextPage(Ref ref, QueryRunState current) async {
   }
   final target = targets.single;
   final original = statements.last;
-  final wrapped = wrapForPage(original, target.server.engine,
+  final wrapped = wrapForPage(original, target.database.engine,
       offset: 0, fetchCount: paginationPageSize + 1);
   return (
     toRun: [...statements.sublist(0, statements.length - 1), wrapped],
     target: target,
     original: original,
   );
+}
+
+/// Refreshes each target's `DatabaseEntry.mode` from disk right before
+/// running — real gap reported 2026-08-12: a query window's own
+/// `selectedQueryTargetsProvider` is a frozen snapshot taken once when the
+/// window opened (`overrideWithValue` in `query_window_bootstrap.dart`,
+/// which explicitly never re-reads server config afterward), so flipping a
+/// database to "Consultas sin restricciones" from the main window's
+/// Administración left an already-open query window for that same
+/// database still enforcing the old "Solo lectura" guard until closed and
+/// reopened. `SharedPreferences.getInstance()` only loads from the
+/// platform side once per isolate and caches after that — `.reload()` is
+/// the one call that genuinely re-fetches, so this reflects whatever the
+/// most recent `ServersRepository.saveAll` wrote, from any window. Applied
+/// unconditionally (main window included) rather than special-cased to
+/// query windows: the main window's own edits already flow through
+/// `serversProvider` before this ever runs, so the reload here is just a
+/// harmless redundant disk read for that case, not a behavior change.
+Future<List<QueryTarget>> _withLiveModes(
+    Ref ref, List<QueryTarget> targets) async {
+  final prefs = ref.read(sharedPreferencesProvider);
+  await prefs.reload();
+  final liveState = ref.read(serversRepositoryProvider).load();
+
+  QueryTarget refresh(QueryTarget target) {
+    // "Sin grupo" target — its live copy lives in `ungroupedDatabases`,
+    // not inside any server's own list.
+    final liveDb = target.server == null
+        ? liveState.ungroupedDatabases
+            .where((d) => d.id == target.database.id)
+            .firstOrNull
+        : liveState.servers
+            .where((s) => s.id == target.server!.id)
+            .firstOrNull
+            ?.databases
+            .where((d) => d.id == target.database.id)
+            .firstOrNull;
+    return liveDb == null
+        ? target
+        : (
+            server: target.server,
+            database: target.database.copyWith(mode: liveDb.mode)
+          );
+  }
+
+  return [for (final t in targets) refresh(t)];
 }
 
 /// Shared by [QueryRunNotifier.run] and `TabQueryRunNotifier.run` — real
@@ -591,7 +639,8 @@ Future<void> runQueryFlow({
   );
   if (statements.isEmpty) return;
 
-  final paging = preparePagination(targets, statements);
+  final liveTargets = await _withLiveModes(ref, targets);
+  final paging = preparePagination(liveTargets, statements);
 
   final cancellationToken = CancellationToken();
   setCancellationToken(cancellationToken);
@@ -599,7 +648,7 @@ Future<void> runQueryFlow({
 
   var result = await runStatementAndRecord(
     ref: ref,
-    targets: targets,
+    targets: liveTargets,
     statements: paging.toRun,
     displayStatements: statements,
     cancellationToken: cancellationToken,

@@ -73,19 +73,6 @@ dependencies:
   intl: ^0.19.0 # formato de fecha/hora en Historial
   uuid: ^4.4.0 # ids de servidores/bases de datos/favoritos
 
-  # SOLO EVALUACIÓN, 2026-07-24 — motor de edición de código real (líneas,
-  # resaltado de sintaxis, buscar/reemplazar, autocompletado), en vez del
-  # TextField armado a mano en features/consulta/presentation/widgets/
-  # sql_editor.dart. Prototipo aislado en
-  # features/consulta/presentation/re_editor_prototype_screen.dart,
-  # alcanzable desde un botón temporal en Apariencia — no está conectado al
-  # editor real todavía. Quitar esta dependencia (y el archivo del
-  # prototipo) si se decide no migrar.
-  re_editor: ^0.10.0
-  # Transitiva de re_editor, pero se importa directo en el prototipo para
-  # el resaltado de PostgreSQL (langPgsql) y el tema de colores.
-  re_highlight: ^0.0.3
-
 dev_dependencies:
   flutter_test:
     sdk: flutter

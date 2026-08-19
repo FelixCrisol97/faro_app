@@ -22,7 +22,10 @@ class QueryTabMeta {
   });
 
   final String id;
-  final String serverId;
+
+  /// `null` — a "Sin grupo" database (2026-08-13); a tab opens the same
+  /// either way, see [resolvedTabTargetProvider].
+  final String? serverId;
   final String databaseId;
 }
 
@@ -45,7 +48,7 @@ class QueryTabsNotifier extends Notifier<QueryTabsState> {
 
   /// Always creates a new tab — see [QueryTabMeta]'s doc comment for why
   /// this doesn't dedup by database.
-  String openTab({required String serverId, required String databaseId}) {
+  String openTab({required String? serverId, required String databaseId}) {
     final id = _uuid.v4();
     state = QueryTabsState(
       tabs: [
@@ -115,8 +118,16 @@ final resolvedTabTargetProvider =
       .where((t) => t.id == tabId)
       .firstOrNull;
   if (meta == null) return null;
+  if (meta.serverId == null) {
+    final database = ref
+        .watch(ungroupedDatabasesProvider)
+        .where((d) => d.id == meta.databaseId)
+        .firstOrNull;
+    if (database == null) return null;
+    return (server: null, database: database);
+  }
   final server = ref
-      .watch(serversProvider)
+      .watch(serverListProvider)
       .where((s) => s.id == meta.serverId)
       .firstOrNull;
   final database =

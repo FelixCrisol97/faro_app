@@ -6,12 +6,15 @@ import '../../../data/providers/servers_providers.dart';
 
 /// Identifies which database's catalog to introspect — a servidor's id
 /// alone isn't enough since credentials/host live per [DatabaseEntry].
-typedef SchemaExplorerKey = ({String serverId, String databaseId});
+/// [serverId] `null` — a "Sin grupo" database (2026-08-13): browsing a
+/// database's catalog never depended on which group it's in, only on its
+/// own engine/credentials, so this works identically either way.
+typedef SchemaExplorerKey = ({String? serverId, String databaseId});
 
 /// [SchemaExplorerKey] plus which object type to fetch — see
 /// [schemaTypeExplorerProvider].
 typedef SchemaTypeExplorerKey = ({
-  String serverId,
+  String? serverId,
   String databaseId,
   SchemaObjectType type,
 });
@@ -29,8 +32,8 @@ typedef SchemaTypeExplorerKey = ({
 /// once) freeze the UI. Splitting into one provider **per (database,
 /// object type)** and only having the sidebar `ref.watch` a given type's
 /// entry once its category header is actually expanded (see
-/// `_SchemaTypeGroup` in `server_sidebar.dart`) means expanding "Tablas"
-/// never touches "Funciones" at all, and vice versa — true lazy loading,
+/// `SchemaTypeGroup` in `shared/navigation/tree/schema_type_group.dart`)
+/// means expanding "Tablas" never touches "Funciones" at all, and vice versa — true lazy loading,
 /// not just a lazy *button press* in front of an eager fetch.
 ///
 /// Still a plain `.family` (not `.autoDispose`): once a category has been
@@ -64,7 +67,7 @@ final schemaTypeExplorerProvider = FutureProvider.family<List<SchemaObject>,
 });
 
 /// [SchemaExplorerKey] plus a name filter — see [schemaSearchProvider].
-typedef SchemaSearchKey = ({String serverId, String databaseId, String query});
+typedef SchemaSearchKey = ({String? serverId, String databaseId, String query});
 
 /// Filters across **every** object type at once, for the sidebar's schema
 /// search box — a real client database can have thousands of tables and

@@ -11,12 +11,13 @@ import 'sql_guard.dart';
 
 export '../datasources/cancellation_token.dart' show CancellationToken;
 
-/// Resolves the login for one database, given its parent servidor's id and
-/// its own id — backed by `CredentialsRepository.resolve` (server default
-/// with an optional per-database override), async because that's backed by
-/// the OS secure credential store.
+/// Resolves the login for one database, given its parent servidor's id
+/// (`null` for a "Sin grupo" database) and its own id — backed by
+/// `CredentialsRepository.resolve` (server default with an optional
+/// per-database override), async because that's backed by the OS secure
+/// credential store.
 typedef CredentialsResolver = Future<DatabaseCredentials> Function(
-    String serverId, String databaseId);
+    String? serverId, String databaseId);
 
 class _DbTaskResult {
   const _DbTaskResult({required this.outcome, this.raw});
@@ -60,7 +61,7 @@ class QueryExecutionService {
     void Function(int completed, int total)? onProgress,
   }) async {
     final results = await Future.wait(targets.map((target) {
-      final connector = _connectors[target.server.engine];
+      final connector = _connectors[target.database.engine];
       if (connector == null) {
         // Every DbEngine value is always registered in practice
         // (dbConnectorsProvider) — this is a defensive per-target failure
@@ -70,11 +71,11 @@ class QueryExecutionService {
           outcome: DatabaseQueryOutcome(
             databaseId: target.database.id,
             databaseName: target.database.name,
-            serverName: target.server.name,
+            serverName: target.server?.name ?? 'Sin grupo',
             databaseHost: target.database.host,
             success: false,
-            errorMessage:
-                'No hay conector registrado para ${target.server.engine.label}.',
+            errorMessage: 'No hay conector registrado para '
+                '${target.database.engine.label}.',
           ),
         ));
       }
@@ -177,16 +178,17 @@ class QueryExecutionService {
   /// it always was.
   Future<_DbTaskResult> _runOne(
     DbConnector connector,
-    Server server,
+    Server? server,
     DatabaseEntry db,
     List<String> statements,
     CredentialsResolver resolveCredentials,
     CancellationToken? cancellationToken,
     void Function(int completed, int total)? onProgress,
   ) async {
-    final credentials = await resolveCredentials(server.id, db.id);
-    final config = DatabaseConnectionConfig.forDatabase(
-        server: server, database: db, credentials: credentials);
+    final serverName = server?.name ?? 'Sin grupo';
+    final credentials = await resolveCredentials(server?.id, db.id);
+    final config =
+        DatabaseConnectionConfig.forDatabase(database: db, credentials: credentials);
 
     RawQueryResult? lastRaw;
     for (var i = 0; i < statements.length; i++) {
@@ -207,7 +209,7 @@ class QueryExecutionService {
           outcome: DatabaseQueryOutcome(
             databaseId: db.id,
             databaseName: db.name,
-            serverName: server.name,
+            serverName: serverName,
             databaseHost: db.host,
             success: false,
             blocked: true,
@@ -219,7 +221,7 @@ class QueryExecutionService {
           outcome: DatabaseQueryOutcome(
             databaseId: db.id,
             databaseName: db.name,
-            serverName: server.name,
+            serverName: serverName,
             databaseHost: db.host,
             success: false,
             errorMessage: describe(e.toString()),
@@ -239,7 +241,7 @@ class QueryExecutionService {
       outcome: DatabaseQueryOutcome(
         databaseId: db.id,
         databaseName: db.name,
-        serverName: server.name,
+        serverName: serverName,
         databaseHost: db.host,
         success: true,
         rowCount: lastRaw?.rows.length ?? 0,

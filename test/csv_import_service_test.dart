@@ -51,12 +51,13 @@ class _FakeConnector implements DbConnector {
   }
 }
 
-const _server = Server(id: 's1', name: 'Servidor', engine: DbEngine.postgres);
+const _server = Server(id: 's1', name: 'Servidor');
 const _database = DatabaseEntry(
     id: 'd1',
     name: 'Bodega',
     host: 'localhost:5432',
     databaseName: 'bodega',
+    engine: DbEngine.postgres,
     // Real gotcha (see project memory): DatabaseEntry.mode defaults to
     // readOnly — a fixture that omits it silently blocks every mutation
     // (import is always a mutation), masking whatever this test is
@@ -67,19 +68,23 @@ const _readOnlyDatabase = DatabaseEntry(
     name: 'Bodega RO',
     host: 'localhost:5432',
     databaseName: 'bodega',
+    engine: DbEngine.postgres,
     mode: ServerMode.readOnly);
 
 final _columns = [
   const TableColumn(
       name: 'sku', dataType: 'text', nullable: false, isPrimaryKey: true),
   const TableColumn(
-      name: 'cantidad', dataType: 'integer', nullable: false, isPrimaryKey: false),
+      name: 'cantidad',
+      dataType: 'integer',
+      nullable: false,
+      isPrimaryKey: false),
   const TableColumn(
       name: 'notas', dataType: 'text', nullable: true, isPrimaryKey: false),
 ];
 
-Future<List<TableColumn>> _fetchColumns(
-        String serverId, String databaseId, String schema, String table) async =>
+Future<List<TableColumn>> _fetchColumns(String? serverId, String databaseId,
+        String schema, String table) async =>
     _columns;
 
 void main() {
@@ -218,7 +223,8 @@ void main() {
       expect(connector.lastRows, null);
     });
 
-    test('ignores an extra CSV column not present on the real table '
+    test(
+        'ignores an extra CSV column not present on the real table '
         '(e.g. origen_bd from a previous Faro export)', () async {
       final connector = _FakeConnector();
       final service =
@@ -304,8 +310,7 @@ void main() {
 
     test(
         'remaps an insertRows-reported failure index back to the original '
-        'CSV row index when an earlier row already failed coercion',
-        () async {
+        'CSV row index when an earlier row already failed coercion', () async {
       // Sent-to-connector list is [row1, row2] (row0 dropped by coercion);
       // the fake connector fails index 1 of *that* list (row2) — the
       // outcome must report it as original CSV row index 2, not 1.

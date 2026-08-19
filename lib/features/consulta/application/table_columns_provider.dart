@@ -8,7 +8,7 @@ import '../../../data/providers/servers_providers.dart';
 /// so `.family` gets structural equality for free, same reasoning as
 /// `SchemaExplorerKey` in `schema_explorer_provider.dart`.
 typedef TableColumnsKey = ({
-  String serverId,
+  String? serverId,
   String databaseId,
   String schema,
   String objectName,

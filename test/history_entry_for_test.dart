@@ -5,9 +5,13 @@ import 'package:faro/data/models/server.dart';
 import 'package:faro/features/consulta/application/consulta_providers.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-const _server = Server(id: 's1', name: 'Servidor', engine: DbEngine.postgres);
+const _server = Server(id: 's1', name: 'Servidor');
 const _database = DatabaseEntry(
-    id: 'd1', name: 'Bodega', host: 'localhost:5432', databaseName: 'bodega');
+    id: 'd1',
+    name: 'Bodega',
+    host: 'localhost:5432',
+    databaseName: 'bodega',
+    engine: DbEngine.postgres);
 const _target = (server: _server, database: _database);
 
 QueryResult _result(int rowCount) => QueryResult(

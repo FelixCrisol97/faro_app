@@ -4,28 +4,23 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:uuid/uuid.dart';
 
 import '../../../../core/constants/db_engine.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../data/models/database_entry.dart';
-import '../../../../data/models/favorite_query.dart';
 import '../../../../data/providers/servers_providers.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_card.dart';
-import '../../../../shared/widgets/app_dialog.dart';
 import '../../../../shared/widgets/app_tag.dart';
 import '../../../../shared/utils/file_paths.dart';
-import '../../../../shared/widgets/add_server_dialog.dart';
+import '../../../../shared/widgets/add_database_dialog.dart';
 import '../../../../shared/widgets/centered_scrollable.dart';
-import '../../../favoritos/application/favoritos_providers.dart';
+import '../../../../shared/widgets/save_favorite_dialog.dart';
 import '../../application/consulta_providers.dart';
 import '../../application/query_tabs_providers.dart';
 import '../../application/sql_formatter.dart';
 import 'sql_editor.dart';
-
-const _uuid = Uuid();
 
 /// README.md "Main — toolbar card": header row, action row, SQL editor.
 class ToolbarCard extends ConsumerWidget {
@@ -54,28 +49,35 @@ class ToolbarCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final colors = context.appTheme.colors;
     final typography = context.appTheme.typography;
-    final servers = ref.watch(serversProvider);
+    final servers = ref.watch(serverListProvider);
+    final ungroupedDatabases = ref.watch(ungroupedDatabasesProvider);
 
-    if (servers.isEmpty) {
-      // Real action right here instead of just pointing at Administración
-      // — the sidebar's own "+ Registrar servidor" (server_sidebar.dart)
-      // already opens this same dialog from this same screen, so telling
-      // the user to go elsewhere was redundant busywork, not a real
-      // requirement (2026-08-02, user-reported: "se me hace inútil").
+    // 2026-08-13: "Registrar servidor" removed as a concept a user creates
+    // explicitly — grouping is optional and happens later, by dragging
+    // databases together (see `Server`'s doc comment). A database is fully
+    // usable with zero servers, so this empty state only shows when there's
+    // truly nothing to query yet, and points at creating a database
+    // directly instead.
+    if (servers.isEmpty && ungroupedDatabases.isEmpty) {
+      // Real action right here instead of just pointing at the tree
+      // — the tree's own "+ Agregar base de datos" (`app_tree.dart`)
+      // already opens this same dialog right next to this screen, so
+      // telling the user to go elsewhere was redundant busywork, not a
+      // real requirement (2026-08-02, user-reported: "se me hace inútil").
       return AppCard(
         child: CenteredScrollable(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(LucideIcons.server, size: 32, color: colors.textMuted),
+              Icon(LucideIcons.database, size: 32, color: colors.textMuted),
               const SizedBox(height: AppSpacing.space2),
-              Text('Todavía no hay servidores registrados.',
+              Text('Todavía no hay bases de datos registradas.',
                   style: typography.body),
               const SizedBox(height: AppSpacing.space3),
               AppButton(
-                label: 'Registrar servidor',
+                label: 'Agregar base de datos',
                 icon: LucideIcons.plus,
-                onPressed: () => showAddServerDialog(context, ref),
+                onPressed: () => showAddDatabaseDialog(context, ref, null),
               ),
             ],
           ),
@@ -117,7 +119,9 @@ class ToolbarCard extends ConsumerWidget {
     final modeLabel = _aggregateModeLabel(selectedDatabases);
     final totalDatabases =
         servers.fold<int>(0, (sum, s) => sum + s.databases.length);
-    final serversInvolved = {for (final t in targets) t.server.id: t.server.name};
+    final serversInvolved = {
+      for (final t in targets) (t.server?.id ?? ''): (t.server?.name ?? 'Sin grupo')
+    };
     // With exactly one database targeted (the common case — "Consulta
     // masiva" off, the default, only ever allows one at a time — or a
     // query tab, always exactly one by construction) the title shows both
@@ -128,7 +132,7 @@ class ToolbarCard extends ConsumerWidget {
     final headerTitle = switch (serversInvolved.length) {
       0 => 'Consulta',
       1 => targets.length == 1
-          ? '${targets.first.server.name} · ${targets.first.database.name}'
+          ? '${targets.first.server?.name ?? 'Sin grupo'} · ${targets.first.database.name}'
           : serversInvolved.values.first,
       _ => '${serversInvolved.length} servidores',
     };
@@ -324,39 +328,12 @@ class ToolbarCard extends ConsumerWidget {
 
   /// Favoritos stays one shared list across every window/tab (same as
   /// Historial) — never per-tab, only *where the text comes from* is
-  /// tab-scoped.
+  /// tab-scoped. Delegates to `showSaveFavoriteDialog` (extracted
+  /// 2026-08-13 so Historial's rows can offer the same action) — this
+  /// wrapper only exists to pull the text out of `editorState`.
   Future<void> _saveFavorite(
-      BuildContext context, WidgetRef ref, QueryEditorState editorState) async {
-    final text = editorState.text;
-    if (text.trim().isEmpty) return;
-    final nameController = TextEditingController();
-
-    void submit() => Navigator.of(context).pop(nameController.text.trim());
-
-    final name = await showAppDialog<String>(
-      context: context,
-      title: 'Guardar como favorito',
-      body: TextField(
-        controller: nameController,
-        decoration: const InputDecoration(labelText: 'Nombre'),
-        autofocus: true,
-        onSubmitted: (_) => submit(),
-      ),
-      actions: [
-        AppButton(
-          label: 'Guardar',
-          variant: AppButtonVariant.primary,
-          onPressed: submit,
-        ),
-      ],
-    );
-
-    if (name == null || name.isEmpty) return;
-    ref.read(favoritesProvider.notifier).add(FavoriteQuery(
-        id: _uuid.v4(),
-        name: name,
-        queryText: text,
-        createdAt: DateTime.now()));
+      BuildContext context, WidgetRef ref, QueryEditorState editorState) {
+    return showSaveFavoriteDialog(context, ref, editorState.text);
   }
 }
 

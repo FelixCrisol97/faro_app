@@ -4,7 +4,8 @@ import '../../../data/models/table_column.dart';
 /// Pure SQL-text generators for the schema tree's context-menu actions —
 /// no provider/state involved, just string assembly from already-fetched
 /// [TableColumn]s. Generated SQL is inserted into the editor via
-/// `sqlEditorProvider.notifier.loadText` (see `server_sidebar.dart`).
+/// `sqlEditorProvider.notifier.loadText` (see
+/// `shared/navigation/tree/schema_object_row.dart`).
 
 String generateSelectScript(DbEngine engine, String schema, String name) =>
     switch (engine) {

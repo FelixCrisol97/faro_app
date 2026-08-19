@@ -1,50 +1,86 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../features/administracion/presentation/administracion_screen.dart';
-import '../../features/apariencia/presentation/apariencia_screen.dart';
+import '../../core/theme/app_theme.dart';
 import '../../features/consulta/presentation/consulta_screen.dart';
-import '../../features/favoritos/presentation/favoritos_screen.dart';
-import '../../features/historial/presentation/historial_screen.dart';
-import 'app_nav_bar.dart';
-import 'app_screen.dart';
+import 'side_panel/side_panel.dart';
+import 'side_panel/side_panel_overlay.dart';
+import 'tree/app_tree.dart';
 
-/// The persistent-nav-bar + current-screen shell (README.md "Interactions
-/// & behavior": "Top nav is a persistent 5-item link bar").
+/// The app's root layout — a permanent left [AppTree] (server/database
+/// picker + schema explorer) beside Consulta's content, with an optional
+/// [SidePanelOverlay] drawn over the tree when Historial/Favoritos/
+/// Apariencia is open.
 ///
-/// All 5 screens are kept mounted at once via [IndexedStack] (only the
-/// active one is painted/hit-testable) instead of switching which single
-/// widget is built — real bug, user-reported: with only the active screen
-/// ever in the tree, navigating away and back tore down and rebuilt every
-/// screen from scratch, silently resetting any purely-local widget `State`
-/// along the way (Consulta's sidebar drag-resized width, the editor/results
-/// split's dragged height, the schema tree's expansion state — none of
-/// that lives in a Riverpod provider, all of it is a `StatefulWidget`
-/// field). [IndexedStack] keeps every screen's `State` alive for the
-/// lifetime of the app, the same tradeoff already accepted for a small,
-/// fixed set of things (5 screens here) — unlike query tabs, which are
-/// deliberately NOT all kept mounted at once (see
-/// `query_tab_workspace.dart`) because that count is unbounded and each tab
-/// carries a heavy results table; 5 fixed nav screens is a different, safe
-/// scale for this pattern.
+/// **2026-08-12: replaces the old 5-tab `AppNavBar` + `IndexedStack`.**
+/// Consulta is no longer one of several "screens" to navigate to — it's
+/// just what's always here; Administración was absorbed into [AppTree]
+/// itself (deleted as a separate screen); Historial/Favoritos/Apariencia
+/// became overlay panels instead of full-screen swaps (see
+/// `side_panel.dart`). [ConsultaScreen] used to sit inside an
+/// [IndexedStack] specifically to keep its `State` alive across
+/// navigation (its own local widget state — sidebar width, split-pane
+/// height, tree expansion — used to reset on every screen switch
+/// otherwise); it no longer needs that here since it's the *only* thing in
+/// this `Stack`'s base layer now, never rebuilt out from under itself.
 class AppShell extends ConsumerWidget {
   const AppShell({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final screen = ref.watch(currentScreenProvider);
-
+    final colors = context.appTheme.colors;
+    // Real bug found live (user screenshot): `Scaffold` (used here before
+    // 2026-08-12) doesn't just draw the old app bar — it also wraps its
+    // body in a `Material` ancestor, which `TextField`/`InkWell`/etc.
+    // throughout the app rely on implicitly. Swapping it for a plain
+    // `ColoredBox`/`Row`/`Stack` dropped that ancestor for everything
+    // under it, crashing the SQL editor's `TextField` with "No Material
+    // widget found." `Scaffold(appBar: null, body: ...)` keeps the
+    // Material ancestor without bringing back the deleted nav bar.
     return Scaffold(
-      appBar: const AppNavBar(),
-      body: IndexedStack(
-        index: screen.index,
-        children: const [
-          ConsultaScreen(),
-          HistorialScreen(),
-          FavoritosScreen(),
-          AdministracionScreen(),
-          AparienciaScreen(),
+      backgroundColor: colors.background,
+      body: const Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AppTree(),
+          Expanded(
+            child: Stack(
+              children: [
+                ConsultaScreen(),
+                // Placed *before* SidePanelOverlay so the panel's own
+                // content still gets first dibs on any click within its
+                // own bounds (painted after = hit-tested first) — only
+                // clicks landing outside the panel (over ConsultaScreen's
+                // visible area) reach this and close it.
+                _PanelDismissBarrier(),
+                SidePanelOverlay(),
+              ],
+            ),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+/// Click-anywhere-else-to-close for the side panel — user-reported
+/// 2026-08-13: clicking elsewhere in the app didn't dismiss an open
+/// Historial/Favoritos/Apariencia panel. Invisible and hit-test-inert
+/// (`SizedBox.shrink`) when no panel is open, so it never intercepts
+/// ordinary clicks on the editor the rest of the time.
+class _PanelDismissBarrier extends ConsumerWidget {
+  const _PanelDismissBarrier();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final panel = ref.watch(activeSidePanelProvider);
+    if (panel == null) return const SizedBox.shrink();
+
+    return Positioned.fill(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => ref.read(activeSidePanelProvider.notifier).state = null,
+        child: const SizedBox.expand(),
       ),
     );
   }

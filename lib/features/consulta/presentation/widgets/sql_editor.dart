@@ -27,8 +27,10 @@ import 'editor/zoom_controller.dart';
 /// Etapa 1 de migración a `re_editor` (colores/fuente conectados, sin
 /// autocompletado/buscador/zoom todavía) — el usuario prefirió quedarse
 /// con esta versión ya afinada ("me gusta así, de cualquier forma es para
-/// mí"). El prototipo aislado (`re_editor_prototype_screen.dart`, botón en
-/// Apariencia) se quedó como está, sin conectarse a nada real.
+/// mí"). El prototipo aislado que quedó de esa evaluación (botón en
+/// Apariencia) se borró por completo el 2026-08-13 — la decisión de no
+/// migrar quedó definitiva, junto con las dependencias `re_editor`/
+/// `re_highlight` en `pubspec.yaml`.
 ///
 /// Este archivo owns la lógica core de edición de texto y el popup de
 /// autocompletado (ambos ligados al árbol de renderizado propio de este

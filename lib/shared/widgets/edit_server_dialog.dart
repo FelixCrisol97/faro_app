@@ -6,14 +6,21 @@ import '../../data/providers/servers_providers.dart';
 import 'app_button.dart';
 import 'app_dialog.dart';
 
-/// "Editar servidor" — Consulta's sidebar tree only ever showed
-/// `server.name` as plain read-only text (Administración edits it inline
-/// via `InlineEditableText` right in the card), so there was no way to
-/// rename a server without leaving Consulta. Same extraction pattern as
-/// `add_server_dialog.dart`, reusing `ServersNotifier.renameServer` — the
-/// same mutator `server_admin_card.dart`'s inline field already calls, so
-/// this doesn't add any new data-layer behavior, just another entry point
-/// to it.
+/// "Editar servidor" — the tree only ever showed `server.name` as plain
+/// read-only text, so there was no way to rename a server without a
+/// dedicated entry point. Reuses `ServersNotifier.renameServer` — the same
+/// mutator Administración's
+/// old inline field called before that screen was absorbed into the tree
+/// (2026-08-12), so this doesn't add any new data-layer behavior, just
+/// another entry point to it.
+///
+/// **Engine selector removed 2026-08-13** — it briefly lived here
+/// (2026-08-12) to correct a guessed engine when merging two "Sin grupo"
+/// databases created a new server, but engine moved off `Server` onto
+/// `DatabaseEntry` that same day (user-requested: "cada grupo/servidor
+/// puede tener diferentes motores") — there's no longer a single
+/// server-level engine to guess or correct. See
+/// `edit_database_dialog.dart` for the per-database equivalent instead.
 Future<void> showEditServerDialog(
     BuildContext context, WidgetRef ref, Server server) async {
   final nameController = TextEditingController(text: server.name);

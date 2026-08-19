@@ -15,28 +15,28 @@ import '../../data/providers/servers_providers.dart';
 /// sidebar. Extracted here (rather than duplicated) so both call sites
 /// share the exact same logic — same pattern as the dialogs in this folder.
 Future<void> testDatabaseConnection(
-    WidgetRef ref, Server server, DatabaseEntry database) async {
+    WidgetRef ref, Server? server, DatabaseEntry database) async {
   final notifier = ref.read(serversProvider.notifier);
   notifier.setConnectionTestStatus(
-      server.id, database.id, ConnectionTestStatus.testing);
+      server?.id, database.id, ConnectionTestStatus.testing);
   try {
-    final connector = ref.read(dbConnectorsProvider)[server.engine]!;
+    final connector = ref.read(dbConnectorsProvider)[database.engine]!;
     final credentials = await ref
         .read(credentialsRepositoryProvider)
-        .resolve(server.id, database.id);
+        .resolve(server?.id, database.id);
     final config = DatabaseConnectionConfig.forDatabase(
-        server: server, database: database, credentials: credentials);
+        database: database, credentials: credentials);
     await connector.testConnection(config);
     notifier.setConnectionTestStatus(
-        server.id, database.id, ConnectionTestStatus.connected);
+        server?.id, database.id, ConnectionTestStatus.connected);
   } catch (e, st) {
     // Still printed for anyone debugging from a console, but the status
     // itself also carries this via testError — no more "Error" with no way
     // to find out why.
     debugPrint(
-        'Probar conexión falló para "${database.name}" (${server.name}): $e\n$st');
+        'Probar conexión falló para "${database.name}" (${server?.name ?? 'Sin grupo'}): $e\n$st');
     notifier.setConnectionTestStatus(
-        server.id, database.id, ConnectionTestStatus.failed,
+        server?.id, database.id, ConnectionTestStatus.failed,
         errorMessage: e.toString());
   }
 }

@@ -369,8 +369,8 @@ enum _CellMenuAction { copyCell, copyRow, copyTable }
 
 /// Drag handle at a header cell's right edge to manually widen/narrow that
 /// one column — same hover-highlight + wider-than-visible hit target
-/// pattern as the sidebar's own panel-width resize handle
-/// (`widgets/sidebar/server_sidebar.dart`'s `_ResizeHandle`), just not
+/// pattern as the tree's own panel-width resize handle
+/// (`shared/navigation/tree/app_tree.dart`'s `_ResizeHandle`), just not
 /// shared with it: that one drags a whole panel horizontally with a
 /// vertical-line look, this one lives inside a single grid header cell —
 /// different enough hosts that forcing one shared widget over both would
