@@ -1,4 +1,4 @@
-# Miscellaneous
+# Miscellaneous (repo-wide)
 *.class
 *.log
 *.pyc
@@ -23,23 +23,5 @@ migrate_working_dir/
 # is commented out by default.
 #.vscode/
 
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
-.dart_tool/
-.flutter-plugins-dependencies
-.pub-cache/
-.pub/
-/build/
-/coverage/
-
-# Symbolication related
-app.*.symbols
-
-# Obfuscation related
-app.*.map.json
-
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+# Reglas específicas de cada stack viven en su propia carpeta:
+# flutter_faroapp/.gitignore, java_faroapp/.gitignore

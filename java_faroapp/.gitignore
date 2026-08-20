@@ -1,0 +1,11 @@
+# Genérico Java/Maven/Gradle — ajustar según la herramienta de build elegida.
+*.class
+target/
+build/
+out/
+.gradle/
+.mvn/wrapper/maven-wrapper.jar
+*.jar
+!gradle-wrapper.jar
+.idea/
+*.iml
