@@ -52,7 +52,9 @@ class QueryWindowScreen extends ConsumerWidget {
                     const SizedBox(width: AppSpacing.space2),
                     Expanded(
                       child: Text(
-                        '${target.server?.name ?? 'Sin grupo'} · ${target.database.name}',
+                        target.server == null
+                            ? target.database.name
+                            : '${target.server!.name} · ${target.database.name}',
                         style: typography.heading.copyWith(fontSize: 16),
                         overflow: TextOverflow.ellipsis,
                       ),

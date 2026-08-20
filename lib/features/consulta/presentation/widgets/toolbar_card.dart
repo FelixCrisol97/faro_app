@@ -120,7 +120,7 @@ class ToolbarCard extends ConsumerWidget {
     final totalDatabases =
         servers.fold<int>(0, (sum, s) => sum + s.databases.length);
     final serversInvolved = {
-      for (final t in targets) (t.server?.id ?? ''): (t.server?.name ?? 'Sin grupo')
+      for (final t in targets) (t.server?.id ?? ''): t.server?.name
     };
     // With exactly one database targeted (the common case — "Consulta
     // masiva" off, the default, only ever allows one at a time — or a
@@ -129,11 +129,20 @@ class ToolbarCard extends ConsumerWidget {
     // databases on the same server (mass mode) still collapse to just the
     // server name — no single database to name unambiguously in that
     // case. Not shown at all when pinned — see below.
+    //
+    // **"Sin grupo" dropped from the title 2026-08-19** — user report: it
+    // added nothing actionable ("para qué verga quiero saber eso"), just
+    // narrower screen space for the part that matters. A single ungrouped
+    // database now shows only its own name; several selected together
+    // (mass mode) fall back to a count instead of repeating the word.
     final headerTitle = switch (serversInvolved.length) {
       0 => 'Consulta',
       1 => targets.length == 1
-          ? '${targets.first.server?.name ?? 'Sin grupo'} · ${targets.first.database.name}'
-          : serversInvolved.values.first,
+          ? (targets.first.server == null
+              ? targets.first.database.name
+              : '${targets.first.server!.name} · ${targets.first.database.name}')
+          : (serversInvolved.values.first ??
+              '${targets.length} bases sin grupo'),
       _ => '${serversInvolved.length} servidores',
     };
     // A query window already has its own header naming the server/database

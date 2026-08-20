@@ -1,4 +1,5 @@
 import 'package:faro/sql_analysis/analysis/scope_resolver.dart';
+import 'package:faro/sql_analysis/analysis/script_offset.dart';
 import 'package:faro/sql_analysis/ast/statements.dart';
 import 'package:faro/sql_analysis/lexer/sql_lexer.dart';
 import 'package:faro/sql_analysis/parser/sql_parser.dart';
@@ -12,7 +13,7 @@ Statement _statementOf(String sql) => SqlParser.parse(lexSql(sql)).statement;
 ScopeInfo _scopeAt(String sql, String marker) {
   final offset = sql.indexOf(marker);
   expect(offset, greaterThanOrEqualTo(0), reason: 'marker not found: $marker');
-  return resolveScopeAt(_statementOf(sql), offset);
+  return resolveScopeAt(_statementOf(sql), RelativeOffset(offset));
 }
 
 void main() {
@@ -187,7 +188,8 @@ void main() {
 
   group('resolveScopeAt — UnknownStatement', () {
     test('never throws, returns an empty scope', () {
-      final scope = resolveScopeAt(_statementOf('CREATE TABLE t (id int)'), 5);
+      final scope = resolveScopeAt(
+          _statementOf('CREATE TABLE t (id int)'), const RelativeOffset(5));
       expect(scope.visibleTables, isEmpty);
     });
   });

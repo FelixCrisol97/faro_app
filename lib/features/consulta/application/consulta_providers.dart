@@ -281,14 +281,20 @@ class QueryRunState {
 
   bool get isRunning => status == QueryRunStatus.running;
 
-  /// Only touches the fields explicitly passed — every other constructor
-  /// call site in this file builds a `QueryRunState` fresh instead (a new
-  /// `run()` deliberately starts from a blank slate, not a copy of
-  /// whatever the previous run left behind in `paginated`/`released`/etc.).
-  /// This exists specifically for [applyPaginationCap]/`loadNextPage`,
-  /// which only ever adjust a handful of fields on an already-`done` state.
+  /// Standard copyWith: every field can be overridden explicitly, an
+  /// omitted one keeps its current value. In practice only
+  /// [applyPaginationCap]/`loadNextPage` call this today — every other
+  /// constructor call site in this file builds a `QueryRunState` fresh
+  /// instead, since a new `run()` deliberately starts from a blank slate,
+  /// not a copy of whatever the previous run left behind in
+  /// `paginated`/`released`/etc.
   QueryRunState copyWith({
+    QueryRunStatus? status,
     QueryResult? result,
+    int? currentStatement,
+    int? totalStatements,
+    String? queryText,
+    bool? released,
     bool? paginated,
     bool? hasMore,
     bool? loadingMore,
@@ -296,12 +302,12 @@ class QueryRunState {
     String? pagingOriginalStatement,
   }) =>
       QueryRunState(
-        status: status,
+        status: status ?? this.status,
         result: result ?? this.result,
-        currentStatement: currentStatement,
-        totalStatements: totalStatements,
-        queryText: queryText,
-        released: released,
+        currentStatement: currentStatement ?? this.currentStatement,
+        totalStatements: totalStatements ?? this.totalStatements,
+        queryText: queryText ?? this.queryText,
+        released: released ?? this.released,
         paginated: paginated ?? this.paginated,
         hasMore: hasMore ?? this.hasMore,
         loadingMore: loadingMore ?? this.loadingMore,

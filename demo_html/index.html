@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light" data-accent="indigo">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Faro — Demo interactiva</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="demo-banner">DEMO — Propuesta Faro · réplica visual e interactiva de la app real · datos ficticios</div>
+
+<div id="app">
+
+  <!-- ============== Sidebar: árbol único (servidores / sin grupo) ============== -->
+  <div class="tree-shell" id="tree-shell">
+    <div class="tree-search input-icon-wrap">
+      <span class="leading" id="tree-search-icon"></span>
+      <input class="input" id="tree-search-input" placeholder="Buscar servidor o base de datos…" style="padding-left:32px; font-size:13px;">
+      <span class="trailing hidden" id="tree-search-clear"></span>
+    </div>
+
+    <div class="tree-toprow">
+      <button class="btn btn-ghost flex-1" id="btn-add-database" style="justify-content:flex-start;"></button>
+      <div style="position:relative;">
+        <button class="btn-icon" id="btn-config-menu" data-tooltip="Configuración" style="width:32px;height:32px;border:none;"></button>
+      </div>
+    </div>
+
+    <div class="tree-panel-icons" id="tree-panel-icons"></div>
+
+    <div class="tree-divider"></div>
+
+    <div class="tree-modebar">
+      <div class="segmented flex-1" id="mass-mode-segmented"></div>
+      <button class="btn-icon hidden" id="btn-mass-discover" style="width:32px;height:32px;" data-tooltip="Descubrir más bases de datos en las IPs seleccionadas"></button>
+    </div>
+
+    <div class="tree-scroll" id="tree-scroll"></div>
+  </div>
+
+  <div class="tree-resize-handle" id="tree-resize"></div>
+
+  <!-- ============== Columna principal ============== -->
+  <div class="main-col">
+
+    <div class="tabs-bar" id="tabs-bar"></div>
+
+    <div class="query-area">
+      <div class="split-pane">
+
+        <div class="card toolbar-card" id="toolbar-card" style="flex: 0 0 40%;">
+          <div class="toolbar-header">
+            <div class="toolbar-title" id="toolbar-title">Consulta</div>
+            <div id="toolbar-mode-tag"></div>
+            <div class="t-caption" id="toolbar-selection-count"></div>
+          </div>
+
+          <div class="toolbar-actions" id="toolbar-actions"></div>
+
+          <div class="sql-editor-wrap">
+            <div class="sql-gutter" id="sql-gutter"></div>
+            <div class="sql-editor-scroll">
+              <div class="sql-highlight" id="sql-highlight"></div>
+              <textarea class="sql-editor-input" id="sql-editor-input" spellcheck="false" placeholder="SELECT * FROM ..."></textarea>
+              <div class="autocomplete-popup" id="autocomplete-popup"></div>
+              <div class="editor-search-toggle" id="editor-search-toggle" data-tooltip="Buscar (Ctrl+F)"></div>
+              <div class="editor-search-bar" id="editor-search-bar">
+                <input type="text" id="editor-search-input" placeholder="Buscar…">
+                <span class="editor-search-count" id="editor-search-count">0 de 0</span>
+                <span class="icon-tap" id="editor-search-prev"></span>
+                <span class="icon-tap" id="editor-search-next"></span>
+                <span class="icon-tap" id="editor-search-close"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="split-resize-handle" id="split-resize"></div>
+
+        <div class="card results-card" id="results-card">
+          <div class="empty-state" id="results-empty">
+            <div id="results-empty-icon"></div>
+            <div class="t-body">Sin resultados todavía — ejecuta una consulta con <b>F5</b>.</div>
+          </div>
+          <div id="results-body" class="hidden" style="display:flex; flex-direction:column; flex:1; min-height:0;">
+            <div class="results-pills-row">
+              <div class="results-pills flex-1" id="results-pills"></div>
+              <button class="icon-tap hidden" id="btn-release-results" data-tooltip="Liberar resultados de memoria (no cierra la pestaña)" style="width:32px;height:32px;"></button>
+              <button class="btn btn-secondary" id="btn-export-csv"></button>
+            </div>
+            <div class="results-table-wrap" id="results-table-wrap"></div>
+            <div class="load-more-bar hidden" id="load-more-bar"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Side panel: Historial / Favoritos / Apariencia -->
+    <div class="dismiss-barrier" id="dismiss-barrier"></div>
+    <div class="side-panel-overlay" id="side-panel">
+      <div class="side-panel-body">
+        <div class="side-panel-close-row">
+          <button class="btn-icon" id="btn-close-panel" style="border:none;"></button>
+        </div>
+        <div class="side-panel-content" id="side-panel-content"></div>
+      </div>
+      <div class="side-panel-resize" id="side-panel-resize"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Generic modal shell (dialogs render their body into #modal-content via JS) -->
+<div class="modal-backdrop" id="modal-backdrop">
+  <div class="modal" id="modal-el">
+    <div class="modal-header"><div class="modal-title" id="modal-title"></div></div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-actions" id="modal-actions"></div>
+  </div>
+</div>
+
+<!-- Context menu (right-click) -->
+<div class="ctx-menu" id="ctx-menu"></div>
+
+<div class="toast-stack" id="toast-stack"></div>
+
+<script src="icons.js"></script>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

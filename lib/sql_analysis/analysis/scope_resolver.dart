@@ -2,6 +2,7 @@ import '../ast/clauses.dart';
 import '../ast/statements.dart';
 import '../ast/table_ref.dart';
 import '../lexer/sql_token.dart';
+import 'script_offset.dart';
 
 /// Which real/pseudo table an alias (or bare table name, when there's no
 /// alias) refers to at some point in a query — the answer to "what does
@@ -72,12 +73,13 @@ class ScopeInfo {
 ///   are visible across nesting levels (they're visible to the whole
 ///   `WITH`-statement, not lexically scoped to one FROM the way table
 ///   aliases are).
-ScopeInfo resolveScopeAt(Statement statement, int cursorOffset) {
+ScopeInfo resolveScopeAt(Statement statement, RelativeOffset cursorOffset) {
+  final cursor = cursorOffset.value;
   final bindings = switch (statement) {
-    SelectStatement s => _resolveSelect(s, cursorOffset, const []),
-    InsertStatement s => _resolveInsert(s, cursorOffset),
-    UpdateStatement s => _resolveUpdate(s, cursorOffset),
-    DeleteStatement s => _resolveDelete(s, cursorOffset),
+    SelectStatement s => _resolveSelect(s, cursor, const []),
+    InsertStatement s => _resolveInsert(s, cursor),
+    UpdateStatement s => _resolveUpdate(s, cursor),
+    DeleteStatement s => _resolveDelete(s, cursor),
     UnknownStatement _ => const <TableBinding>[],
   };
   return ScopeInfo(visibleTables: bindings);

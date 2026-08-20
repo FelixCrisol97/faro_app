@@ -2,6 +2,7 @@ import '../ast/statements.dart';
 import '../lexer/sql_lexer.dart';
 import '../parser/diagnostic.dart';
 import '../parser/sql_parser.dart';
+import 'script_offset.dart';
 import 'script_splitter.dart';
 
 /// One statement out of a (possibly multi-statement) script, with its own
@@ -32,21 +33,28 @@ class AnalyzedStatement {
 
   final Statement statement;
 
-  /// Already absolute — see the class doc comment.
+  /// Already absolute — see the class doc comment. [SqlDiagnostic.start]/
+  /// [SqlDiagnostic.end] stay plain `int` (that type is shared with
+  /// `ParseResult`'s statement-relative diagnostics, produced before this
+  /// class shifts them) — [AbsoluteOffset]/[RelativeOffset] exist for this
+  /// class's own boundary specifically, not to retype every offset in the
+  /// module.
   final List<SqlDiagnostic> diagnostics;
 
   /// This statement's own span within the full script text.
-  final int scriptStart;
-  final int scriptEnd;
+  final AbsoluteOffset scriptStart;
+  final AbsoluteOffset scriptEnd;
 
   /// A statement-relative offset (as found on any node under [statement])
   /// → absolute script offset.
-  int toAbsoluteOffset(int relativeOffset) => relativeOffset + scriptStart;
+  AbsoluteOffset toAbsoluteOffset(RelativeOffset relativeOffset) =>
+      AbsoluteOffset(relativeOffset.value + scriptStart.value);
 
   /// Absolute script offset → statement-relative — the one conversion
   /// needed before passing an editor cursor position into
   /// `scope_resolver.dart`'s `resolveScopeAt(statement, ...)`.
-  int toRelativeOffset(int absoluteOffset) => absoluteOffset - scriptStart;
+  RelativeOffset toRelativeOffset(AbsoluteOffset absoluteOffset) =>
+      RelativeOffset(absoluteOffset.value - scriptStart.value);
 }
 
 /// Every statement found in [fullText], each independently lexed, parsed,
@@ -64,9 +72,10 @@ class SqlScriptAnalysis {
   /// the usual way a caller (the editor, keyed off the cursor position)
   /// picks which statement to run `scope_resolver.dart`'s `resolveScopeAt`
   /// against.
-  AnalyzedStatement? statementAt(int absoluteOffset) {
+  AnalyzedStatement? statementAt(AbsoluteOffset absoluteOffset) {
     for (final s in statements) {
-      if (absoluteOffset >= s.scriptStart && absoluteOffset <= s.scriptEnd) {
+      if (absoluteOffset.value >= s.scriptStart.value &&
+          absoluteOffset.value <= s.scriptEnd.value) {
         return s;
       }
     }
@@ -107,7 +116,7 @@ AnalyzedStatement _analyzeOne(SqlStatementSpan span) {
   return AnalyzedStatement(
     statement: result.statement,
     diagnostics: absoluteDiagnostics,
-    scriptStart: span.start,
-    scriptEnd: span.end,
+    scriptStart: AbsoluteOffset(span.start),
+    scriptEnd: AbsoluteOffset(span.end),
   );
 }

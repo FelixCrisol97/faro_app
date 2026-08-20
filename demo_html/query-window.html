@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light" data-accent="indigo">
+<head>
+<meta charset="UTF-8">
+<title>Faro — Ventana de consulta</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app" style="flex-direction:column;">
+  <div class="query-window-header">
+    <span id="qw-icon" style="color:var(--accent-base); display:flex;"></span>
+    <div class="t-heading flex-1" id="qw-title" style="font-size:16px;">Cargando…</div>
+    <div class="t-caption" id="qw-engine"></div>
+  </div>
+  <div class="query-window-body">
+    <div class="split-pane">
+      <div class="card toolbar-card" id="qw-toolbar" style="flex: 0 0 42%;">
+        <div class="toolbar-actions" style="margin-bottom:var(--space-3);">
+          <button class="btn btn-primary" id="qw-run"></button>
+          <button class="btn btn-secondary" id="qw-format"></button>
+        </div>
+        <div class="sql-editor-wrap">
+          <div class="sql-gutter" id="qw-gutter"></div>
+          <div class="sql-editor-scroll">
+            <div class="sql-highlight" id="qw-highlight"></div>
+            <textarea class="sql-editor-input" id="qw-input" spellcheck="false" placeholder="SELECT * FROM ..."></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="split-resize-handle" id="qw-split"></div>
+      <div class="card results-card" id="qw-results">
+        <div class="empty-state"><div class="t-body">Sin resultados todavía — ejecuta una consulta.</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast-stack" id="toast-stack"></div>
+<script src="icons.js"></script>
+<script src="data.js"></script>
+<script src="query-window.js"></script>
+</body>
+</html>

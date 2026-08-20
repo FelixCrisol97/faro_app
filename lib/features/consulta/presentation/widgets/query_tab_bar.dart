@@ -97,7 +97,9 @@ class _QueryTabChip extends ConsumerWidget {
     final target = ref.watch(resolvedTabTargetProvider(tab.id));
     final label = target == null
         ? 'Base eliminada'
-        : '${target.server?.name ?? 'Sin grupo'} · ${target.database.name}';
+        : target.server == null
+            ? target.database.name
+            : '${target.server!.name} · ${target.database.name}';
 
     return _TabChipShell(
       active: active,

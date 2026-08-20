@@ -1,4 +1,5 @@
 import 'package:faro/sql_analysis/analysis/scope_resolver.dart';
+import 'package:faro/sql_analysis/analysis/script_offset.dart';
 import 'package:faro/sql_analysis/analysis/sql_script_analyzer.dart';
 import 'package:faro/sql_analysis/ast/statements.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,13 +17,15 @@ void main() {
       const script = 'SELECT 1; SELECT a FROM t';
       final analysis = analyzeSqlScript(script);
       for (final s in analysis.statements) {
-        final slice = script.substring(s.scriptStart, s.scriptEnd);
+        final slice =
+            script.substring(s.scriptStart.value, s.scriptEnd.value);
         // Every statement's own text should round-trip back through the
         // same parser without new diagnostics — confirms the span is the
         // real statement text, not off by some fixed amount.
         expect(slice, isNotEmpty);
       }
-      expect(script.substring(analysis.statements[1].scriptStart), 'SELECT a FROM t');
+      expect(script.substring(analysis.statements[1].scriptStart.value),
+          'SELECT a FROM t');
     });
   });
 
@@ -38,8 +41,10 @@ void main() {
       // The diagnostic's absolute range must fall within the SECOND
       // statement's own script span, not the first (this is exactly the
       // bug this class exists to prevent — see its own doc comment).
-      expect(diag.start, greaterThanOrEqualTo(analysis.statements[1].scriptStart));
-      expect(diag.end, lessThanOrEqualTo(analysis.statements[1].scriptEnd));
+      expect(diag.start,
+          greaterThanOrEqualTo(analysis.statements[1].scriptStart.value));
+      expect(
+          diag.end, lessThanOrEqualTo(analysis.statements[1].scriptEnd.value));
     });
 
     test('allDiagnostics concatenates every statement\'s own diagnostics', () {
@@ -57,7 +62,7 @@ void main() {
       const script = 'SELECT 1; SELECT a FROM t';
       final analysis = analyzeSqlScript(script);
       final offsetInSecond = script.indexOf('FROM t');
-      final found = analysis.statementAt(offsetInSecond);
+      final found = analysis.statementAt(AbsoluteOffset(offsetInSecond));
       expect(found, same(analysis.statements[1]));
     });
 
@@ -67,7 +72,7 @@ void main() {
       // Right after the semicolon, inside the whitespace gap trimmed out
       // of both statement spans.
       final gapOffset = script.indexOf(';') + 1;
-      expect(analysis.statementAt(gapOffset), isNull);
+      expect(analysis.statementAt(AbsoluteOffset(gapOffset)), isNull);
     });
   });
 
@@ -76,7 +81,7 @@ void main() {
       const script = 'SELECT 1; SELECT a FROM t WHERE a = 1';
       final analysis = analyzeSqlScript(script);
       final stmt = analysis.statements[1];
-      const relative = 5;
+      const relative = RelativeOffset(5);
       final absolute = stmt.toAbsoluteOffset(relative);
       expect(stmt.toRelativeOffset(absolute), relative);
     });
@@ -85,7 +90,7 @@ void main() {
       const script = "SELECT 1; SELECT x FROM pedidos p WHERE p.id = 1";
       final analysis = analyzeSqlScript(script);
       final stmt = analysis.statements[1];
-      final absoluteCursor = script.indexOf('p.id');
+      final absoluteCursor = AbsoluteOffset(script.indexOf('p.id'));
       final relativeCursor = stmt.toRelativeOffset(absoluteCursor);
       final scope = resolveScopeAt(stmt.statement, relativeCursor);
       expect(scope.visibleTables.single.alias, 'p');

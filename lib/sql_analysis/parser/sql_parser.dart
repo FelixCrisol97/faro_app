@@ -481,37 +481,15 @@ class SqlParser {
       whereClause = _scanExpressionStub(stopKeywords: _clauseKeywords);
     }
 
-    final groupBy = <ExpressionStub>[];
-    if (_matchKeyword('GROUP') != null) {
-      _expectKeyword('BY', code: 'expected-by', message: 'Se esperaba BY después de GROUP.');
-      groupBy.add(_scanExpressionStub(stopKeywords: _clauseKeywords, stopAtComma: true));
-      while (_matchPunct(',') != null) {
-        groupBy.add(_scanExpressionStub(stopKeywords: _clauseKeywords, stopAtComma: true));
-      }
-    }
+    final groupBy = _parseGroupByClause();
 
     ExpressionStub? having;
     if (_matchKeyword('HAVING') != null) {
       having = _scanExpressionStub(stopKeywords: _clauseKeywords);
     }
 
-    final orderBy = <OrderByItem>[];
-    if (_matchKeyword('ORDER') != null) {
-      _expectKeyword('BY', code: 'expected-by', message: 'Se esperaba BY después de ORDER.');
-      orderBy.add(_parseOrderByItem());
-      while (_matchPunct(',') != null) {
-        orderBy.add(_parseOrderByItem());
-      }
-    }
-
-    ExpressionStub? limitClause;
-    if (_matchKeyword('LIMIT') != null) {
-      limitClause = _scanExpressionStub(stopKeywords: _clauseKeywords);
-    }
-    ExpressionStub? offsetClause;
-    if (_matchKeyword('OFFSET') != null) {
-      offsetClause = _scanExpressionStub(stopKeywords: _clauseKeywords);
-    }
+    final orderBy = _parseOrderByClause();
+    final limitOffset = _parseLimitOffset();
 
     // Any trailing UNION/INTERSECT/EXCEPT is folded in by
     // [_parseSetOperationChain] (called from [_parseSelectStatementWithOptionalWith]),
@@ -525,12 +503,63 @@ class SqlParser {
       groupBy: groupBy,
       having: having,
       orderBy: orderBy,
-      limitClause: limitClause,
-      offsetClause: offsetClause,
+      limitClause: limitOffset.limit,
+      offsetClause: limitOffset.offset,
       setOperation: null,
       start: start,
       end: _lastConsumedEnd,
     );
+  }
+
+  /// Parses a `GROUP BY expr, expr, ...` clause. Returns the empty list
+  /// (not null) when there's no `GROUP BY` at all, matching
+  /// [SelectStatement.groupBy]'s shape — called with the cursor positioned
+  /// right where `GROUP` would start, a no-op otherwise.
+  List<ExpressionStub> _parseGroupByClause() {
+    final groupBy = <ExpressionStub>[];
+    if (_matchKeyword('GROUP') != null) {
+      _expectKeyword('BY',
+          code: 'expected-by', message: 'Se esperaba BY después de GROUP.');
+      groupBy.add(
+          _scanExpressionStub(stopKeywords: _clauseKeywords, stopAtComma: true));
+      while (_matchPunct(',') != null) {
+        groupBy.add(_scanExpressionStub(
+            stopKeywords: _clauseKeywords, stopAtComma: true));
+      }
+    }
+    return groupBy;
+  }
+
+  /// Parses an `ORDER BY item, item, ...` clause. Returns the empty list
+  /// (not null) when there's no `ORDER BY` at all, matching
+  /// [SelectStatement.orderBy]'s shape.
+  List<OrderByItem> _parseOrderByClause() {
+    final orderBy = <OrderByItem>[];
+    if (_matchKeyword('ORDER') != null) {
+      _expectKeyword('BY',
+          code: 'expected-by', message: 'Se esperaba BY después de ORDER.');
+      orderBy.add(_parseOrderByItem());
+      while (_matchPunct(',') != null) {
+        orderBy.add(_parseOrderByItem());
+      }
+    }
+    return orderBy;
+  }
+
+  /// Parses trailing `LIMIT expr` / `OFFSET expr` clauses, in that fixed
+  /// order (Postgres-only parser, per this module's scope — T-SQL's
+  /// `OFFSET ... FETCH` isn't handled here). Either, both, or neither may
+  /// be present.
+  ({ExpressionStub? limit, ExpressionStub? offset}) _parseLimitOffset() {
+    ExpressionStub? limitClause;
+    if (_matchKeyword('LIMIT') != null) {
+      limitClause = _scanExpressionStub(stopKeywords: _clauseKeywords);
+    }
+    ExpressionStub? offsetClause;
+    if (_matchKeyword('OFFSET') != null) {
+      offsetClause = _scanExpressionStub(stopKeywords: _clauseKeywords);
+    }
+    return (limit: limitClause, offset: offsetClause);
   }
 
   SetOperationType? _tryMatchSetOperationType() {

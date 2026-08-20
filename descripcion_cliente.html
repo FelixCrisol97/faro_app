@@ -1,0 +1,358 @@
+<title>Faro</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Manrope:wght@500;600;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+  :root {
+    --bg: #F8FAFC;
+    --surface: #FFFFFF;
+    --surface-alt: #F1F5F9;
+    --text: #0F172A;
+    --text-muted: #475569;
+    --border: #E2E8F0;
+    --accent: #6366F1;
+    --accent-soft: #EEF2FF;
+    --accent-text: #4338CA;
+    --success: #059669;
+    --success-soft: #ECFDF5;
+    --success-text: #047857;
+    --warn: #B45309;
+    --warn-soft: #FEF3C7;
+    --warn-text: #92400E;
+    --shadow-sm: 0 1px 2px rgba(15,23,42,.04), 0 4px 12px rgba(15,23,42,.04);
+    --shadow-md: 0 10px 30px rgba(15,23,42,.10);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0F172A;
+      --surface: #1E293B;
+      --surface-alt: #263449;
+      --text: #F1F5F9;
+      --text-muted: #AEBACB;
+      --border: #334155;
+      --accent: #818CF8;
+      --accent-soft: rgba(129,140,248,.16);
+      --accent-text: #C7D2FE;
+      --success: #34D399;
+      --success-soft: rgba(52,211,153,.14);
+      --success-text: #6EE7B7;
+      --warn: #FBBF24;
+      --warn-soft: rgba(180,83,9,.20);
+      --warn-text: #FCD34D;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,.3), 0 4px 12px rgba(0,0,0,.25);
+      --shadow-md: 0 10px 30px rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0F172A;
+    --surface: #1E293B;
+    --surface-alt: #263449;
+    --text: #F1F5F9;
+    --text-muted: #AEBACB;
+    --border: #334155;
+    --accent: #818CF8;
+    --accent-soft: rgba(129,140,248,.16);
+    --accent-text: #C7D2FE;
+    --success: #34D399;
+    --success-soft: rgba(52,211,153,.14);
+    --success-text: #6EE7B7;
+    --warn: #FBBF24;
+    --warn-soft: rgba(180,83,9,.20);
+    --warn-text: #FCD34D;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.3), 0 4px 12px rgba(0,0,0,.25);
+    --shadow-md: 0 10px 30px rgba(0,0,0,.4);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+    font-weight: 500;
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 { font-family: 'Sora', ui-sans-serif, sans-serif; text-wrap: balance; color: var(--text); margin: 0; }
+  code, .mono { font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace; font-size: .88em; }
+
+  .page { max-width: 760px; margin: 0 auto; padding: 72px 28px 120px; }
+
+  /* ---- Header ---- */
+  .masthead { margin-bottom: 56px; }
+  .masthead .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: 'Manrope'; font-weight: 700; font-size: 12.5px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--accent-text);
+    background: var(--accent-soft);
+    border-radius: 999px;
+    padding: 5px 14px;
+    margin-bottom: 20px;
+  }
+  .masthead .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .masthead h1 { font-size: 52px; font-weight: 700; line-height: 1.05; letter-spacing: -0.01em; }
+  .masthead .pitch { font-size: 19px; color: var(--text-muted); margin-top: 18px; max-width: 62ch; line-height: 1.55; }
+  .masthead .meta-row {
+    display: flex; flex-wrap: wrap; gap: 10px;
+    margin-top: 28px;
+  }
+  .meta-chip {
+    font-size: 13px; font-weight: 600; color: var(--text-muted);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 12px;
+    background: var(--surface);
+  }
+
+  /* ---- Sections ---- */
+  section { margin-top: 64px; }
+  .section-label {
+    font-family: 'Manrope'; font-weight: 700; font-size: 12.5px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--accent-text);
+    margin-bottom: 10px;
+  }
+  h2 { font-size: 27px; font-weight: 700; margin-bottom: 18px; }
+  section > p { color: var(--text); max-width: 66ch; margin: 14px 0; }
+  section > p.muted { color: var(--text-muted); }
+
+  hr.rule { border: none; border-top: 1px solid var(--border); margin: 64px 0 0; }
+
+  /* ---- Design showcase strip ---- */
+  .design-strip {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin-top: 26px;
+  }
+  .swatch-card {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+  }
+  .swatch-card .label { font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 10px; }
+  .accent-dots { display: flex; gap: 6px; }
+  .accent-dots span { width: 22px; height: 22px; border-radius: 50%; display: inline-block; box-shadow: inset 0 0 0 1px rgba(0,0,0,.06); }
+  .type-sample .h { font-family: 'Sora'; font-weight: 700; font-size: 20px; }
+  .type-sample .b { font-family: 'Manrope'; font-weight: 500; font-size: 14px; color: var(--text-muted); margin-top: 4px; }
+  .type-sample .m { font-family: 'JetBrains Mono'; font-size: 12.5px; color: var(--accent-text); margin-top: 6px; }
+  .theme-preview { display: flex; gap: 8px; }
+  .theme-chip { flex: 1; border-radius: 10px; height: 44px; border: 1px solid var(--border); }
+  .theme-chip.light { background: #F8FAFC; }
+  .theme-chip.dark { background: #0F172A; }
+
+  /* ---- Feature grid ---- */
+  .feature-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 24px;
+  }
+  @media (max-width: 640px) { .feature-grid { grid-template-columns: 1fr; } }
+  .feature-card {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 22px;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+  }
+  .feature-card .tag {
+    display: inline-block;
+    font-size: 11px; font-weight: 700; letter-spacing: .03em;
+    padding: 3px 9px; border-radius: 6px;
+    margin-bottom: 10px;
+  }
+  .tag-conexion { background: var(--accent-soft); color: var(--accent-text); }
+  .tag-consulta { background: var(--success-soft); color: var(--success-text); }
+  .tag-seguridad { background: var(--warn-soft); color: var(--warn-text); }
+  .tag-editor { background: var(--accent-soft); color: var(--accent-text); }
+  .tag-org { background: var(--success-soft); color: var(--success-text); }
+  .tag-personalizacion { background: var(--warn-soft); color: var(--warn-text); }
+  .feature-card h3 { font-size: 16.5px; font-weight: 600; margin-bottom: 6px; }
+  .feature-card p { font-size: 14.5px; color: var(--text-muted); margin: 0; line-height: 1.55; }
+
+  /* ---- Flow steps (navigation) ---- */
+  .flow { display: flex; flex-direction: column; gap: 0; margin-top: 24px; border-left: 2px solid var(--border); padding-left: 26px; }
+  .flow-step { position: relative; padding-bottom: 30px; }
+  .flow-step:last-child { padding-bottom: 0; }
+  .flow-step::before {
+    content: '';
+    position: absolute; left: -31px; top: 4px;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--bg);
+  }
+  .flow-step h3 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+  .flow-step p { font-size: 14.5px; color: var(--text-muted); margin: 0; max-width: 58ch; }
+
+  /* ---- Stat row ---- */
+  .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 24px; }
+  .stat-card { border: 1px solid var(--border); border-radius: 14px; padding: 20px; background: var(--surface); text-align: left; }
+  .stat-card .num { font-family: 'Sora'; font-weight: 700; font-size: 26px; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .stat-card .label { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+  .closing { margin-top: 64px; padding: 26px 28px; border-radius: 16px; background: var(--accent-soft); border: 1px solid var(--border); }
+  .closing p { margin: 0; color: var(--accent-text); font-size: 15px; line-height: 1.6; }
+
+  ul.plain { margin: 10px 0 0; padding-left: 20px; color: var(--text); }
+  ul.plain li { margin-bottom: 6px; }
+</style>
+
+<div class="page">
+
+  <div class="masthead">
+    <span class="eyebrow"><span class="dot"></span>Ficha de producto</span>
+    <h1>Faro</h1>
+    <p class="pitch">Un solo lugar para consultar, comparar y administrar todas las bases de datos del negocio — una bodega o cien, al mismo tiempo, con la misma consulta.</p>
+    <div class="meta-row">
+      <span class="meta-chip">Aplicación de escritorio · Windows</span>
+      <span class="meta-chip">PostgreSQL &amp; SQL Server</span>
+      <span class="meta-chip">Consulta individual y masiva</span>
+      <span class="meta-chip">Sin depender de internet</span>
+    </div>
+  </div>
+
+  <section>
+    <div class="section-label">Qué es</div>
+    <h2>El problema que resuelve</h2>
+    <p>Cuando la información vive repartida en muchas bases de datos — una por bodega, una por sucursal, una por sistema — responder una pregunta simple ("¿cuánto inventario tenemos de este producto en todas las tiendas?") significa entrar a cada base por separado, correr la misma consulta N veces y juntar los resultados a mano.</p>
+    <p>Faro elimina ese paso manual: se registra cada base de datos una sola vez, se agrupan libremente como tenga sentido para el negocio (por región, por marca, por lo que sea — o simplemente sin agrupar), y desde ahí una sola consulta SQL puede correr contra una base o contra todas las seleccionadas a la vez, trayendo los resultados ya combinados y marcados con su origen.</p>
+    <p class="muted">Es una herramienta para quien ya sabe SQL — un analista, un desarrollador, un administrador de TI — no un generador de reportes para usuario final. Piensa en algo como SSMS o pgAdmin, pero pensado desde cero para trabajar con muchas bases de datos de golpe.</p>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <div class="section-label">Diseño</div>
+    <h2>Cómo se ve y se siente</h2>
+    <p>Interfaz nativa de Windows, moderna y limpia — sin la estética anticuada de las herramientas clásicas de administración de bases de datos. Tema claro y oscuro completos, y seis colores de acento a elegir, para que cada usuario la deje como prefiera.</p>
+    <div class="design-strip">
+      <div class="swatch-card">
+        <div class="label">Tipografía</div>
+        <div class="type-sample">
+          <div class="h">Sora — títulos</div>
+          <div class="b">Manrope — texto e interfaz</div>
+          <div class="m">JetBrains Mono — código SQL</div>
+        </div>
+      </div>
+      <div class="swatch-card">
+        <div class="label">Color de acento (elegible)</div>
+        <div class="accent-dots" style="margin-top:14px;">
+          <span style="background:#6366F1"></span>
+          <span style="background:#8B5CF6"></span>
+          <span style="background:#2563EB"></span>
+          <span style="background:#0D9488"></span>
+          <span style="background:#E11D48"></span>
+          <span style="background:#D97706"></span>
+        </div>
+      </div>
+      <div class="swatch-card">
+        <div class="label">Tema claro / oscuro</div>
+        <div class="theme-preview" style="margin-top:14px;">
+          <div class="theme-chip light"></div>
+          <div class="theme-chip dark"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <div class="section-label">Navegación</div>
+    <h2>Cómo está organizada</h2>
+    <p class="muted">Todo vive alrededor de un único árbol de navegación al lado izquierdo — sin pestañas de menú que recorrer, todo a un clic.</p>
+    <div class="flow">
+      <div class="flow-step">
+        <h3>Árbol de servidores y bases de datos</h3>
+        <p>Cada base de datos registrada aparece ahí, agrupada libremente en "servidores" (agrupadores opcionales, se arma arrastrando) o suelta en "Sin grupo". Buscador arriba, selección de una o varias bases con un clic.</p>
+      </div>
+      <div class="flow-step">
+        <h3>Editor de consulta + resultados</h3>
+        <p>El panel principal: escribe la consulta arriba, corre con F5, resultados combinados abajo. Redimensionable arrastrando la línea divisoria.</p>
+      </div>
+      <div class="flow-step">
+        <h3>Pestañas y ventanas adicionales</h3>
+        <p>Para trabajar varias consultas al mismo tiempo — pestañas dentro de la misma ventana, o abrir una base en una ventana de Windows completamente aparte.</p>
+      </div>
+      <div class="flow-step">
+        <h3>Historial, Favoritos y Apariencia</h3>
+        <p>Tres paneles accesibles con un ícono, que se abren encima del árbol sin perder de vista la consulta activa.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <div class="section-label">Funcionalidad</div>
+    <h2>Qué se puede hacer hoy</h2>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <span class="tag tag-conexion">Conexión</span>
+        <h3>PostgreSQL y SQL Server</h3>
+        <p>Cada base de datos elige su propio motor, host y credenciales — sin importar cómo esté agrupada. Las contraseñas se guardan cifradas en el almacén seguro de Windows, nunca en texto plano.</p>
+      </div>
+      <div class="feature-card">
+        <span class="tag tag-org">Organización</span>
+        <h3>Agrupación 100% libre</h3>
+        <p>Un "servidor" en Faro es solo una etiqueta que tú decides — arrastra y suelta bases de datos entre grupos, o déjalas sueltas. Nunca obliga a que compartan esquema ni servidor físico real.</p>
+      </div>
+      <div class="feature-card">
+        <span class="tag tag-consulta">Consulta</span>
+        <h3>Individual o masiva</h3>
+        <p>Modo "Individual" para trabajar sobre una base a la vez; modo "Masiva" para seleccionar cualquier combinación y correr la misma consulta en todas, con los resultados combinados e identificados por origen e IP.</p>
+      </div>
+      <div class="feature-card">
+        <span class="tag tag-editor">Editor SQL</span>
+        <h3>Pensado para escribir SQL de verdad</h3>
+        <p>Resaltado de sintaxis, autocompletado de tablas y columnas, buscador (Ctrl+F), zoom, formateo automático, números de línea, y detecta automáticamente qué instrucción ejecutar según dónde esté el cursor.</p>
+      </div>
+      <div class="feature-card">
+        <span class="tag tag-seguridad">Seguridad</span>
+        <h3>Solo lectura por base de datos</h3>
+        <p>Cada base de datos se marca como "Solo lectura" o "Consultas sin restricciones" de forma independiente — una consulta que modifica datos se bloquea automáticamente en las que están protegidas, con confirmación explícita para desactivarlo.</p>
+      </div>
+      <div class="feature-card">
+        <span class="tag tag-consulta">Resultados</span>
+        <h3>Pensados para volumen real</h3>
+        <p>Tabla de resultados que aguanta cientos de miles de filas sin trabarse, paginación bajo demanda, exportar a CSV con un clic, e importar CSV masivamente respetando el tipo real de cada columna.</p>
+      </div>
+      <div class="feature-card">
+        <span class="tag tag-org">Explorador de esquema</span>
+        <h3>Tablas, vistas, funciones, procedimientos</h3>
+        <p>Navega el catálogo de cada base de datos y genera automáticamente el script SELECT, UPDATE o CREATE de cualquier objeto con un clic derecho — sin tener que escribirlo a mano.</p>
+      </div>
+      <div class="feature-card">
+        <span class="tag tag-personalizacion">Historial y favoritos</span>
+        <h3>Nada se pierde al cerrar la app</h3>
+        <p>Cada consulta ejecutada queda en el historial (persistente, no solo de la sesión), y cualquier consulta se puede guardar como favorita para reusarla después con un clic.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <div class="section-label">Tecnología</div>
+    <h2>Cómo corre</h2>
+    <p>Faro es una aplicación de escritorio nativa de Windows — un solo <code>.exe</code>, sin necesidad de navegador, sin servidor intermedio que mantener. Se conecta directo a cada base de datos con drivers nativos (PostgreSQL y SQL Server), así que el rendimiento de las consultas es el mismo que tendría cualquier otra herramienta de administración — Faro no agrega ninguna capa extra en medio.</p>
+    <p class="muted">Construida con Flutter, lo que le da una interfaz consistente, fluida y fácil de seguir extendiendo con nuevas funciones a futuro.</p>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <div class="section-label">Estado actual</div>
+    <h2>Ya probada contra datos reales</h2>
+    <p>No es un prototipo — se ha refinado de forma iterativa probándola contra bases de datos reales de bodegas, incluyendo escenarios de volumen real:</p>
+    <div class="stat-row">
+      <div class="stat-card"><div class="num">5,000</div><div class="label">tablas/funciones/procedimientos por base, probado sin que el árbol se trabe</div></div>
+      <div class="stat-card"><div class="num">100k+</div><div class="label">filas en una sola consulta, con paginación y sin saturar memoria</div></div>
+      <div class="stat-card"><div class="num">2</div><div class="label">motores de base de datos soportados de forma nativa hoy</div></div>
+    </div>
+  </section>
+
+  <div class="closing">
+    <p>Esta ficha describe Faro tal como está funcionando hoy — no es una promesa a futuro. Todo lo descrito ya está construido, probado y en uso.</p>
+  </div>
+
+</div>

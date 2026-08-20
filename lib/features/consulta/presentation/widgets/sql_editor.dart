@@ -3,13 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/theme/app_shadows.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../application/consulta_providers.dart';
 import '../../application/query_tabs_providers.dart';
 import '../../application/sql_autocomplete.dart';
 import '../../application/sql_syntax_highlighter.dart';
 import '../../application/table_names_provider.dart';
+import 'editor/autocomplete_controller.dart';
 import 'editor/highlighting_controller.dart';
 import 'editor/line_number_gutter.dart';
 import 'editor/search_bar.dart';
@@ -32,14 +32,18 @@ import 'editor/zoom_controller.dart';
 /// migrar quedó definitiva, junto con las dependencias `re_editor`/
 /// `re_highlight` en `pubspec.yaml`.
 ///
-/// Este archivo owns la lógica core de edición de texto y el popup de
-/// autocompletado (ambos ligados al árbol de renderizado propio de este
-/// widget — `LayerLink`/`Overlay`/matemática de posición del cursor no se
-/// factorizan limpio). El zoom y el buscador dentro del editor son lo
-/// bastante autocontenidos como para vivir en sus propios controladores —
-/// ver `editor/zoom_controller.dart` y `editor/search_controller.dart` —
-/// este widget solo conecta su estado a eventos de teclado/scroll y al
-/// `HighlightingController` compartido.
+/// Este archivo owns la lógica core de edición de texto (el
+/// `TextField`/`HighlightingController` real, la sincronía scroll/gutter,
+/// los atajos de teclado). El zoom, el buscador, y el popup de
+/// autocompletado viven en sus propios controladores — ver
+/// `editor/zoom_controller.dart`, `editor/search_controller.dart`,
+/// `editor/autocomplete_controller.dart` (extraído 2026-08-19,
+/// AUDITORIA_CODIGO.md — el último en salir de aquí, porque el
+/// `LayerLink`/`Overlay`/la matemática de posición del cursor que necesita
+/// SÍ siguen genuinamente ligados al árbol de renderizado de este widget;
+/// ver el propio comentario de esa clase) — este widget solo conecta su
+/// estado a eventos de teclado/scroll y al `HighlightingController`
+/// compartido.
 class SqlEditor extends ConsumerStatefulWidget {
   const SqlEditor({super.key, this.tabId});
 
@@ -54,19 +58,10 @@ class SqlEditor extends ConsumerStatefulWidget {
 class _SqlEditorState extends ConsumerState<SqlEditor> {
   static const _contentPadding = 14.0;
   static const _editorRadius = BorderRadius.all(Radius.circular(10));
-  // See `filterSuggestions`'s doc comment (application/sql_autocomplete.dart)
-  // for why this is capped.
-  static const _maxSuggestions = 50;
 
   late final HighlightingController _controller;
   late final FocusNode _focusNode;
-  final _layerLink = LayerLink();
-  OverlayEntry? _overlayEntry;
-
-  List<String> _suggestions = const [];
-  int _selectedIndex = 0;
-  int _replaceFrom = 0;
-  int _replaceLength = 0;
+  late final AutocompleteController _autocomplete;
 
   // Line numbers gutter: the TextField owns the real scroll position, the
   // gutter is a passive follower (NeverScrollableScrollPhysics — see build())
@@ -99,6 +94,10 @@ class _SqlEditorState extends ConsumerState<SqlEditor> {
         HighlightingController(text: readEditorState(ref, widget.tabId).text);
     _controller.addListener(_onControllerChanged);
     _focusNode = FocusNode(onKeyEvent: _handleKeyEvent);
+    _autocomplete = AutocompleteController(
+      editorController: _controller,
+      onChanged: () => setState(() {}),
+    );
     _zoom = EditorZoomController(ref);
     _search = EditorSearchController(
       editorController: _controller,
@@ -120,7 +119,7 @@ class _SqlEditorState extends ConsumerState<SqlEditor> {
     _editorScrollController.removeListener(_mirrorGutterScroll);
     _editorScrollController.dispose();
     _gutterScrollController.dispose();
-    _removeOverlay();
+    _autocomplete.dispose();
     super.dispose();
   }
 
@@ -220,52 +219,34 @@ class _SqlEditorState extends ConsumerState<SqlEditor> {
     if (word != _highlightWord) setState(() => _highlightWord = word);
   }
 
+  /// Re-evaluates the popup for [text]/[selection] and, if
+  /// [AutocompleteController.update] found something to suggest, computes
+  /// where to put it and shows it — the caret-position/theme values it
+  /// needs stay here (not in the controller) for the same reason `_caretOffset`/
+  /// `_lineHeight` do, see this class's own doc comment and
+  /// `AutocompleteController.show`'s.
   void _updateAutocomplete(String text, TextSelection selection) {
-    if (!selection.isValid || !selection.isCollapsed) {
-      _removeOverlay();
-      return;
-    }
-    final upToCursor = text.substring(0, selection.baseOffset);
-    final trigger = detectAutocompleteTrigger(upToCursor);
-    if (trigger == null) {
-      _removeOverlay();
-      return;
-    }
-
-    switch (trigger.target) {
-      case AutocompleteTarget.table:
-        _applyAutocomplete(text, trigger, _readTableNames());
-      case AutocompleteTarget.column:
-        final tablesKey = referencedTablesKey(text);
-        if (tablesKey.isEmpty) {
-          _removeOverlay();
-          return;
-        }
-        _applyAutocomplete(text, trigger, _readColumnNames(tablesKey));
-    }
-  }
-
-  /// Shared by both autocomplete triggers (`FROM <partial>` → table names;
-  /// `WHERE`/`AND`/`OR`/`ON`/`HAVING`/`ORDER BY`/`GROUP BY`/`SELECT
-  /// <partial>` → column names) — only the source of candidate names
-  /// differs, everything about filtering/replacing/showing the popup is
-  /// identical.
-  void _applyAutocomplete(String text, AutocompleteTrigger trigger,
-      AsyncValue<List<String>> namesAsync) {
-    final suggestions = namesAsync.maybeWhen(
-      data: (names) =>
-          filterSuggestions(names, trigger.partial, _maxSuggestions),
-      orElse: () => const <String>[],
+    final shouldShow = _autocomplete.update(
+      text,
+      selection,
+      readTableNames: _readTableNames,
+      readColumnNames: _readColumnNames,
     );
-    if (suggestions.isEmpty) {
-      _removeOverlay();
-      return;
-    }
-    _suggestions = suggestions;
-    _selectedIndex = 0;
-    _replaceFrom = trigger.replaceFrom;
-    _replaceLength = trigger.partial.length;
-    _showOverlay(text, trigger.replaceFrom);
+    if (!shouldShow) return;
+
+    final typography = context.appTheme.typography;
+    final editorStyle = typography.monospace.copyWith(
+        fontSize: _zoom.effectiveFontSize(typography.monospace.fontSize!));
+    final caretOffset = _caretOffset(
+        text,
+        _autocomplete.replaceFrom + _autocomplete.replaceLength,
+        editorStyle);
+    _autocomplete.show(
+      context,
+      caretOffset: caretOffset,
+      colors: context.appTheme.colors,
+      typography: typography,
+    );
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
@@ -294,26 +275,22 @@ class _SqlEditorState extends ConsumerState<SqlEditor> {
       }
     }
 
-    if (_overlayEntry == null) return KeyEventResult.ignored;
+    if (!_autocomplete.isOpen) return KeyEventResult.ignored;
 
     switch (event.logicalKey) {
       case LogicalKeyboardKey.arrowDown:
-        setState(
-            () => _selectedIndex = (_selectedIndex + 1) % _suggestions.length);
-        _overlayEntry!.markNeedsBuild();
+        _autocomplete.selectNext();
         return KeyEventResult.handled;
       case LogicalKeyboardKey.arrowUp:
-        setState(() => _selectedIndex =
-            (_selectedIndex - 1 + _suggestions.length) % _suggestions.length);
-        _overlayEntry!.markNeedsBuild();
+        _autocomplete.selectPrevious();
         return KeyEventResult.handled;
       case LogicalKeyboardKey.enter:
       case LogicalKeyboardKey.numpadEnter:
       case LogicalKeyboardKey.tab:
-        _applySuggestion(_suggestions[_selectedIndex]);
+        _autocomplete.applyHighlighted();
         return KeyEventResult.handled;
       case LogicalKeyboardKey.escape:
-        _removeOverlay();
+        _autocomplete.close();
         return KeyEventResult.handled;
       default:
         return KeyEventResult.ignored;
@@ -351,79 +328,6 @@ class _SqlEditorState extends ConsumerState<SqlEditor> {
         textDirection: TextDirection.ltr)
       ..layout();
     return painter.height;
-  }
-
-  void _showOverlay(String text, int replaceFrom) {
-    _removeOverlay();
-    final colors = context.appTheme.colors;
-    final typography = context.appTheme.typography;
-    final editorStyle = typography.monospace.copyWith(
-        fontSize: _zoom.effectiveFontSize(typography.monospace.fontSize!));
-    final caretOffset =
-        _caretOffset(text, replaceFrom + _replaceLength, editorStyle);
-
-    _overlayEntry = OverlayEntry(
-      builder: (context) => Positioned(
-        width: 240,
-        child: CompositedTransformFollower(
-          link: _layerLink,
-          showWhenUnlinked: false,
-          offset: caretOffset + const Offset(0, 22),
-          child: Material(
-            elevation: 0,
-            borderRadius: _editorRadius,
-            child: Container(
-              decoration: BoxDecoration(
-                color: colors.surface,
-                borderRadius: _editorRadius,
-                boxShadow: AppShadows.md,
-              ),
-              constraints: const BoxConstraints(maxHeight: 160),
-              // .builder, not a plain children: list — _suggestions is
-              // capped (_maxSuggestions) so this alone wouldn't balloon,
-              // but building on-demand rather than allocating every row's
-              // widgets up front on every keystroke is free to do right.
-              child: ListView.builder(
-                shrinkWrap: true,
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                itemCount: _suggestions.length,
-                itemBuilder: (context, index) {
-                  final name = _suggestions[index];
-                  return InkWell(
-                    onTap: () => _applySuggestion(name),
-                    child: Container(
-                      color:
-                          index == _selectedIndex ? colors.accent.soft : null,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      child: Text(name,
-                          style: typography.monospace.copyWith(fontSize: 13)),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    Overlay.of(context).insert(_overlayEntry!);
-  }
-
-  void _applySuggestion(String name) {
-    final text = _controller.text;
-    final newText =
-        text.replaceRange(_replaceFrom, _replaceFrom + _replaceLength, name);
-    _controller.value = TextEditingValue(
-      text: newText,
-      selection: TextSelection.collapsed(offset: _replaceFrom + name.length),
-    );
-    _removeOverlay();
-  }
-
-  void _removeOverlay() {
-    _overlayEntry?.remove();
-    _overlayEntry = null;
   }
 
   // tableNamesProvider/tabTableNamesProvider aren't state providers (no
@@ -512,8 +416,8 @@ class _SqlEditorState extends ConsumerState<SqlEditor> {
     // theme's base 14) are derived from one effective size so line heights
     // stay in sync as it changes. `ref.watch` here (not `_zoom.effectiveFontSize`,
     // which reads — correct for the one-shot lookups in `_handleKeyEvent`/
-    // `_showOverlay`, but build() needs an actual subscription so zooming
-    // triggers a rebuild).
+    // `_updateAutocomplete`, but build() needs an actual subscription so
+    // zooming triggers a rebuild).
     final baseFontSize = typography.monospace.fontSize!;
     final fontSize = ref.watch(sqlEditorFontSizeProvider) ?? baseFontSize;
     final editorStyle = typography.monospace.copyWith(fontSize: fontSize);
@@ -577,7 +481,7 @@ class _SqlEditorState extends ConsumerState<SqlEditor> {
                 ),
                 Expanded(
                   child: CompositedTransformTarget(
-                    link: _layerLink,
+                    link: _autocomplete.layerLink,
                     child: TextField(
                       controller: _controller,
                       focusNode: _focusNode,
