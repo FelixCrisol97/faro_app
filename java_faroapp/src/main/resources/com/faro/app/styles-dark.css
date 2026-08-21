@@ -1,0 +1,602 @@
+/*
+ * TEMA OSCURO — generado (2026-08-20) a partir de styles.css sustituyendo
+ * cada valor hex de tema claro por su equivalente oscuro, en dos fases con
+ * `sed` (placeholders primero, valores reales después) para que no hubiera
+ * colisión entre un valor que es "fondo" en un tema y "texto" en el otro
+ * (ej. #0F172A es --text en claro pero --background en oscuro). Los
+ * reemplazos vienen de `lib/core/theme/app_colors.dart` `AppColors.dark()` /
+ * `app_accent.dart` `AppAccent.indigo.dark` cuando existe ese token ahí.
+ * Solo un valor (`#94A3B8`/`#CBD5E1`, un gris "atenuado" y un borde de
+ * casilla que no tienen equivalente en `app_colors.dart`) sigue siendo
+ * **inferido, no verificado contra el diseño Flutter** — anotado en la
+ * regla donde aplica.
+ *
+ * `.toolbar-pill` (`--accent-soft`/`--accent-soft-text`) — **corregido
+ * (2026-08-20)**: la primera versión de este archivo usaba una
+ * aproximación sólida inventada a mano (`#242C4F`/`#6366F1`) en vez del
+ * valor real, porque se asumió sin verificar que JavaFX no podía pintar
+ * fondos semitransparentes. Sí puede — `rgba()` ya se usa en este mismo
+ * archivo para la sombra de menús (`--shadow-md` más abajo), así que no
+ * hacía falta aproximar nada. El valor real, copiado de
+ * `demo_html/styles.css` (que a su vez es 1:1 de `app_accent.dart`
+ * `AppAccent.indigo.dark`), es `rgba(129,140,248,.18)` /
+ * `#C7D2FE` — mucho más claro y con mucho más contraste que la
+ * aproximación anterior, que quedaba apagada/difícil de leer contra el
+ * fondo oscuro (encontrado por el usuario probando la app en vivo,
+ * "el modo oscuro está horrible").
+ *
+ * `#B45309` (--warn-base) se deja igual en los dos temas, así lo define
+ * `app_colors.dart` para ambos. La sombra de menús (`rgba(15,23,42,0.15)`,
+ * `--shadow-md`) tampoco cambia — `app_shadows.dart` documenta el mismo
+ * tinte fijo en los dos temas.
+ *
+ * Si `styles.css` cambia, este archivo hay que regenerarlo con el mismo
+ * mapeo (ver README, sección "Sistema de temas") — no es un `:root`
+ * reusable porque JavaFX no tiene variables CSS nativas antes de JDK 24.
+ *
+ * Fuentes reales (Sora/Manrope/JetBrains Mono) cargadas vía Font.loadFont()
+ * en Main.java desde fonts/*.ttf — son variable fonts, JavaFX solo carga su
+ * instancia por defecto (peso 400), los pesos 600/700 de acá abajo son
+ * negrita sintética, no el eje de peso real de la fuente.
+ */
+
+.app-root {
+    -fx-background-color: #0F172A; /* --background */
+    -fx-font-family: "Manrope", "Segoe UI", sans-serif; /* --font-body */
+    -fx-font-size: 13px;
+}
+
+.app-menu-bar {
+    -fx-background-color: #1E293B; /* --surface */
+    -fx-padding: 0 4 0 4;
+}
+.app-menu-bar .label {
+    -fx-text-fill: #F1F5F9; /* --text */
+    -fx-font-size: 12.5px;
+}
+.app-menu-bar .menu:hover, .app-menu-bar .menu:showing {
+    -fx-background-color: #334155; /* --surface-alt */
+}
+
+/* Menús desplegables (Archivo/Editar/…) — sombra "md" de AppShadows, radio
+   10px como el prototipo. .context-menu es la ventana emergente real del
+   Menu, no un hijo del MenuBar en el árbol de escena, por eso va sin
+   prefijo .app-menu-bar. */
+.context-menu {
+    -fx-background-color: #1E293B; /* --surface */
+    -fx-background-radius: 10;
+    -fx-border-color: #334155; /* --border */
+    -fx-border-width: 1;
+    -fx-border-radius: 10;
+    -fx-effect: dropshadow(gaussian, rgba(15,23,42,0.15), 30, 0, 0, 10); /* --shadow-md */
+    -fx-padding: 6;
+}
+.context-menu .menu-item {
+    -fx-background-radius: 7;
+    -fx-padding: 4 8 4 8;
+}
+.context-menu .menu-item:focused {
+    -fx-background-color: #334155; /* --surface-alt */
+}
+.context-menu .menu-item .label {
+    -fx-text-fill: #F1F5F9; /* --text */
+    -fx-font-size: 12.5px;
+}
+.context-menu .separator {
+    -fx-padding: 4 0 4 0;
+}
+
+.toolbar {
+    -fx-background-color: #1E293B; /* --surface */
+    -fx-border-color: transparent transparent #334155 transparent; /* --border */
+    -fx-border-width: 0 0 1 0;
+}
+
+.app-title {
+    -fx-font-family: "Sora", "Segoe UI", sans-serif; /* --font-heading */
+    -fx-font-weight: bold;
+    -fx-font-size: 18px;
+    -fx-text-fill: #F1F5F9; /* --text */
+}
+
+.muted {
+    -fx-text-fill: #AEBACB; /* --text-muted */
+    -fx-font-size: 11.5px;
+}
+
+/* ---- Riel de íconos (Conexiones/Historial/Favoritos/Preferencias) — contra
+   faro-java-prototipo.html con "Mapa JavaFX" activado. ---- */
+.icon-rail {
+    -fx-background-color: #1E293B; /* --surface */
+    -fx-border-color: transparent #334155 transparent transparent; /* --border */
+    -fx-border-width: 0 1 0 0;
+    -fx-pref-width: 44;
+    -fx-min-width: 44;
+    -fx-max-width: 44;
+}
+.rail-button {
+    -fx-background-color: transparent;
+    -fx-background-radius: 9px;
+    -fx-border-width: 0;
+    -fx-padding: 9;
+    -fx-cursor: hand;
+}
+.rail-button .icon-stroke {
+    -fx-stroke: #AEBACB; /* --text-muted */
+}
+.rail-button:hover {
+    -fx-background-color: #334155; /* --surface-alt */
+}
+.rail-button:selected {
+    -fx-background-color: rgba(129,140,248,.18); /* --accent-soft, mismo valor real que .toolbar-pill */
+}
+.rail-button:selected .icon-stroke {
+    -fx-stroke: #818CF8; /* --accent-base */
+}
+
+.panel-left {
+    -fx-background-color: #1E293B; /* --surface */
+    -fx-border-color: transparent #334155 transparent transparent;
+    -fx-border-width: 0 1 0 0;
+}
+
+.section-label {
+    -fx-font-weight: bold;
+    -fx-font-size: 11.5px;
+    -fx-text-fill: #AEBACB;
+}
+
+.panel-center {
+    -fx-background-color: #0F172A;
+}
+
+.status-bar {
+    -fx-background-color: #1E293B;
+    -fx-border-color: #334155 transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+}
+
+/* ---- Árbol de conexiones ---- */
+.connection-tree {
+    -fx-background-color: #1E293B; /* --surface */
+    -fx-padding: 0 0 8 0;
+}
+.connection-tree .tree-cell {
+    -fx-background-color: transparent;
+    -fx-padding: 3 6 3 4;
+}
+.connection-tree .tree-cell:filled:selected,
+.connection-tree .tree-cell:filled:hover {
+    -fx-background-color: #334155; /* --surface-alt */
+}
+
+/* Mismo forzado que en el tema claro (ver styles.css) por consistencia —
+   acá la flecha blanca de Modena sí tendría contraste aceptable sobre
+   #334155, pero se deja el mismo color fijo (--text-muted) en los dos
+   temas para que no cambie de aspecto al alternar. */
+.connection-tree .tree-cell .tree-disclosure-node .arrow,
+.connection-tree .tree-cell:filled:selected .tree-disclosure-node .arrow,
+.connection-tree .tree-cell:filled:hover .tree-disclosure-node .arrow {
+    -fx-background-color: #AEBACB; /* --text-muted */
+}
+
+/* Checkbox de selección — el tema Modena por defecto de JavaFX (caja gris
+   con relieve) no tiene nada que ver con el diseño; esto lo reemplaza por
+   un cuadrito de borde delgado que se llena de acento sólido al marcar,
+   igual que el prototipo (que usa un div de 15x15 con check SVG blanco). */
+.connection-tree .check-box > .box {
+    -fx-background-color: #1E293B;
+    -fx-border-color: #64748B;
+    -fx-border-width: 1.4;
+    -fx-border-radius: 4;
+    -fx-background-radius: 4;
+    -fx-padding: 2 2 2 2;
+}
+.connection-tree .check-box:hover > .box {
+    -fx-border-color: #818CF8; /* --accent-base */
+}
+.connection-tree .check-box:selected > .box {
+    -fx-background-color: #818CF8;
+    -fx-border-color: #818CF8;
+}
+.connection-tree .check-box > .box > .mark {
+    -fx-background-color: transparent;
+    -fx-padding: 3 3 3 3;
+}
+.connection-tree .check-box:selected > .box > .mark {
+    -fx-background-color: #1E293B;
+}
+
+.tree-server-name {
+    -fx-font-weight: bold;
+    -fx-font-size: 12.5px;
+    -fx-text-fill: #F1F5F9;
+}
+.tree-count {
+    -fx-font-size: 11px;
+    -fx-text-fill: #AEBACB;
+}
+.tree-section-label {
+    -fx-font-weight: bold;
+    -fx-font-size: 11px;
+    -fx-text-fill: #AEBACB;
+}
+.tree-db-name {
+    -fx-font-size: 12.5px;
+    -fx-text-fill: #F1F5F9;
+}
+.tree-engine-badge {
+    -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace; /* --font-mono */
+    -fx-font-size: 9.5px;
+    -fx-text-fill: #AEBACB;
+    -fx-background-color: #334155;
+    -fx-background-radius: 6; /* --radius-chip */
+    -fx-padding: 1 4 1 4;
+}
+
+/* Punto de estado de conexión — mismo lenguaje de color que success/warn/
+   error en app_colors.dart. */
+.tree-status-dot-connected { -fx-fill: #34D399; } /* --success-base */
+.tree-status-dot-failed    { -fx-fill: #F87171; } /* --error-base */
+.tree-status-dot-testing   { -fx-fill: #B45309; } /* --warn-base */
+.tree-status-dot-unknown   { -fx-fill: #64748B; }
+
+/* Candado de modo — ícono real (Lucide lock/lock-open, ver Icons.java),
+   verde cerrado = solo lectura (protegido), ámbar abierto = sin
+   restricciones (riesgo). Mismo criterio que database_check_row.dart en
+   la versión Flutter: el candado nunca debe leerse como "algo anda mal". */
+.tree-mode-icon-locked {
+    -fx-fill: transparent;
+    -fx-stroke: #34D399; /* --success-base */
+    -fx-stroke-width: 2.2;
+    -fx-stroke-line-cap: round;
+    -fx-stroke-line-join: round;
+}
+.tree-mode-icon-unlocked {
+    -fx-fill: transparent;
+    -fx-stroke: #B45309; /* --warn-base */
+    -fx-stroke-width: 2.2;
+    -fx-stroke-line-cap: round;
+    -fx-stroke-line-join: round;
+    -fx-opacity: 0.75;
+}
+
+/* Botón de editar (lápiz) — visible siempre en cada fila de base de datos,
+   no un gesto oculto (doble clic solo es un atajo extra, ver
+   MainController#onTreeClicked). */
+.tree-edit-button {
+    -fx-min-width: 20; -fx-min-height: 20; -fx-max-width: 20; -fx-max-height: 20;
+    -fx-background-radius: 5;
+    -fx-cursor: hand;
+}
+.tree-edit-button:hover {
+    -fx-background-color: #334155; /* --border, como fondo sutil de hover */
+}
+.tree-edit-icon {
+    -fx-fill: transparent;
+    -fx-stroke: #64748B; /* --text-muted, tenue por defecto */
+    -fx-stroke-width: 2.6;
+    -fx-stroke-line-cap: round;
+    -fx-stroke-line-join: round;
+}
+.tree-edit-button:hover .tree-edit-icon {
+    -fx-stroke: #818CF8; /* --accent-base */
+}
+
+/* ---- Editor SQL (RichTextFX CodeArea) — contra demo_html/styles.css
+   .sql-editor-wrap/.sql-gutter/.tok-*: fondo --surface-alt (no blanco),
+   radio 10px, sin borde, gutter transparente sobre ese mismo fondo, y los
+   4 colores de resaltado exactos de .tok-kw/.tok-str/.tok-num/.tok-com. */
+.sql-editor-scroll {
+    -fx-background-color: #334155; /* --surface-alt */
+    -fx-background-radius: 10;
+}
+.sql-editor {
+    -fx-background-color: #334155; /* --surface-alt */
+    -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace; /* --font-mono */
+    -fx-font-size: 14px;
+    -fx-padding: 14;
+}
+.sql-editor .paragraph-box {
+    -fx-cursor: text;
+}
+.sql-editor .lineno {
+    -fx-background-color: transparent;
+    -fx-text-fill: #AEBACB; /* --text-muted */
+    -fx-padding: 0 8 0 4;
+}
+.sql-editor .keyword {
+    -fx-fill: #818CF8; /* --accent-base, .tok-kw */
+    -fx-font-weight: bold;
+}
+.sql-editor .string {
+    -fx-fill: #34D399; /* --success-base, .tok-str */
+}
+.sql-editor .number {
+    -fx-fill: #B45309; /* --warn-base, .tok-num */
+}
+.sql-editor .comment {
+    -fx-fill: #AEBACB; /* --text-muted, .tok-com */
+    -fx-font-style: italic;
+}
+
+/* ---- SplitPane (editor arriba / resultados abajo) ---- */
+.panel-center > .split-pane-divider {
+    -fx-background-color: #334155; /* --border */
+    -fx-padding: 0 1 0 1;
+}
+
+/* ---- Pestañas de resultados (Resultados/Ejecución/Diagnóstico) — contra
+   demo_html/styles.css .tab-chip: subrayado de 2px con el acento en la
+   pestaña activa, sin fondo relleno (no es una "pill"), texto muted→text. */
+.results-tabs .tab-header-area {
+    -fx-background-color: #1E293B; /* --surface */
+    -fx-border-color: transparent transparent #334155 transparent; /* --border */
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 0;
+}
+.results-tabs .tab {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-border-color: transparent transparent transparent transparent;
+    -fx-border-width: 0 0 2 0;
+    -fx-padding: 8 12 8 12;
+}
+.results-tabs .tab:hover {
+    -fx-background-color: #0F172A; /* --background */
+}
+.results-tabs .tab:selected {
+    -fx-border-color: transparent transparent #818CF8 transparent; /* --accent-base */
+}
+.results-tabs .tab-label {
+    -fx-text-fill: #AEBACB; /* --text-muted */
+    -fx-font-size: 13px;
+}
+.results-tabs .tab:selected .tab-label {
+    -fx-text-fill: #F1F5F9; /* --text */
+    -fx-font-weight: bold;
+}
+.results-tabs .tab-content-area {
+    -fx-background-color: #1E293B;
+}
+
+/* ---- Pestañas de consulta (editor SQL) — mismo lenguaje visual que
+   .results-tabs, pero cerrables (cada una es un script SQL independiente,
+   con su propio archivo asociado — ver MainController#QueryTabState). */
+.query-tabs .tab-header-area {
+    -fx-background-color: #1E293B; /* --surface */
+    -fx-border-color: transparent transparent #334155 transparent; /* --border */
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 0;
+}
+.query-tabs .tab {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-border-color: transparent transparent transparent transparent;
+    -fx-border-width: 0 0 2 0;
+    -fx-padding: 6 8 6 12;
+}
+.query-tabs .tab:hover {
+    -fx-background-color: #0F172A; /* --background */
+}
+.query-tabs .tab:selected {
+    -fx-border-color: transparent transparent #818CF8 transparent; /* --accent-base */
+}
+.query-tabs .tab-label {
+    -fx-text-fill: #AEBACB; /* --text-muted */
+    -fx-font-size: 12.5px;
+}
+.query-tabs .tab:selected .tab-label {
+    -fx-text-fill: #F1F5F9; /* --text */
+    -fx-font-weight: bold;
+}
+.query-tabs .tab-close-button {
+    -fx-background-color: #64748B;
+}
+.query-tabs .tab:hover .tab-close-button,
+.query-tabs .tab:selected .tab-close-button {
+    -fx-background-color: #AEBACB; /* --text-muted */
+}
+.query-tabs .tab-content-area {
+    -fx-background-color: #334155; /* --surface-alt, mismo fondo que .sql-editor-scroll */
+}
+
+/* ---- Barra de búsqueda del editor (Ctrl+F) — una sola, compartida entre pestañas ---- */
+.find-bar {
+    -fx-background-color: #334155; /* --surface-alt */
+    -fx-background-radius: 8px;
+    -fx-padding: 6 8 6 8;
+    -fx-border-color: #334155; /* --border */
+    -fx-border-radius: 8px;
+    -fx-border-width: 1px;
+}
+
+/* ---- TableView de resultados — contra demo_html/styles.css
+   table.results-grid: encabezado --surface-alt con texto --text (no
+   muted), SIN cebra, SIN resaltado de selección (es una vista de datos de
+   solo lectura), fila resaltada solo en hover. */
+.results-table {
+    -fx-background-color: #1E293B;
+    -fx-font-size: 13px;
+}
+.results-table .column-header-background {
+    -fx-background-color: #334155; /* --surface-alt */
+}
+.results-table .column-header {
+    -fx-border-color: transparent transparent #334155 transparent; /* --border */
+}
+.results-table .column-header .label {
+    -fx-text-fill: #F1F5F9; /* --text */
+    -fx-font-weight: bold;
+    -fx-font-size: 12.5px;
+}
+.results-table .table-row-cell {
+    -fx-background-color: #1E293B;
+    -fx-border-color: transparent transparent #334155 transparent; /* --border */
+}
+.results-table .table-row-cell:hover {
+    -fx-background-color: #334155; /* --surface-alt */
+}
+.results-table .table-row-cell:selected {
+    -fx-background-color: #334155;
+}
+.results-table .table-cell {
+    -fx-text-fill: #F1F5F9;
+    -fx-padding: 8 14 8 14;
+}
+
+/* ---- Log de la pestaña Diagnóstico — líneas con hora, más reciente arriba. */
+.diagnostic-log {
+    -fx-background-color: #1E293B;
+}
+.diagnostic-log .list-cell {
+    -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace; /* --font-mono */
+    -fx-font-size: 12px;
+    -fx-text-fill: #F1F5F9;
+    -fx-padding: 5 14 5 14;
+    -fx-background-color: transparent;
+    -fx-border-color: transparent transparent #334155 transparent;
+}
+.diagnostic-log .list-cell:filled:hover,
+.diagnostic-log .list-cell:filled:selected {
+    -fx-background-color: #334155; /* --surface-alt */
+    -fx-text-fill: #F1F5F9;
+}
+
+/* Íconos Lucide (ver Icons.java) dentro de botones — trazo por defecto,
+   .icon-fill solo para el triángulo de "Ejecutar". */
+.icon-stroke {
+    -fx-fill: transparent;
+    -fx-stroke: #F1F5F9; /* --text, igual que el texto de .button-secondary */
+    -fx-stroke-width: 2;
+    -fx-stroke-line-cap: round;
+    -fx-stroke-line-join: round;
+}
+.icon-fill {
+    -fx-fill: white;
+    -fx-stroke: transparent;
+}
+.button-icon .icon-stroke {
+    -fx-stroke: #AEBACB; /* --text-muted, igual que el texto de .button-icon */
+}
+.button-icon:hover .icon-stroke {
+    -fx-stroke: #818CF8; /* --accent-base, igual que .button-icon:hover */
+}
+
+/* Botón — radio 9px (--radius-control), acento indigo (--accent-base) */
+.button {
+    -fx-background-color: #818CF8;
+    -fx-text-fill: white;
+    -fx-background-radius: 9px;
+    -fx-padding: 6 14 6 14;
+    -fx-font-weight: bold;
+    -fx-graphic-text-gap: 7;
+    -fx-cursor: hand;
+}
+.run-button-label {
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+.run-button-shortcut {
+    -fx-text-fill: white;
+    -fx-opacity: 0.8;
+    -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace; /* --font-mono */
+    -fx-font-size: 10.5px;
+}
+
+.button:hover {
+    -fx-background-color: #A5B4FC; /* --accent-hover */
+}
+.button:pressed {
+    -fx-background-color: #6366F1; /* --accent-active */
+}
+
+/* Botón secundario de barra de herramientas — borde, sin relleno */
+.button-secondary {
+    -fx-background-color: transparent;
+    -fx-text-fill: #F1F5F9; /* --text */
+    -fx-border-color: #334155; /* --border */
+    -fx-border-width: 1;
+    -fx-border-radius: 9px;
+    -fx-background-radius: 9px;
+    -fx-padding: 6 12 6 12;
+    -fx-font-weight: bold;
+    -fx-font-size: 12.5px;
+    -fx-graphic-text-gap: 6;
+    -fx-cursor: hand;
+}
+.button-secondary:hover {
+    -fx-background-color: #334155; /* --surface-alt */
+}
+
+.toolbar-separator {
+    -fx-min-width: 1;
+    -fx-max-width: 1;
+    -fx-background-color: #334155; /* --border */
+}
+
+.toolbar-pill {
+    -fx-background-color: rgba(129,140,248,.18); /* --accent-soft, valor real de app_accent.dart (indigo.dark) */
+    -fx-text-fill: #C7D2FE; /* --accent-soft-text */
+    -fx-background-radius: 999px;
+    -fx-padding: 5 12 5 12;
+    -fx-font-weight: bold;
+    -fx-font-size: 12px;
+}
+
+/* Botón cuadrado de icono (ej. "+" de agregar base de datos) */
+.button-icon {
+    -fx-background-color: transparent;
+    -fx-text-fill: #AEBACB; /* --text-muted */
+    -fx-border-color: #334155; /* --border */
+    -fx-border-width: 1;
+    -fx-border-radius: 9px;
+    -fx-background-radius: 9px;
+    -fx-min-width: 26px;
+    -fx-min-height: 26px;
+    -fx-max-width: 26px;
+    -fx-max-height: 26px;
+    -fx-font-weight: bold;
+    -fx-cursor: hand;
+}
+.button-icon:hover {
+    -fx-background-color: #334155; /* --surface-alt */
+    -fx-text-fill: #818CF8; /* --accent-base */
+}
+
+/* ---- Diálogos (Agregar/editar base de datos, etc.) ---- */
+.dialog-root {
+    -fx-background-color: #1E293B; /* --surface */
+}
+.dialog-title {
+    -fx-font-family: "Sora", "Segoe UI", sans-serif; /* --font-heading */
+    -fx-font-weight: bold;
+    -fx-font-size: 17px;
+    -fx-text-fill: #F1F5F9; /* --text */
+}
+.field-label {
+    -fx-font-size: 12px;
+    -fx-text-fill: #AEBACB; /* --text-muted */
+}
+.text-field {
+    -fx-background-color: #0F172A; /* --background */
+    -fx-border-color: #334155; /* --border */
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 6 10 6 10;
+    -fx-font-size: 12.5px;
+}
+.text-field:focused {
+    -fx-border-color: #818CF8; /* --accent-base */
+}
+.combo-box {
+    -fx-background-color: #0F172A;
+    -fx-border-color: #334155;
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+}
+.combo-box:focused {
+    -fx-border-color: #818CF8;
+}

@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.faro</groupId>
+  <artifactId>faro-java</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <name>Faro (Java)</name>
+  <description>
+    Cliente SQL multi-base para consulta ligera y masiva contra muchas
+    bodegas/sucursales a la vez. Reemplazo en JavaFX de flutter_faroapp/ —
+    ver ../README.md y Migración_Flutter_Java/entrega/ para el diseño.
+  </description>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.release>21</maven.compiler.release>
+    <javafx.version>21.0.8</javafx.version>
+    <mainClass>com.faro.app.Main</mainClass>
+  </properties>
+
+  <dependencies>
+    <!-- JavaFX — controls (todos los widgets) + fxml (carga de vistas .fxml) -->
+    <dependency>
+      <groupId>org.openjfx</groupId>
+      <artifactId>javafx-controls</artifactId>
+      <version>${javafx.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.openjfx</groupId>
+      <artifactId>javafx-fxml</artifactId>
+      <version>${javafx.version}</version>
+    </dependency>
+
+    <!-- Drivers JDBC — PostgreSQL y SQL Server (el motivo real de la migración,
+         ver AUDITORIA_CODIGO.md/README.md: el driver de SQL Server en Dart/
+         Flutter nunca llegó a un estado maduro). -->
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <version>42.7.4</version>
+    </dependency>
+    <dependency>
+      <groupId>com.microsoft.sqlserver</groupId>
+      <artifactId>mssql-jdbc</artifactId>
+      <version>12.8.1.jre11</version>
+    </dependency>
+
+    <!-- Pool de conexiones — un HikariDataSource por servidor, per el diseño -->
+    <dependency>
+      <groupId>com.zaxxer</groupId>
+      <artifactId>HikariCP</artifactId>
+      <version>6.2.1</version>
+    </dependency>
+
+    <!-- Editor SQL con resaltado de sintaxis — CodeArea del diseño -->
+    <dependency>
+      <groupId>org.fxmisc.richtext</groupId>
+      <artifactId>richtextfx</artifactId>
+      <version>0.11.3</version>
+    </dependency>
+
+    <!-- Persistencia de conexiones/preferencias a JSON en disco — NO se usa
+         para credenciales (esas quedan en memoria a propósito, ver
+         ConnectionRegistryStore y README: "credenciales en el almacén de
+         claves del sistema, nunca en JSON plano" es una decisión de diseño
+         ya tomada, no una omisión). -->
+    <dependency>
+      <groupId>com.google.code.gson</groupId>
+      <artifactId>gson</artifactId>
+      <version>2.11.0</version>
+    </dependency>
+
+    <!-- DPAPI (Windows Data Protection API) para cifrar credenciales en disco
+         atadas a la cuenta de Windows del usuario actual — ver
+         CredentialVaultStore. Solo se usa Crypt32Util (helper de alto nivel
+         de jna-platform), sin bindings nativos a mano. -->
+    <dependency>
+      <groupId>net.java.dev.jna</groupId>
+      <artifactId>jna-platform</artifactId>
+      <version>5.14.0</version>
+    </dependency>
+
+    <!-- Testing -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.11.3</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+      </plugin>
+
+      <!-- `mvn javafx:run` — arranca la app sin empaquetar; el runtime de
+           JavaFX no va en el classpath normal (son módulos con partes
+           nativas por plataforma), este plugin arma el module-path por su
+           cuenta a partir de las dependencias de arriba. -->
+      <plugin>
+        <groupId>org.openjfx</groupId>
+        <artifactId>javafx-maven-plugin</artifactId>
+        <version>0.0.8</version>
+        <configuration>
+          <mainClass>${mainClass}</mainClass>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.5.2</version>
+      </plugin>
+    </plugins>
+  </build>
+
+  <!--
+    Perfil de empaquetado — `mvn -Ppackage clean package` (NO corre en el
+    build normal, a propósito: mvn compile/test/javafx:run quedan igual de
+    rápidos que siempre). Produce un solo JAR ejecutable
+    (target/faro-app.jar, "fat jar" con todas las dependencias adentro,
+    manifest con Main-Class ya puesto) vía maven-shade-plugin.
+
+    Por qué NO se usó jlink (goal `javafx:jlink` del plugin de arriba):
+    jlink necesita un grafo de módulos completo para poder recortar el
+    runtime — este proyecto no tiene module-info.java (a propósito, ver
+    README) y ninguna de sus dependencias de runtime (HikariCP, los
+    drivers JDBC, RichTextFX, Gson, jna-platform) están modularizadas
+    tampoco, así que jlink terminaría necesitando convertir cada una a
+    módulo automático (con el riesgo real de paquetes divididos/nombres
+    en conflicto) solo para producir un runtime recortado — la ganancia
+    (tamaño del runtime) no justifica ese riesgo para una app de
+    escritorio interna. La alternativa está documentada como la forma
+    estándar de manejar apps JavaFX no modulares: JAR único +
+    `jpackage` directo (ver el comando exacto en el README, sección
+    "Empaquetado") en vez de jlink+jpackage encadenados.
+
+    Los artefactos de JavaFX con `classifier=win` (a diferencia de los de
+    arriba, sin classifier, que solo sirven para compilar y para que
+    javafx-maven-plugin arme su propio module-path en `javafx:run`) sí
+    traen las librerías nativas de Windows utilizables directo desde el
+    classpath sin módulos — necesarias para que el JAR final corra con
+    `java -jar` sin flags de módulo. Coinciden en versión con los de
+    arriba (mismas clases, simplemente empaquetadas distinto), así que
+    convivir en el classpath del perfil no genera conflicto real
+    (mismo contenido, solo empaquetado distinto).
+  -->
+  <profiles>
+    <profile>
+      <id>package</id>
+      <dependencies>
+        <dependency>
+          <groupId>org.openjfx</groupId>
+          <artifactId>javafx-controls</artifactId>
+          <version>${javafx.version}</version>
+          <classifier>win</classifier>
+        </dependency>
+        <dependency>
+          <groupId>org.openjfx</groupId>
+          <artifactId>javafx-fxml</artifactId>
+          <version>${javafx.version}</version>
+          <classifier>win</classifier>
+        </dependency>
+      </dependencies>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-shade-plugin</artifactId>
+            <version>3.6.0</version>
+            <executions>
+              <execution>
+                <phase>package</phase>
+                <goals>
+                  <goal>shade</goal>
+                </goals>
+                <configuration>
+                  <finalName>faro-app</finalName>
+                  <createDependencyReducedPom>false</createDependencyReducedPom>
+                  <transformers>
+                    <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                      <mainClass>${mainClass}</mainClass>
+                    </transformer>
+                  </transformers>
+                  <filters>
+                    <filter>
+                      <artifact>*:*</artifact>
+                      <excludes>
+                        <exclude>module-info.class</exclude>
+                        <exclude>META-INF/*.SF</exclude>
+                        <exclude>META-INF/*.DSA</exclude>
+                        <exclude>META-INF/*.RSA</exclude>
+                      </excludes>
+                    </filter>
+                  </filters>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

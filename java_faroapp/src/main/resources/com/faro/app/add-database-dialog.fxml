@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.PasswordField?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.ColumnConstraints?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<!-- Sin stylesheets fijo — AddDatabaseDialog la agrega según el tema activo, ver Theme.java. -->
+<VBox styleClass="dialog-root" spacing="14"
+      xmlns="http://javafx.com/javafx" xmlns:fx="http://javafx.com/fxml"
+      fx:controller="com.faro.app.ui.AddDatabaseDialogController">
+    <padding><Insets top="18" right="18" bottom="16" left="18"/></padding>
+
+    <Label fx:id="dialogTitleLabel" text="Agregar base de datos" styleClass="dialog-title"/>
+
+    <GridPane hgap="10" vgap="10">
+        <columnConstraints>
+            <ColumnConstraints minWidth="100"/>
+            <ColumnConstraints hgrow="ALWAYS"/>
+        </columnConstraints>
+
+        <Label text="Alias" styleClass="field-label" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+        <TextField fx:id="aliasField" styleClass="text-field" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
+
+        <Label text="Motor" styleClass="field-label" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+        <ComboBox fx:id="engineCombo" maxWidth="Infinity" GridPane.rowIndex="1" GridPane.columnIndex="1"/>
+
+        <Label text="Host" styleClass="field-label" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+        <TextField fx:id="hostField" styleClass="text-field" GridPane.rowIndex="2" GridPane.columnIndex="1"/>
+
+        <Label text="Puerto" styleClass="field-label" GridPane.rowIndex="3" GridPane.columnIndex="0"/>
+        <TextField fx:id="portField" styleClass="text-field" GridPane.rowIndex="3" GridPane.columnIndex="1"/>
+
+        <Label text="Base de datos" styleClass="field-label" GridPane.rowIndex="4" GridPane.columnIndex="0"/>
+        <TextField fx:id="databaseNameField" styleClass="text-field" GridPane.rowIndex="4" GridPane.columnIndex="1"/>
+
+        <Label text="Usuario" styleClass="field-label" GridPane.rowIndex="5" GridPane.columnIndex="0"/>
+        <TextField fx:id="userField" styleClass="text-field" GridPane.rowIndex="5" GridPane.columnIndex="1"/>
+
+        <Label text="Contraseña" styleClass="field-label" GridPane.rowIndex="6" GridPane.columnIndex="0"/>
+        <PasswordField fx:id="passwordField" styleClass="text-field" GridPane.rowIndex="6" GridPane.columnIndex="1"/>
+
+        <Label text="Modo" styleClass="field-label" GridPane.rowIndex="7" GridPane.columnIndex="0"/>
+        <ComboBox fx:id="modeCombo" maxWidth="Infinity" GridPane.rowIndex="7" GridPane.columnIndex="1"/>
+
+        <Label text="Conexiones del pool" styleClass="field-label" GridPane.rowIndex="8" GridPane.columnIndex="0"/>
+        <TextField fx:id="poolSizeField" styleClass="text-field" GridPane.rowIndex="8" GridPane.columnIndex="1"/>
+
+        <Label text="Timeout de consulta (s)" styleClass="field-label" GridPane.rowIndex="9" GridPane.columnIndex="0"/>
+        <TextField fx:id="queryTimeoutField" styleClass="text-field" GridPane.rowIndex="9" GridPane.columnIndex="1"/>
+    </GridPane>
+
+    <HBox spacing="8" alignment="CENTER_LEFT">
+        <Button text="Probar conexión" styleClass="button-secondary" onAction="#onTestConnection"/>
+        <Label fx:id="testStatusLabel" styleClass="muted" wrapText="true"/>
+    </HBox>
+
+    <Region VBox.vgrow="ALWAYS"/>
+
+    <HBox spacing="8" alignment="CENTER_RIGHT">
+        <Button text="Cancelar" styleClass="button-secondary" onAction="#onCancel"/>
+        <Button text="Guardar" styleClass="button" onAction="#onSave"/>
+    </HBox>
+</VBox>

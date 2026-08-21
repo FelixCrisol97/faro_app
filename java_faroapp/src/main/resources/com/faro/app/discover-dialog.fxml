@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.PasswordField?>
+<?import javafx.scene.control.ScrollPane?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.ColumnConstraints?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+
+<!-- Sin stylesheets fijo — DiscoverDialog la agrega según el tema activo, ver Theme.java. -->
+<VBox styleClass="dialog-root" spacing="14"
+      xmlns="http://javafx.com/javafx" xmlns:fx="http://javafx.com/fxml"
+      fx:controller="com.faro.app.ui.DiscoverDialogController">
+    <padding><Insets top="18" right="18" bottom="16" left="18"/></padding>
+
+    <Label text="Descubrir bases de datos" styleClass="dialog-title"/>
+    <Label styleClass="muted" wrapText="true"
+           text="Busca bases PostgreSQL/SQL Server accesibles en un host, con el usuario/contraseña dados."/>
+
+    <GridPane hgap="10" vgap="10">
+        <columnConstraints>
+            <ColumnConstraints minWidth="90"/>
+            <ColumnConstraints hgrow="ALWAYS"/>
+        </columnConstraints>
+
+        <Label text="Host" styleClass="field-label" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+        <TextField fx:id="hostField" styleClass="text-field" promptText="ej. 192.168.1.24" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
+
+        <Label text="Usuario" styleClass="field-label" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+        <TextField fx:id="userField" styleClass="text-field" GridPane.rowIndex="1" GridPane.columnIndex="1"/>
+
+        <Label text="Contraseña" styleClass="field-label" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+        <PasswordField fx:id="passwordField" styleClass="text-field" GridPane.rowIndex="2" GridPane.columnIndex="1"/>
+    </GridPane>
+
+    <HBox spacing="10" alignment="CENTER_LEFT">
+        <Button text="Buscar" styleClass="button-secondary" onAction="#onSearch"/>
+        <Label fx:id="searchStatusLabel" styleClass="muted" wrapText="true"/>
+    </HBox>
+
+    <ScrollPane fitToWidth="true" VBox.vgrow="ALWAYS" styleClass="discover-results-scroll">
+        <VBox fx:id="resultsBox" spacing="4"/>
+    </ScrollPane>
+
+    <HBox spacing="8" alignment="CENTER_RIGHT">
+        <Button text="Cerrar" styleClass="button-secondary" onAction="#onClose"/>
+        <Button text="Agregar seleccionadas" styleClass="button" onAction="#onAddSelected"/>
+    </HBox>
+</VBox>

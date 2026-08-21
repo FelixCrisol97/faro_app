@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Tab?>
+<?import javafx.scene.control.TabPane?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.ColumnConstraints?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<!-- Sin stylesheets fijo — PreferencesDialog la agrega según el tema activo, ver Theme.java. -->
+<VBox styleClass="dialog-root" spacing="14"
+      xmlns="http://javafx.com/javafx" xmlns:fx="http://javafx.com/fxml"
+      fx:controller="com.faro.app.ui.PreferencesDialogController">
+    <padding><Insets top="18" right="18" bottom="16" left="18"/></padding>
+
+    <Label text="Preferencias" styleClass="dialog-title"/>
+
+    <TabPane fx:id="tabPane" styleClass="results-tabs" tabClosingPolicy="UNAVAILABLE" VBox.vgrow="ALWAYS">
+        <Tab text="Rendimiento">
+            <VBox spacing="14">
+                <padding><Insets top="14" right="4" bottom="4" left="4"/></padding>
+                <Label styleClass="muted" wrapText="true"
+                       text="Estos valores afectan de verdad cómo corre la app — no son solo texto."/>
+                <GridPane hgap="10" vgap="10">
+                    <columnConstraints>
+                        <ColumnConstraints minWidth="220"/>
+                        <ColumnConstraints hgrow="ALWAYS"/>
+                    </columnConstraints>
+                    <Label text="Bases en paralelo al ejecutar" styleClass="field-label" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+                    <TextField fx:id="maxConcurrentField" styleClass="text-field" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
+
+                    <Label text="Tamaño de pool por defecto (base nueva)" styleClass="field-label" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+                    <TextField fx:id="poolSizeField" styleClass="text-field" GridPane.rowIndex="1" GridPane.columnIndex="1"/>
+
+                    <Label text="Timeout de consulta por defecto (s)" styleClass="field-label" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+                    <TextField fx:id="queryTimeoutField" styleClass="text-field" GridPane.rowIndex="2" GridPane.columnIndex="1"/>
+                </GridPane>
+            </VBox>
+        </Tab>
+        <Tab text="Atajos">
+            <VBox spacing="4">
+                <padding><Insets top="14" right="4" bottom="4" left="4"/></padding>
+                <Label styleClass="muted" wrapText="true" text="Solo referencia — los atajos ya existen en el menú, esto es donde consultarlos."/>
+                <GridPane hgap="14" vgap="6">
+                    <columnConstraints>
+                        <ColumnConstraints minWidth="90"/>
+                        <ColumnConstraints hgrow="ALWAYS"/>
+                    </columnConstraints>
+                    <Label text="Ctrl+T" styleClass="field-label" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+                    <Label text="Nueva consulta" styleClass="tree-db-name" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
+                    <Label text="Ctrl+O" styleClass="field-label" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+                    <Label text="Abrir archivo .sql…" styleClass="tree-db-name" GridPane.rowIndex="1" GridPane.columnIndex="1"/>
+                    <Label text="Ctrl+G" styleClass="field-label" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+                    <Label text="Guardar" styleClass="tree-db-name" GridPane.rowIndex="2" GridPane.columnIndex="1"/>
+                    <Label text="Ctrl+F" styleClass="field-label" GridPane.rowIndex="3" GridPane.columnIndex="0"/>
+                    <Label text="Buscar en el script" styleClass="tree-db-name" GridPane.rowIndex="3" GridPane.columnIndex="1"/>
+                    <Label text="Ctrl+L" styleClass="field-label" GridPane.rowIndex="4" GridPane.columnIndex="0"/>
+                    <Label text="Formatear SQL" styleClass="tree-db-name" GridPane.rowIndex="4" GridPane.columnIndex="1"/>
+                    <Label text="Ctrl+Espacio" styleClass="field-label" GridPane.rowIndex="5" GridPane.columnIndex="0"/>
+                    <Label text="Autocompletado" styleClass="tree-db-name" GridPane.rowIndex="5" GridPane.columnIndex="1"/>
+                    <Label text="F5" styleClass="field-label" GridPane.rowIndex="6" GridPane.columnIndex="0"/>
+                    <Label text="Ejecutar en las bases seleccionadas" styleClass="tree-db-name" GridPane.rowIndex="6" GridPane.columnIndex="1"/>
+                    <Label text="Alt+1 / 2 / 3" styleClass="field-label" GridPane.rowIndex="7" GridPane.columnIndex="0"/>
+                    <Label text="Panel de conexiones / Historial / Favoritos" styleClass="tree-db-name" GridPane.rowIndex="7" GridPane.columnIndex="1"/>
+                    <Label text="Alt+F4" styleClass="field-label" GridPane.rowIndex="8" GridPane.columnIndex="0"/>
+                    <Label text="Salir" styleClass="tree-db-name" GridPane.rowIndex="8" GridPane.columnIndex="1"/>
+                </GridPane>
+            </VBox>
+        </Tab>
+        <Tab text="Apariencia">
+            <VBox spacing="14">
+                <padding><Insets top="14" right="4" bottom="4" left="4"/></padding>
+                <Label styleClass="muted" wrapText="true"
+                       text="Tema claro/oscuro real — el acento de color (índigo) todavía es fijo, no hay selector para eso todavía."/>
+                <GridPane hgap="10" vgap="10">
+                    <columnConstraints>
+                        <ColumnConstraints minWidth="220"/>
+                        <ColumnConstraints hgrow="ALWAYS"/>
+                    </columnConstraints>
+                    <Label text="Tema" styleClass="field-label" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+                    <ComboBox fx:id="themeCombo" maxWidth="Infinity" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
+                </GridPane>
+            </VBox>
+        </Tab>
+    </TabPane>
+
+    <HBox spacing="8" alignment="CENTER_LEFT">
+        <Label fx:id="statusLabel" styleClass="muted" wrapText="true"/>
+        <Region HBox.hgrow="ALWAYS"/>
+        <Button text="Cerrar" styleClass="button-secondary" onAction="#onClose"/>
+        <Button text="Guardar" styleClass="button" onAction="#onSave"/>
+    </HBox>
+</VBox>

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ProgressBar?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.ColumnConstraints?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.VBox?>
+
+<!-- Sin stylesheets fijo — CsvImportDialog la agrega según el tema activo, ver Theme.java. -->
+<VBox styleClass="dialog-root" spacing="14"
+      xmlns="http://javafx.com/javafx" xmlns:fx="http://javafx.com/fxml"
+      fx:controller="com.faro.app.ui.CsvImportDialogController">
+    <padding><Insets top="18" right="18" bottom="16" left="18"/></padding>
+
+    <Label text="Importar CSV a una tabla" styleClass="dialog-title"/>
+    <Label styleClass="muted" wrapText="true"
+           text="La primera fila del archivo debe traer los nombres de columna — deben coincidir con columnas reales de la tabla destino."/>
+
+    <GridPane hgap="10" vgap="10">
+        <columnConstraints>
+            <ColumnConstraints minWidth="100"/>
+            <ColumnConstraints hgrow="ALWAYS"/>
+        </columnConstraints>
+
+        <Label text="Base de datos" styleClass="field-label" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+        <ComboBox fx:id="databaseCombo" maxWidth="Infinity" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
+
+        <Label text="Tabla destino" styleClass="field-label" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+        <TextField fx:id="tableNameField" styleClass="text-field" GridPane.rowIndex="1" GridPane.columnIndex="1"/>
+
+        <Label text="Archivo CSV" styleClass="field-label" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+        <HBox spacing="8" alignment="CENTER_LEFT" GridPane.rowIndex="2" GridPane.columnIndex="1">
+            <Button text="Elegir archivo…" styleClass="button-secondary" onAction="#onChooseFile"/>
+            <Label fx:id="fileLabel" styleClass="muted" text="(ninguno)" wrapText="true"/>
+        </HBox>
+    </GridPane>
+
+    <ProgressBar fx:id="progressBar" maxWidth="Infinity" progress="0" visible="false"/>
+    <Label fx:id="statusLabel" styleClass="muted" wrapText="true"/>
+
+    <Region VBox.vgrow="ALWAYS"/>
+
+    <HBox spacing="8" alignment="CENTER_RIGHT">
+        <Button text="Cerrar" styleClass="button-secondary" onAction="#onClose"/>
+        <Button fx:id="importButton" text="Importar" styleClass="button" onAction="#onImport"/>
+    </HBox>
+</VBox>
