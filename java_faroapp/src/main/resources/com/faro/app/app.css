@@ -1,0 +1,1016 @@
+/*
+ * Hoja de estilos ÚNICA y ESTRUCTURAL — reemplaza a `styles.css` +
+ * `styles-dark.css` (esos dos archivos siguen ahí sin tocar, como
+ * respaldo instantáneo, ver `Theme.java`). Todos los colores de acá
+ * usan variables "looked-up color" de JavaFX (`-token-*`, definidas en
+ * `theme-light.css`/`theme-dark.css` sobre `.root`) en vez de hex
+ * literal — es la misma regla sin importar qué tema esté cargado al
+ * mismo tiempo, así que un bug de "se me olvidó arreglarlo en el otro
+ * archivo" ya no puede pasar (motivo real de esta reescritura, ver
+ * README — el mismo bug de estilos apareció doce veces seguidas con el
+ * sistema de dos archivos separados).
+ *
+ * Fuentes/radios/tamaños/sombras que NO cambian entre temas se dejan
+ * literales acá mismo (no hay razón para tokenizarlos). La única
+ * excepción es la sombra de menús/popups (`rgba(15,23,42,0.15)`) y el
+ * fondo del `.tooltip` — ambos son fijos en los dos temas por diseño
+ * real (`app_shadows.dart`/convención de tooltip), no un descuido.
+ *
+ * IMPORTANTE — sin verificar en una ventana real todavía (ver README,
+ * "Sistema de temas — reescritura a variables"): la reescritura completa
+ * de dos archivos de ~700 líneas cada uno a este formato se hizo por
+ * transcripción cuidadosa regla por regla, releída contra el original,
+ * pero JavaFX/CSS no se puede compilar-verificar como el código Java —
+ * solo corriendo la app se sabe si el mecanismo de "looked-up color"
+ * resuelve como se espera en las 6 ventanas reales.
+ */
+
+.app-root {
+    -fx-background-color: -token-background;
+    -fx-font-family: "Manrope", "Segoe UI", sans-serif; /* --font-body */
+    -fx-font-size: 13px;
+}
+
+/* ---- Barras de desplazamiento — GLOBAL, sin escopar a una clase, porque
+   TreeView/TableView/ListView/CodeArea comparten el mismo .scroll-bar de
+   Modena. Contra demo_html/styles.css línea 139-143: pista transparente,
+   thumb angosto redondeado con --border, --text-muted al pasar el mouse,
+   sin flechas de incremento/decremento (`-fx-shape: " "` las oculta). ---- */
+.scroll-bar {
+    -fx-background-color: transparent;
+}
+.scroll-bar .track,
+.scroll-bar .track-background {
+    -fx-background-color: transparent;
+    -fx-border-width: 0;
+}
+/* Antes -token-border en reposo — hallazgo real del usuario probando
+   contra una tabla de 120,000 filas: prácticamente no se veía ni se podía
+   agarrar. -token-text-muted (antes solo al pasar el mouse) da suficiente
+   contraste en reposo sin perder la idea de "sutil" del diseño; el acento
+   en hover/pressed reemplaza al viejo -token-text-muted, para que agarrar
+   el thumb se sienta obvio, no solo "un poco más oscuro". */
+.scroll-bar .thumb {
+    -fx-background-color: -token-text-muted;
+    -fx-background-radius: 6px;
+}
+.scroll-bar .thumb:hover,
+.scroll-bar .thumb:pressed {
+    -fx-background-color: -token-accent-base;
+}
+.scroll-bar .increment-button,
+.scroll-bar .decrement-button {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+.scroll-bar .increment-arrow,
+.scroll-bar .decrement-arrow {
+    -fx-shape: " ";
+    -fx-padding: 0;
+}
+
+.app-menu-bar {
+    -fx-background-color: -token-surface;
+    -fx-padding: 0 4 0 4;
+}
+.app-menu-bar .label {
+    -fx-text-fill: -token-text;
+    -fx-font-size: 12.5px;
+}
+.app-menu-bar .menu:hover, .app-menu-bar .menu:showing {
+    -fx-background-color: -token-surface-alt;
+}
+
+/* Menús desplegables (Archivo/Editar/…) — sombra "md" de AppShadows, radio
+   10px como el prototipo. .context-menu es la ventana emergente real del
+   Menu, no un hijo del MenuBar en el árbol de escena, por eso va sin
+   prefijo .app-menu-bar. */
+.context-menu {
+    -fx-background-color: -token-surface;
+    -fx-background-radius: 10;
+    -fx-border-color: -token-border;
+    -fx-border-width: 1;
+    -fx-border-radius: 10;
+    -fx-effect: dropshadow(gaussian, rgba(15,23,42,0.15), 30, 0, 0, 10); /* --shadow-md, fijo en los dos temas */
+    -fx-padding: 6;
+}
+.context-menu .menu-item {
+    -fx-background-radius: 7;
+    -fx-padding: 4 8 4 8;
+}
+.context-menu .menu-item:focused {
+    -fx-background-color: -token-surface-alt;
+}
+.context-menu .menu-item .label {
+    -fx-text-fill: -token-text;
+    -fx-font-size: 12.5px;
+}
+.context-menu .separator {
+    -fx-padding: 4 0 4 0;
+}
+
+.toolbar {
+    -fx-background-color: -token-surface;
+    -fx-border-color: transparent transparent -token-border transparent;
+    -fx-border-width: 0 0 1 0;
+}
+
+.app-title {
+    -fx-font-family: "Sora", "Segoe UI", sans-serif; /* --font-heading */
+    -fx-font-weight: bold;
+    -fx-font-size: 18px;
+    -fx-text-fill: -token-text;
+}
+
+.muted {
+    -fx-text-fill: -token-text-muted;
+    -fx-font-size: 11.5px;
+}
+
+/* ---- Riel de íconos (Conexiones/Historial/Favoritos/Preferencias) — contra
+   faro-java-prototipo.html con "Mapa JavaFX" activado. ---- */
+.icon-rail {
+    -fx-background-color: -token-surface;
+    -fx-border-color: transparent -token-border transparent transparent;
+    -fx-border-width: 0 1 0 0;
+    -fx-pref-width: 44;
+    -fx-min-width: 44;
+    -fx-max-width: 44;
+}
+/* settingsRailButton es ToggleButton (no Button) como sus tres hermanos del
+   riel a propósito — ver MainController, hallazgo real: Button trae en
+   Modena más capas de relieve/foco por defecto que ToggleButton, y esas
+   capas se colaban por encima de -fx-background-color aunque estuviera en
+   "transparent". Las reglas :focused/:armed/:pressed de acá quedan como
+   refuerzo, no eran la causa real. */
+.rail-button {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-background-radius: 9px;
+    -fx-border-width: 0;
+    -fx-padding: 9;
+    -fx-cursor: hand;
+    -fx-focus-color: transparent;
+    -fx-faint-focus-color: transparent;
+}
+.rail-button .icon-stroke {
+    -fx-stroke: -token-text-muted;
+}
+.rail-button:hover {
+    -fx-background-color: -token-surface-alt;
+}
+.rail-button:armed,
+.rail-button:pressed {
+    -fx-background-color: -token-border;
+}
+.rail-button:selected {
+    -fx-background-color: -token-accent-soft;
+}
+.rail-button:selected .icon-stroke {
+    -fx-stroke: -token-accent-base;
+}
+
+.panel-left {
+    -fx-background-color: -token-surface;
+    -fx-border-color: transparent -token-border transparent transparent;
+    -fx-border-width: 0 1 0 0;
+}
+
+.section-label {
+    -fx-font-weight: bold;
+    -fx-font-size: 11.5px;
+    -fx-text-fill: -token-text-muted;
+}
+
+.panel-center {
+    -fx-background-color: -token-background;
+}
+
+.status-bar {
+    -fx-background-color: -token-surface;
+    -fx-border-color: -token-border transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+}
+/* Punto de "N conexiones · pool activo/total" — verde si hay al menos una
+   base con un pool abierto ahora mismo, gris si todavía no se ha corrido
+   ninguna consulta esta sesión (mismo lenguaje de color que los puntos de
+   estado del árbol, ver .tree-status-dot-*). */
+.pool-dot-connected { -fx-fill: -token-success-base; }
+.pool-dot-idle       { -fx-fill: -token-gray-border; }
+
+/* Spinner de "Exportando…" — igual que faro-java-prototipo.html: un anillo
+   con un lado transparente, girando sin parar mientras la exportación está
+   en curso (RotateTransition en MainController, CSS no anima solo por sí
+   mismo en JavaFX). */
+.export-spinner {
+    -fx-min-width: 11; -fx-min-height: 11; -fx-max-width: 11; -fx-max-height: 11;
+    -fx-border-radius: 6;
+    -fx-border-width: 2;
+    -fx-border-color: -token-accent-base -token-accent-base -token-accent-base transparent;
+}
+.export-spinner-label {
+    -fx-text-fill: -token-accent-soft-text;
+    -fx-font-size: 11.5px;
+}
+
+/* ---- Árbol de conexiones ---- */
+.connection-tree {
+    -fx-background-color: -token-surface;
+    -fx-padding: 0 0 8 0;
+}
+.connection-tree .tree-cell {
+    -fx-background-color: transparent;
+    -fx-padding: 3 6 3 4;
+}
+.connection-tree .tree-cell:filled:selected,
+.connection-tree .tree-cell:filled:hover {
+    -fx-background-color: -token-surface-alt;
+}
+
+/* La flecha de expandir/colapsar por defecto (Modena) se pone blanca en
+   :selected, asumiendo un fondo de selección oscuro — forzada a un color
+   fijo (--text-muted) sin importar el estado de selección, en los dos
+   temas, para que no cambie de aspecto al alternar. */
+.connection-tree .tree-cell .tree-disclosure-node .arrow,
+.connection-tree .tree-cell:filled:selected .tree-disclosure-node .arrow,
+.connection-tree .tree-cell:filled:hover .tree-disclosure-node .arrow {
+    -fx-background-color: -token-text-muted;
+}
+
+/* Checkbox de selección — el tema Modena por defecto de JavaFX (caja gris
+   con relieve) no tiene nada que ver con el diseño; esto lo reemplaza por
+   un cuadrito de borde delgado que se llena de acento sólido al marcar,
+   igual que el prototipo (que usa un div de 15x15 con check SVG blanco).
+   La palomita en sí (.mark, más abajo) sí es un check real desde 2026-08-22
+   — antes se veía como un bloque sólido por poco espacio, no porque
+   faltara la forma. */
+.connection-tree .check-box > .box {
+    -fx-background-color: -token-surface;
+    -fx-border-color: -token-gray-border;
+    -fx-border-width: 1.4;
+    -fx-border-radius: 4;
+    -fx-background-radius: 4;
+    -fx-padding: 2 2 2 2;
+}
+.connection-tree .check-box:hover > .box {
+    -fx-border-color: -token-accent-base;
+}
+.connection-tree .check-box:selected > .box {
+    -fx-background-color: -token-accent-base;
+    -fx-border-color: -token-accent-base;
+}
+/* -fx-shape NO se toca acá — el que trae Modena por defecto
+   (com.sun.javafx.scene.control.skin.modena/modena.css, ".check-box >
+   .box > .mark") ya es una forma de palomita real y rellenable (una curva
+   cerrada, no un trazo abierto sin área que rellenar, como se pensó mal
+   en una versión anterior de este comentario) — solo hacía falta
+   suficiente espacio para que se viera clara en vez de un bloque, verificado
+   contra el CSS real del jar de javafx-controls antes de tocar esto. */
+.connection-tree .check-box > .box > .mark {
+    -fx-background-color: transparent;
+    -fx-padding: 1 1 1 1;
+}
+.connection-tree .check-box:selected > .box > .mark {
+    -fx-background-color: -token-surface;
+}
+
+.tree-server-name {
+    -fx-font-weight: bold;
+    -fx-font-size: 12.5px;
+    -fx-text-fill: -token-text;
+}
+.tree-count {
+    -fx-font-size: 11px;
+    -fx-text-fill: -token-text-muted;
+}
+.tree-section-label {
+    -fx-font-weight: bold;
+    -fx-font-size: 11px;
+    -fx-text-fill: -token-text-muted;
+}
+.tree-db-name {
+    -fx-font-size: 12.5px;
+    -fx-text-fill: -token-text;
+}
+.tree-engine-badge {
+    -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace; /* --font-mono */
+    -fx-font-size: 9.5px;
+    -fx-text-fill: -token-text-muted;
+    -fx-background-color: -token-surface-alt;
+    -fx-background-radius: 6; /* --radius-chip */
+    -fx-padding: 1 4 1 4;
+}
+
+/* Punto de estado de conexión — mismo lenguaje de color que success/warn/
+   error en app_colors.dart. */
+.tree-status-dot-connected { -fx-fill: -token-success-base; }
+.tree-status-dot-failed    { -fx-fill: -token-error-base; }
+.tree-status-dot-testing   { -fx-fill: -token-warn-base; }
+.tree-status-dot-unknown   { -fx-fill: -token-gray-border; }
+
+/* Etiqueta "SIN RESTRICCIONES" — reemplaza al candado (2026-08-22, para
+   igualar faro-java-prototipo.html: el prototipo NO tiene ningún ícono de
+   candado en el árbol, cambiar el modo es solo cosa del diálogo Editar;
+   ahí solo aparece esta etiqueta, y solo para las bases que NO son de
+   solo lectura — una de solo lectura no lleva ninguna marca extra, es el
+   caso "normal"/esperado). Mismos tokens `warn-soft`/`warn-soft-text` que
+   ya usa el prototipo para este badge exacto. */
+.tree-unrestricted-badge {
+    -fx-font-size: 9.5px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -token-warn-soft-text;
+    -fx-background-color: -token-warn-soft;
+    -fx-background-radius: 6; /* --radius-chip */
+    -fx-padding: 1 5 1 5;
+}
+
+/* Botón de editar (lápiz) — visible siempre en cada fila de base de datos,
+   no un gesto oculto (doble clic solo es un atajo extra, ver
+   MainController#onTreeClicked). */
+.tree-edit-button {
+    -fx-min-width: 20; -fx-min-height: 20; -fx-max-width: 20; -fx-max-height: 20;
+    -fx-background-radius: 5;
+    -fx-cursor: hand;
+}
+.tree-edit-button:hover {
+    -fx-background-color: -token-border;
+}
+.tree-edit-icon {
+    -fx-fill: transparent;
+    -fx-stroke: -token-gray-icon;
+    -fx-stroke-width: 2.6;
+    -fx-stroke-line-cap: round;
+    -fx-stroke-line-join: round;
+}
+.tree-edit-button:hover .tree-edit-icon {
+    -fx-stroke: -token-accent-base;
+}
+
+/* ---- Editor SQL (RichTextFX CodeArea) — contra demo_html/styles.css
+   .sql-editor-wrap/.sql-gutter/.tok-*: fondo --surface-alt (no blanco),
+   radio 10px, sin borde, gutter transparente sobre ese mismo fondo, y los
+   4 colores de resaltado exactos de .tok-kw/.tok-str/.tok-num/.tok-com. */
+.sql-editor-scroll {
+    -fx-background-color: -token-surface-alt;
+    -fx-background-radius: 10;
+}
+.sql-editor {
+    -fx-background-color: -token-surface-alt;
+    -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace; /* --font-mono */
+    -fx-font-size: 14px;
+    -fx-padding: 14;
+}
+.sql-editor .paragraph-box {
+    -fx-cursor: text;
+}
+.sql-editor .lineno {
+    -fx-background-color: transparent;
+    -fx-text-fill: -token-text-muted;
+    -fx-padding: 0 8 0 4;
+}
+/* Texto SIN resaltar (identificadores, puntuación, espacios) — RichTextFX
+   envuelve cada tramo en un Text con la clase base "text" (la que trae
+   javafx.scene.text.Text por defecto); sin esto cae en el negro por
+   defecto de JavaFX, opaco/invisible según el tema. Un token con
+   resaltado (keyword/string/número/comentario) trae la clase "text" MÁS
+   su clase semántica encima — misma especificidad que esta regla, pero
+   las de abajo ganan por venir después en el archivo. */
+.sql-editor .text {
+    -fx-fill: -token-text;
+}
+/* RichTextFX deja el color del cursor y de la selección sin definir a
+   propósito en su propia hoja de estilos — sin esto, caen en negro/algo
+   sin contraste según el tema. Selección: mismo valor real que
+   demo_html/styles.css (`::selection { background: var(--accent-soft); }`). */
+.sql-editor .caret {
+    -fx-stroke: -token-text;
+}
+.sql-editor .selection {
+    -fx-fill: -token-editor-selection;
+}
+.sql-editor .keyword {
+    -fx-fill: -token-accent-base; /* .tok-kw */
+    -fx-font-weight: bold;
+}
+.sql-editor .string {
+    -fx-fill: -token-success-base; /* .tok-str */
+}
+.sql-editor .number {
+    -fx-fill: -token-warn-base; /* .tok-num */
+}
+.sql-editor .comment {
+    -fx-fill: -token-text-muted; /* .tok-com */
+    -fx-font-style: italic;
+}
+
+/* ---- SplitPane — regla global (editor/resultados, y desde hoy también
+   Ejecución/Diagnóstico fusionadas) para que ningún SplitPane nuevo se
+   quede con el gris de Modena por defecto, mismo patrón de siempre. */
+.split-pane-divider {
+    -fx-background-color: -token-border;
+    -fx-padding: 0 1 0 1;
+}
+
+/* ---- Pestañas de resultados (Resultados/Ejecución — esta última con
+   Diagnóstico fusionado adentro, ver main-view.fxml) — contra
+   demo_html/styles.css .tab-chip: subrayado de 2px con el acento en la
+   pestaña activa, sin fondo relleno (no es una "pill"), texto muted→text. */
+.results-tabs .tab-header-area {
+    -fx-background-color: -token-surface;
+    -fx-border-color: transparent transparent -token-border transparent;
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 0;
+}
+/* .tab-header-background es un nodo HIJO separado de .tab-header-area (no
+   el mismo) que trae su propio fondo gris claro de Modena por defecto —
+   sin esto se pinta encima de todo lo demás, sin importar el tema. */
+.results-tabs .tab-header-background {
+    -fx-background-color: -token-surface;
+}
+.results-tabs .tab {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-border-color: transparent transparent transparent transparent;
+    -fx-border-width: 0 0 2 0;
+    -fx-padding: 8 12 8 12;
+}
+.results-tabs .tab:hover {
+    -fx-background-color: -token-background;
+}
+.results-tabs .tab:selected {
+    -fx-border-color: transparent transparent -token-accent-base transparent;
+}
+.results-tabs .tab-label {
+    -fx-text-fill: -token-text-muted;
+    -fx-font-size: 13px;
+}
+.results-tabs .tab:selected .tab-label {
+    -fx-text-fill: -token-text;
+    -fx-font-weight: bold;
+}
+/* Nombre + contador en la propia pestaña ("Resultados 1,240"), contra
+   faro-java-prototipo.html — el tab usa un graphic propio (MainController
+   #setTabBadge) en vez del texto normal del Tab, así que .tab-label de
+   arriba no le aplica; estas dos clases son las que sí le pegan. */
+.results-tabs .tab-name {
+    -fx-text-fill: -token-text-muted;
+    -fx-font-size: 13px;
+}
+.results-tabs .tab:selected .tab-name {
+    -fx-text-fill: -token-text;
+    -fx-font-weight: bold;
+}
+.tab-badge {
+    -fx-background-color: -token-surface-alt;
+    -fx-text-fill: -token-text-muted;
+    -fx-background-radius: 999px;
+    -fx-padding: 1 7 1 7;
+    -fx-font-size: 10.5px;
+    -fx-font-weight: 600;
+}
+.results-tabs .tab-content-area {
+    -fx-background-color: -token-surface;
+}
+
+/* ---- Pestañas de consulta (editor SQL) — mismo lenguaje visual que
+   .results-tabs, pero cerrables (cada una es un script SQL independiente,
+   con su propio archivo asociado — ver MainController#QueryTabState). */
+.query-tabs .tab-header-area {
+    -fx-background-color: -token-surface;
+    -fx-border-color: transparent transparent -token-border transparent;
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 0;
+}
+.query-tabs .tab-header-background {
+    -fx-background-color: -token-surface;
+}
+.query-tabs .tab {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-border-color: transparent transparent transparent transparent;
+    -fx-border-width: 0 0 2 0;
+    -fx-padding: 6 8 6 12;
+}
+.query-tabs .tab:hover {
+    -fx-background-color: -token-background;
+}
+.query-tabs .tab:selected {
+    -fx-border-color: transparent transparent -token-accent-base transparent;
+}
+.query-tabs .tab-label {
+    -fx-text-fill: -token-text-muted;
+    -fx-font-size: 12.5px;
+}
+.query-tabs .tab:selected .tab-label {
+    -fx-text-fill: -token-text;
+    -fx-font-weight: bold;
+}
+.query-tabs .tab-close-button {
+    -fx-background-color: -token-gray-icon;
+}
+.query-tabs .tab:hover .tab-close-button,
+.query-tabs .tab:selected .tab-close-button {
+    -fx-background-color: -token-text-muted;
+}
+.query-tabs .tab-content-area {
+    -fx-background-color: -token-surface-alt; /* mismo fondo que .sql-editor-scroll */
+}
+
+/* ---- Barra de búsqueda del editor (Ctrl+F) — una sola, compartida entre pestañas ---- */
+.find-bar {
+    -fx-background-color: -token-surface-alt;
+    -fx-background-radius: 8px;
+    -fx-padding: 6 8 6 8;
+    -fx-border-color: -token-border;
+    -fx-border-radius: 8px;
+    -fx-border-width: 1px;
+}
+
+/* ---- TableView de resultados — contra demo_html/styles.css
+   table.results-grid: encabezado --surface-alt con texto --text (no
+   muted), SIN cebra, SIN resaltado de selección (es una vista de datos de
+   solo lectura), fila resaltada solo en hover. */
+.results-table {
+    -fx-background-color: -token-surface;
+    -fx-font-size: 13px;
+}
+.results-table .column-header-background {
+    -fx-background-color: -token-surface-alt;
+}
+/* .filler es OTRO nodo hijo más — la franja que la tabla pinta después de
+   la última columna real cuando sobra ancho (columnas angostas en un panel
+   ancho) — mismo patrón de fondo propio de Modena sin anular. */
+.results-table .filler {
+    -fx-background-color: -token-surface-alt;
+}
+/* Cada .column-header individual (uno por columna) trae su propio fondo
+   gris de Modena por defecto — sin anularlo acá también, se pinta encima
+   del fondo de .column-header-background de arriba (el contenedor
+   completo), sin importar qué color se le ponga a ese padre. */
+.results-table .column-header {
+    -fx-background-color: -token-surface-alt;
+    -fx-border-color: transparent transparent -token-border transparent;
+}
+.results-table .column-header .label {
+    -fx-text-fill: -token-text;
+    -fx-font-weight: bold;
+    -fx-font-size: 12.5px;
+}
+.results-table .table-row-cell {
+    -fx-background-color: -token-surface;
+    -fx-border-color: transparent transparent -token-border transparent;
+}
+.results-table .table-row-cell:hover {
+    -fx-background-color: -token-surface-alt;
+}
+.results-table .table-row-cell:selected {
+    -fx-background-color: -token-surface-alt;
+}
+.results-table .table-cell {
+    -fx-text-fill: -token-text;
+    -fx-padding: 8 14 8 14;
+}
+/* Placeholder ("Tabla sin contenido") — el Label que TableView muestra
+   solo cuando no hay filas (ExecutionTableFactory antes de correr una
+   consulta, por ejemplo) — nunca tenía color, caía en el gris tenue por
+   defecto de Modena. */
+.results-table .placeholder,
+.results-table .placeholder .label {
+    -fx-text-fill: -token-text-muted;
+}
+
+/* ---- Log de la pestaña Diagnóstico — líneas con hora, más reciente arriba. */
+.diagnostic-log {
+    -fx-background-color: -token-surface;
+}
+.diagnostic-log .list-cell {
+    -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace; /* --font-mono */
+    -fx-font-size: 12px;
+    -fx-text-fill: -token-text;
+    -fx-padding: 5 14 5 14;
+    -fx-background-color: transparent;
+    -fx-border-color: transparent transparent -token-surface-alt transparent;
+}
+.diagnostic-log .list-cell:filled:hover,
+.diagnostic-log .list-cell:filled:selected {
+    -fx-background-color: -token-surface-alt;
+    -fx-text-fill: -token-text;
+}
+/* ---- Log de Diagnóstico de verdad — texto corrido, SIN bordes ni
+   resaltado por fila (no es una lista clicable, a diferencia de
+   .diagnostic-log de historial/favoritos) — contra
+   faro-java-prototipo.html, que usa line-height:1.9 y nada de separadores
+   entre líneas. */
+.diagnostic-panel {
+    -fx-background-color: -token-surface;
+}
+.diagnostic-panel .list-cell {
+    -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace;
+    -fx-font-size: 11.5px;
+    -fx-text-fill: -token-text;
+    -fx-padding: 3 14 3 14;
+    -fx-background-color: transparent;
+}
+.diagnostic-panel .list-cell:filled:hover,
+.diagnostic-panel .list-cell:filled:selected {
+    -fx-background-color: transparent;
+    -fx-text-fill: -token-text;
+}
+/* Nivel de cada entrada — mismos colores que faro-java-prototipo.html
+   (INFO/WARN/ERROR en negrita, DEBUG en el mismo muted que la hora). */
+.log-timestamp {
+    -fx-text-fill: -token-text-muted;
+}
+.log-level-info {
+    -fx-text-fill: -token-success-base;
+    -fx-font-weight: bold;
+}
+.log-level-warn {
+    -fx-text-fill: -token-warn-base;
+    -fx-font-weight: bold;
+}
+.log-level-error {
+    -fx-text-fill: -token-error-base;
+    -fx-font-weight: bold;
+}
+.log-level-debug {
+    -fx-text-fill: -token-text-muted;
+    -fx-font-weight: bold;
+}
+.log-message {
+    -fx-text-fill: -token-text;
+}
+
+/* ---- Ejecución — lista tipo tarjeta por base, contra
+   faro-java-prototipo.html (no existe en demo_html, exclusivo del
+   rediseño Java). Reemplaza la TableView con rejilla que había antes —
+   el usuario la marcó como "formato de tabla culero", sin nada que ver
+   con el diseño real. Ver ExecutionTableFactory. */
+.exec-header {
+    -fx-padding: 9 12 9 12;
+    -fx-border-color: transparent transparent -token-border transparent;
+}
+.exec-summary {
+    -fx-font-size: 12px;
+    -fx-font-weight: 600;
+    -fx-text-fill: -token-text;
+}
+.execution-list {
+    -fx-background-color: -token-surface;
+}
+.execution-list .list-cell {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+.exec-cell-root {
+    -fx-border-color: transparent transparent -token-border transparent;
+}
+.exec-row {
+    -fx-padding: 8 12 8 12;
+}
+.exec-error-detail {
+    -fx-padding: 0 12 10 33; /* alineado bajo el alias, no bajo el punto de color */
+    -fx-font-size: 11.5px;
+    -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace;
+    -fx-text-fill: -token-error-base;
+}
+.exec-dot {
+    -fx-min-width: 9;
+    -fx-min-height: 9;
+    -fx-max-width: 9;
+    -fx-max-height: 9;
+    -fx-background-radius: 999;
+}
+.exec-dot-running {
+    -fx-background-color: -token-warn-base;
+}
+.exec-dot-succeeded {
+    -fx-background-color: -token-success-base;
+}
+.exec-dot-failed {
+    -fx-background-color: -token-error-base;
+}
+.exec-dot-cancelled {
+    -fx-background-color: -token-text-muted;
+}
+.exec-alias {
+    -fx-font-size: 12.5px;
+    -fx-text-fill: -token-text;
+}
+.exec-host {
+    -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace;
+    -fx-font-size: 10.5px;
+    -fx-text-fill: -token-text-muted;
+}
+.exec-badge {
+    -fx-font-size: 10.5px;
+    -fx-font-weight: 700;
+    -fx-padding: 3 8 3 8;
+    -fx-background-radius: 999;
+}
+.exec-badge-running {
+    -fx-background-color: -token-warn-soft;
+    -fx-text-fill: -token-warn-soft-text;
+}
+.exec-badge-succeeded {
+    -fx-background-color: -token-success-soft;
+    -fx-text-fill: -token-success-soft-text;
+}
+.exec-badge-failed {
+    -fx-background-color: -token-error-soft;
+    -fx-text-fill: -token-error-soft-text;
+}
+.exec-badge-cancelled {
+    -fx-background-color: -token-surface-alt;
+    -fx-text-fill: -token-text-muted;
+}
+.exec-bar {
+    -fx-pref-height: 5;
+    -fx-max-height: 5;
+}
+.exec-bar > .track {
+    -fx-background-color: -token-surface-alt;
+    -fx-background-radius: 999;
+}
+.exec-bar-running > .bar {
+    -fx-background-color: -token-warn-base;
+    -fx-background-radius: 999;
+    -fx-background-insets: 0;
+}
+.exec-bar-succeeded > .bar {
+    -fx-background-color: -token-success-base;
+    -fx-background-radius: 999;
+    -fx-background-insets: 0;
+}
+.exec-bar-failed > .bar {
+    -fx-background-color: -token-error-base;
+    -fx-background-radius: 999;
+    -fx-background-insets: 0;
+}
+.exec-bar-cancelled > .bar {
+    -fx-background-color: -token-text-muted;
+    -fx-background-radius: 999;
+    -fx-background-insets: 0;
+}
+.exec-rows {
+    -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace;
+    -fx-font-size: 11.5px;
+    -fx-text-fill: -token-text;
+    -fx-alignment: CENTER_RIGHT;
+}
+.exec-elapsed {
+    -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace;
+    -fx-font-size: 11.5px;
+    -fx-text-fill: -token-text-muted;
+    -fx-alignment: CENTER_RIGHT;
+}
+
+/* Íconos Lucide (ver Icons.java) dentro de botones — trazo por defecto,
+   .icon-fill solo para el triángulo de "Ejecutar". */
+.icon-stroke {
+    -fx-fill: transparent;
+    -fx-stroke: -token-text;
+    -fx-stroke-width: 2;
+    -fx-stroke-line-cap: round;
+    -fx-stroke-line-join: round;
+}
+.icon-fill {
+    -fx-fill: white;
+    -fx-stroke: transparent;
+}
+.button-icon .icon-stroke {
+    -fx-stroke: -token-text-muted;
+}
+.button-icon:hover .icon-stroke {
+    -fx-stroke: -token-accent-base;
+}
+
+/* Botón — radio 9px (--radius-control), acento indigo (--accent-base) */
+.button {
+    -fx-background-color: -token-accent-base;
+    -fx-text-fill: white;
+    -fx-background-radius: 9px;
+    -fx-padding: 6 14 6 14;
+    -fx-font-weight: bold;
+    -fx-graphic-text-gap: 7;
+    -fx-cursor: hand;
+}
+.run-button-label {
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+/* Bug real encontrado en vivo: cancelButtonGraphic() reusaba
+   .run-button-label (texto blanco a propósito, pensado SOLO para el fondo
+   indigo sólido de .button) — pero "Cancelar" usa .button-danger, fondo
+   transparente, así que el texto blanco quedaba invisible sobre el fondo
+   claro de la barra de herramientas. Clase propia, mismo tono rojo que ya
+   usa .button-danger para el ícono. */
+.cancel-button-label {
+    -fx-text-fill: -token-error-base;
+    -fx-font-weight: bold;
+}
+.run-button-shortcut {
+    -fx-text-fill: white;
+    -fx-opacity: 0.8;
+    -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace; /* --font-mono */
+    -fx-font-size: 10.5px;
+}
+.button:hover {
+    -fx-background-color: -token-accent-hover;
+}
+.button:pressed {
+    -fx-background-color: -token-accent-active;
+}
+
+/* Botón "Cancelar" — mismo hueco que ocupa "Ejecutar" mientras una
+   consulta está corriendo (ver MainController#onRunButtonClicked), pero
+   con el tratamiento visual del prototipo: transparente + borde/texto
+   rojo (destructivo/detener), no el acento indigo sólido de "Ejecutar" —
+   necesitaba verse claramente distinto, no solo cambiar el texto. */
+.button-danger {
+    -fx-background-color: transparent;
+    -fx-text-fill: -token-error-base;
+    -fx-border-color: -token-border;
+    -fx-border-width: 1;
+    -fx-border-radius: 9px;
+    -fx-background-radius: 9px;
+    -fx-padding: 6 14 6 14;
+    -fx-font-weight: bold;
+    -fx-graphic-text-gap: 7;
+    -fx-cursor: hand;
+}
+.button-danger:hover {
+    -fx-background-color: -token-error-soft;
+}
+
+/* Botón secundario de barra de herramientas — borde, sin relleno */
+.button-secondary {
+    -fx-background-color: transparent;
+    -fx-text-fill: -token-text;
+    -fx-border-color: -token-border;
+    -fx-border-width: 1;
+    -fx-border-radius: 9px;
+    -fx-background-radius: 9px;
+    -fx-padding: 6 12 6 12;
+    -fx-font-weight: bold;
+    -fx-font-size: 12.5px;
+    -fx-graphic-text-gap: 6;
+    -fx-cursor: hand;
+}
+.button-secondary:hover {
+    -fx-background-color: -token-surface-alt;
+}
+
+.toolbar-separator {
+    -fx-min-width: 1;
+    -fx-max-width: 1;
+    -fx-background-color: -token-border;
+}
+
+.toolbar-pill {
+    -fx-background-color: -token-accent-soft;
+    -fx-text-fill: -token-accent-soft-text;
+    -fx-background-radius: 999px;
+    -fx-padding: 5 12 5 12;
+    -fx-font-weight: bold;
+    -fx-font-size: 12px;
+}
+
+/* Botón cuadrado de icono (ej. "+" de agregar base de datos) */
+.button-icon {
+    -fx-background-color: transparent;
+    -fx-text-fill: -token-text-muted;
+    -fx-border-color: -token-border;
+    -fx-border-width: 1;
+    -fx-border-radius: 9px;
+    -fx-background-radius: 9px;
+    -fx-min-width: 26px;
+    -fx-min-height: 26px;
+    -fx-max-width: 26px;
+    -fx-max-height: 26px;
+    -fx-font-weight: bold;
+    -fx-cursor: hand;
+}
+.button-icon:hover {
+    -fx-background-color: -token-surface-alt;
+    -fx-text-fill: -token-accent-base;
+}
+
+/* ---- Diálogos (Agregar/editar base de datos, etc.) ---- */
+.dialog-root {
+    -fx-background-color: -token-surface;
+}
+.dialog-title {
+    -fx-font-family: "Sora", "Segoe UI", sans-serif; /* --font-heading */
+    -fx-font-weight: bold;
+    -fx-font-size: 17px;
+    -fx-text-fill: -token-text;
+}
+
+/* ---- Alert/TextInputDialog — el Dialog NATIVO de JavaFX (".dialog-pane",
+   NO ".dialog-root" de arriba, que es solo para los diálogos propios como
+   Agregar/editar base de datos). Nunca se le había puesto CSS al panel en
+   sí — MainController#applyThemeToAlert solo le daba jerarquía a los
+   BOTONES (.button/.button-secondary), dejando el fondo/texto del panel
+   pegado al valor por defecto de Modena (-fx-background, un gris claro fijo
+   que no tiene nada que ver con el tema activo). En modo claro pasaba
+   desapercibido (ese gris se parece lo bastante al -token-surface real);
+   en modo oscuro el fondo se quedaba claro mientras el texto de los
+   botones secundarios (-token-text, ya claro por el tema oscuro) se volvía
+   invisible encima — hallazgo real del usuario, "Cambios sin guardar" con
+   los botones en blanco. Selectores verificados contra el modena.css real
+   del jar de javafx-controls antes de escribir esto (no adivinados). */
+.dialog-pane {
+    -fx-background-color: -token-surface;
+}
+.dialog-pane:header .header-panel {
+    -fx-background-color: -token-surface-alt;
+}
+.dialog-pane:header .header-panel .label {
+    -fx-text-fill: -token-text;
+    -fx-font-weight: bold;
+}
+.dialog-pane > .content.label {
+    -fx-text-fill: -token-text;
+}
+.field-label {
+    -fx-font-size: 12px;
+    -fx-text-fill: -token-text-muted;
+}
+/* Resultado de una acción con éxito/error real (ej. "Probar conexión") —
+   .muted por sí sola no distingue "todavía no se sabe"/"funcionó"/"falló". */
+.status-success {
+    -fx-text-fill: -token-success-base;
+    -fx-font-weight: bold;
+}
+.status-error {
+    -fx-text-fill: -token-error-base;
+    -fx-font-weight: bold;
+}
+.text-field {
+    -fx-background-color: -token-background;
+    -fx-border-color: -token-border;
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 6 10 6 10;
+    -fx-font-size: 12.5px;
+    -fx-text-fill: -token-text;
+}
+.text-field:focused {
+    -fx-border-color: -token-accent-base;
+}
+.combo-box {
+    -fx-background-color: -token-background;
+    -fx-border-color: -token-border;
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+}
+.combo-box:focused {
+    -fx-border-color: -token-accent-base;
+}
+/* El texto del valor seleccionado (cuadro CERRADO) es una ListCell interna
+   propia de Modena, `.combo-box > .list-cell` (verificado contra
+   modena.css real del jar de javafx-controls) — distinta de
+   `.combo-box-popup .list-cell` de abajo, que solo pinta las opciones del
+   popup ABIERTO. Sin esto hereda -fx-text-base-color de Modena (oscuro
+   fijo), ilegible en modo oscuro. */
+.combo-box > .list-cell {
+    -fx-text-fill: -token-text;
+}
+/* La lista desplegable es un popup APARTE del cuadro cerrado (mismo patrón
+   que .context-menu) — sin esto usa el ListView blanco/negro de Modena
+   por defecto, aunque el cuadro cerrado sí tuviera estilo. */
+.combo-box-popup .list-view {
+    -fx-background-color: -token-surface;
+    -fx-border-color: -token-border;
+    -fx-border-width: 1;
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-effect: dropshadow(gaussian, rgba(15,23,42,0.15), 30, 0, 0, 10); /* --shadow-md */
+    -fx-padding: 4;
+}
+.combo-box-popup .list-cell {
+    -fx-background-color: transparent;
+    -fx-text-fill: -token-text;
+    -fx-padding: 6 10 6 10;
+    -fx-background-radius: 6;
+}
+.combo-box-popup .list-cell:filled:hover,
+.combo-box-popup .list-cell:filled:selected {
+    -fx-background-color: -token-surface-alt;
+}
+
+/* Tooltip — mismo tratamiento oscuro en los dos temas A PROPÓSITO (caja
+   oscura fija, texto claro fijo), no tokenizado — convención común de
+   tooltip (VSCode, macOS, navegadores) y no hay una fuente real de diseño
+   que verificar acá (los tooltips de demo_html son del navegador, sin CSS
+   propio que copiar). */
+.tooltip {
+    -fx-background-color: #0F172A;
+    -fx-text-fill: #F8FAFC;
+    -fx-background-radius: 6;
+    -fx-padding: 5 9 5 9;
+    -fx-font-size: 11.5px;
+}

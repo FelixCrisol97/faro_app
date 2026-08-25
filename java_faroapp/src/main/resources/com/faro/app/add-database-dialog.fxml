@@ -9,7 +9,6 @@
 <?import javafx.scene.layout.ColumnConstraints?>
 <?import javafx.scene.layout.GridPane?>
 <?import javafx.scene.layout.HBox?>
-<?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.VBox?>
 
 <!-- Sin stylesheets fijo — AddDatabaseDialog la agrega según el tema activo, ver Theme.java. -->
@@ -18,6 +17,16 @@
       fx:controller="com.faro.app.ui.AddDatabaseDialogController">
     <padding><Insets top="18" right="18" bottom="16" left="18"/></padding>
 
+    <!-- SIN ScrollPane a propósito — un intento anterior lo usó para que un
+         mensaje largo de "Probar conexión" nunca empujara los botones fuera
+         de la vista, pero el usuario lo rechazó de raíz (2026-08-22): "no
+         quiero un scroll, quiero que se vea bien" — tener que desplazarse
+         solo para leer si conectó o no le molestaba más que el problema
+         original. Arreglo real: la ventana ahora arranca bastante más alta
+         (ver AddDatabaseDialog#show) y es redimensionable, así que un
+         mensaje inusualmente largo tiene espacio de sobra por defecto y,
+         en el peor de los casos, el usuario puede agrandarla arrastrando el
+         borde — nunca necesita desplazarse adentro del diálogo mismo. -->
     <Label fx:id="dialogTitleLabel" text="Agregar base de datos" styleClass="dialog-title"/>
 
     <GridPane hgap="10" vgap="10">
@@ -57,12 +66,10 @@
         <TextField fx:id="queryTimeoutField" styleClass="text-field" GridPane.rowIndex="9" GridPane.columnIndex="1"/>
     </GridPane>
 
-    <HBox spacing="8" alignment="CENTER_LEFT">
+    <VBox spacing="6">
         <Button text="Probar conexión" styleClass="button-secondary" onAction="#onTestConnection"/>
-        <Label fx:id="testStatusLabel" styleClass="muted" wrapText="true"/>
-    </HBox>
-
-    <Region VBox.vgrow="ALWAYS"/>
+        <Label fx:id="testStatusLabel" styleClass="muted" wrapText="true" maxWidth="Infinity"/>
+    </VBox>
 
     <HBox spacing="8" alignment="CENTER_RIGHT">
         <Button text="Cancelar" styleClass="button-secondary" onAction="#onCancel"/>

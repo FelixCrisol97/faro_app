@@ -13,6 +13,9 @@ import java.util.List;
 
 import com.faro.app.model.DbEngine;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javafx.concurrent.Task;
 
 /**
@@ -29,6 +32,8 @@ import javafx.concurrent.Task;
  */
 public final class DiscoveryService {
 
+    private static final Logger log = LoggerFactory.getLogger(DiscoveryService.class);
+
     private static final int CONNECT_TIMEOUT_MILLIS = 800;
 
     private DiscoveryService() {
@@ -38,13 +43,22 @@ public final class DiscoveryService {
         return new Task<>() {
             @Override
             protected List<DiscoveredDatabase> call() {
+                log.info("Escaneando '{}' — puertos {} (PostgreSQL) y {} (SQL Server).",
+                        host, DbEngine.POSTGRES.defaultPort(), DbEngine.SQL_SERVER.defaultPort());
                 List<DiscoveredDatabase> found = new ArrayList<>();
                 if (isPortOpen(host, DbEngine.POSTGRES.defaultPort())) {
                     found.addAll(listPostgresDatabases(host, user, password));
+                } else {
+                    log.debug("[{}] Puerto PostgreSQL ({}) cerrado o sin respuesta en {} ms — se descarta ese motor.",
+                            host, DbEngine.POSTGRES.defaultPort(), CONNECT_TIMEOUT_MILLIS);
                 }
                 if (isPortOpen(host, DbEngine.SQL_SERVER.defaultPort())) {
                     found.addAll(listSqlServerDatabases(host, user, password));
+                } else {
+                    log.debug("[{}] Puerto SQL Server ({}) cerrado o sin respuesta en {} ms — se descarta ese motor.",
+                            host, DbEngine.SQL_SERVER.defaultPort(), CONNECT_TIMEOUT_MILLIS);
                 }
+                log.info("Escaneo de '{}' completo — {} base(s) encontradas.", host, found.size());
                 return found;
             }
         };
@@ -68,8 +82,11 @@ public final class DiscoveryService {
             while (rs.next()) {
                 result.add(new DiscoveredDatabase(DbEngine.POSTGRES, rs.getString(1)));
             }
+            log.debug("[{}] PostgreSQL — {} base(s) visibles con ese usuario.", host, result.size());
         } catch (SQLException e) {
-            // Puerto abierto pero login/permiso falló — no es fatal para el resto del escaneo.
+            // Puerto abierto pero login/permiso falló — no es fatal para el resto del escaneo,
+            // pero sin este log no había NINGÚN rastro de por qué el escaneo no encontró nada.
+            log.debug("[{}] Puerto PostgreSQL abierto pero login/consulta falló: {}", host, e.getMessage());
         }
         return result;
     }
@@ -84,8 +101,9 @@ public final class DiscoveryService {
             while (rs.next()) {
                 result.add(new DiscoveredDatabase(DbEngine.SQL_SERVER, rs.getString(1)));
             }
+            log.debug("[{}] SQL Server — {} base(s) visibles con ese usuario.", host, result.size());
         } catch (SQLException e) {
-            // Puerto abierto pero login/permiso falló — no es fatal para el resto del escaneo.
+            log.debug("[{}] Puerto SQL Server abierto pero login/consulta falló: {}", host, e.getMessage());
         }
         return result;
     }

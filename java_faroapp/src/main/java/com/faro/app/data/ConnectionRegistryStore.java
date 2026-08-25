@@ -16,6 +16,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Guarda/carga {@link ConnectionRegistry} + {@link AppPreferences} a un
  * archivo JSON en disco — el equivalente a {@code servers_repository.dart}
@@ -48,6 +51,8 @@ import com.google.gson.JsonParser;
  */
 public final class ConnectionRegistryStore {
 
+    private static final Logger log = LoggerFactory.getLogger(ConnectionRegistryStore.class);
+
     public static final Path DEFAULT_FILE =
             Path.of(System.getProperty("user.home"), ".faro", "connections.json");
 
@@ -64,6 +69,7 @@ public final class ConnectionRegistryStore {
         prefs.addProperty("defaultPoolSize", preferences.defaultPoolSize());
         prefs.addProperty("defaultQueryTimeoutSeconds", preferences.defaultQueryTimeoutSeconds());
         prefs.addProperty("darkTheme", preferences.isDarkTheme());
+        prefs.addProperty("fetchSize", preferences.fetchSize());
         root.add("preferences", prefs);
 
         JsonArray favoritesJson = new JsonArray();
@@ -100,10 +106,13 @@ public final class ConnectionRegistryStore {
             Files.createDirectories(file.getParent());
         }
         Files.writeString(file, root.toString(), StandardCharsets.UTF_8);
+        log.info("Registro guardado en {} — {} servidor(es), {} favorito(s).",
+                file, registry.servers().size(), favorites.all().size());
     }
 
     public static ConnectionRegistry load(Path file, AppPreferences preferences, FavoritesStore favorites)
             throws IOException {
+        log.info("Cargando registro desde {}", file);
         String content = Files.readString(file, StandardCharsets.UTF_8);
         JsonObject root = JsonParser.parseString(content).getAsJsonObject();
 
@@ -120,6 +129,9 @@ public final class ConnectionRegistryStore {
             }
             if (prefs.has("darkTheme")) {
                 preferences.setDarkTheme(prefs.get("darkTheme").getAsBoolean());
+            }
+            if (prefs.has("fetchSize")) {
+                preferences.setFetchSize(prefs.get("fetchSize").getAsInt());
             }
         }
 
@@ -153,6 +165,8 @@ public final class ConnectionRegistryStore {
                 registry.ungroupedDatabases().add(fromJson(element.getAsJsonObject()));
             }
         }
+        log.info("Registro cargado — {} servidor(es), {} base(s) sin agrupar, {} favorito(s).",
+                registry.servers().size(), registry.ungroupedDatabases().size(), favorites.all().size());
         return registry;
     }
 

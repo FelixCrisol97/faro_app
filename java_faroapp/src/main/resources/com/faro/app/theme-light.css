@@ -1,0 +1,68 @@
+/*
+ * Paleta — tema claro. Define únicamente las variables de color reales
+ * (mismos valores que `demo_html/styles.css` `:root`/`[data-theme='light']`
+ * y `app_accent.dart` `AppAccent.indigo.light`) usando "looked-up colors"
+ * de JavaFX — un mecanismo real que existe desde siempre en JavaFX (no
+ * necesita JDK 24, eso se dijo mal en una versión anterior de este
+ * sistema): cualquier propiedad `-nombre: valor;` puesta en un nodo se
+ * puede referenciar en CUALQUIER regla `-fx-propiedad: -nombre;` de
+ * cualquier hoja de estilos cargada en la misma ventana — se resuelve
+ * buscando hacia arriba en el árbol de nodos, no por orden de carga de
+ * archivos. `.root` es la clase que JavaFX le pone automáticamente al nodo
+ * raíz de CADA `Scene` (las 6 ventanas de la app la tienen sin que haga
+ * falta pedirlo), así que definir las variables ahí basta para que
+ * `app.css` (la única hoja con las reglas de verdad, ver ese archivo) las
+ * vea en las 6 ventanas.
+ *
+ * `Theme.java` decide cargar este archivo + `app.css` juntos, o
+ * `theme-dark.css` + `app.css` — nunca los 4 a la vez. Ver
+ * `styles.css`/`styles-dark.css` (archivos viejos, ya no referenciados
+ * desde `Theme.java`, dejados sin tocar a propósito como respaldo
+ * instantáneo si este sistema nuevo tuviera un problema — no se pudo
+ * probar en una ventana real, ver README).
+ */
+.root {
+    -token-background: #F8FAFC;
+    -token-surface: #FFFFFF;
+    -token-surface-alt: #F1F5F9;
+    -token-text: #0F172A;
+    -token-text-muted: #475569;
+    -token-border: #E2E8F0;
+
+    -token-success-base: #059669;
+    -token-error-base: #DC2626;
+    -token-warn-base: #B45309;
+
+    /* Variantes "soft" (fondo pastel + texto a juego) — para badges tipo
+       pill, como los de la pestaña Ejecución (LISTO/ERROR). Valores reales
+       de faro-java-prototipo.html, el diseño de referencia de Ejecución/
+       Diagnóstico (no existen en demo_html/app_colors.dart, esos paneles
+       son exclusivos del rediseño Java, ver README). */
+    -token-success-soft: #ECFDF5;
+    -token-success-soft-text: #047857;
+    -token-error-soft: #FEF2F2;
+    -token-error-soft-text: #B91C1C;
+    -token-warn-soft: #FEF3C7;
+    -token-warn-soft-text: #92400E;
+
+    -token-accent-base: #6366F1;
+    -token-accent-hover: #4F46E5;
+    -token-accent-active: #4338CA;
+    -token-accent-soft: #EEF2FF;
+    -token-accent-soft-text: #4338CA;
+
+    /* Selección de texto del editor SQL — token propio, NO reutiliza
+       accent-soft. El demo web usa accent-soft para `::selection`, pero ahí
+       el navegador también cambia el color del TEXTO seleccionado a la vez
+       (ver demo_html/styles.css línea 136); RichTextFX solo pinta un fondo
+       detrás del texto sin tocar su color, así que el mismo valor pálido de
+       accent-soft (#EEF2FF) queda casi invisible acá — hace falta un tono
+       bastante más saturado para que se note por sí solo. Pedido explícito
+       del usuario tras verlo casi invisible en modo claro. */
+    -token-editor-selection: #C7D2FE;
+
+    /* Dos grises sin equivalente en app_colors.dart/demo_html — inferidos,
+       no verificados contra una fuente real (igual que en styles.css). */
+    -token-gray-icon: #94A3B8;
+    -token-gray-border: #CBD5E1;
+}

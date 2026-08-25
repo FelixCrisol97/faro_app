@@ -23,5 +23,13 @@ migrate_working_dir/
 # is commented out by default.
 #.vscode/
 
+# Archivo basura que Git Bash/MSYS a veces crea de verdad cuando un comando
+# pensado para cmd.exe redirige a NUL (ej. "... 2>NUL") — en MSYS "NUL" no es
+# el dispositivo nulo, así que termina siendo un archivo real con lo que sea
+# que se haya redirigido (visto 2 veces esta sesión, con fragmentos de
+# known_hosts SSH adentro). No es contenido del proyecto.
+NUL
+**/NUL
+
 # Reglas específicas de cada stack viven en su propia carpeta:
 # flutter_faroapp/.gitignore, java_faroapp/.gitignore

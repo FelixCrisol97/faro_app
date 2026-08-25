@@ -21,6 +21,41 @@
     -fx-font-size: 13px;
 }
 
+/* ---- Barras de desplazamiento — GLOBAL, sin escopar a una clase, porque
+   TreeView/TableView/ListView/CodeArea comparten el mismo .scroll-bar de
+   Modena y nunca se habían tocado en ningún tema — usaban la barra gris
+   nativa de JavaFX en toda la app (hallazgo real del usuario, "revisa todo
+   el aplicativo"). Contra demo_html/styles.css línea 139-143: pista
+   transparente, thumb angosto redondeado con --border, --text-muted al
+   pasar el mouse, sin flechas de incremento/decremento (el `-fx-shape: " "`
+   es el truco estándar de JavaFX para ocultarlas). ---- */
+.scroll-bar {
+    -fx-background-color: transparent;
+}
+.scroll-bar .track,
+.scroll-bar .track-background {
+    -fx-background-color: transparent;
+    -fx-border-width: 0;
+}
+.scroll-bar .thumb {
+    -fx-background-color: #E2E8F0; /* --border */
+    -fx-background-radius: 6px;
+}
+.scroll-bar .thumb:hover,
+.scroll-bar .thumb:pressed {
+    -fx-background-color: #475569; /* --text-muted */
+}
+.scroll-bar .increment-button,
+.scroll-bar .decrement-button {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+.scroll-bar .increment-arrow,
+.scroll-bar .decrement-arrow {
+    -fx-shape: " ";
+    -fx-padding: 0;
+}
+
 .app-menu-bar {
     -fx-background-color: #FFFFFF; /* --surface */
     -fx-padding: 0 4 0 4;
@@ -89,18 +124,35 @@
     -fx-min-width: 44;
     -fx-max-width: 44;
 }
+/* Causa real del "engrane con cuadro sólido" que reportó el usuario:
+   settingsRailButton era un Button normal (los otros tres del riel son
+   ToggleButton) — Button trae en Modena más capas de relieve/foco por
+   defecto que ToggleButton, y esas capas se colaban por encima de este
+   -fx-background-color aunque estuviera puesto en "transparent". El fix
+   real fue hacer que los 4 íconos del riel sean el MISMO tipo de control
+   (ToggleButton, ver MainController — settingsRailButton no entra al
+   ToggleGroup, se destilda a mano en onOpenPreferences() apenas cierra el
+   diálogo). Las reglas :focused/:armed/:pressed de acá abajo se dejan
+   como refuerzo — no hacen daño — pero no eran la causa real. */
 .rail-button {
     -fx-background-color: transparent;
+    -fx-background-insets: 0;
     -fx-background-radius: 9px;
     -fx-border-width: 0;
     -fx-padding: 9;
     -fx-cursor: hand;
+    -fx-focus-color: transparent;
+    -fx-faint-focus-color: transparent;
 }
 .rail-button .icon-stroke {
     -fx-stroke: #475569; /* --text-muted */
 }
 .rail-button:hover {
     -fx-background-color: #F1F5F9; /* --surface-alt */
+}
+.rail-button:armed,
+.rail-button:pressed {
+    -fx-background-color: #E2E8F0; /* --border, gris intermedio a propósito, distinto de hover/selected */
 }
 .rail-button:selected {
     -fx-background-color: #EEF2FF; /* --accent-soft */
@@ -280,6 +332,29 @@
     -fx-text-fill: #475569; /* --text-muted */
     -fx-padding: 0 8 0 4;
 }
+/* Ver nota completa en styles-dark.css — texto sin resaltar, nunca tenía
+   color explícito acá (caía en el negro por defecto de JavaFX, que en
+   claro ya se veía bien por casualidad — mismo bug real, solo que
+   invisible en este tema). Fijado explícito para no depender de que el
+   default de JavaFX siga siendo negro. */
+.sql-editor .text {
+    -fx-fill: #0F172A; /* --text */
+}
+/* RichTextFX deja el color del cursor sin definir a propósito en su propia
+   hoja de estilos (solo fija velocidad de parpadeo) — sin esto, usa el
+   negro por defecto de JavaFX, invisible en modo oscuro contra el fondo
+   #334155 del editor (hallazgo real del usuario: "en modo oscuro el script
+   no se ve nada bien" — no era la sintaxis, era no poder ver el cursor). */
+.sql-editor .caret {
+    -fx-stroke: #0F172A; /* --text */
+}
+/* Mismo motivo que el cursor de arriba — RichTextFX tampoco fija color de
+   selección por defecto. demo_html/styles.css sí lo hace para el navegador
+   (`::selection { background: var(--accent-soft); }`), mismo valor real
+   acá para no adivinar uno nuevo. */
+.sql-editor .selection {
+    -fx-fill: #EEF2FF; /* --accent-soft */
+}
 .sql-editor .keyword {
     -fx-fill: #6366F1; /* --accent-base, .tok-kw */
     -fx-font-weight: bold;
@@ -309,6 +384,13 @@
     -fx-border-color: transparent transparent #E2E8F0 transparent; /* --border */
     -fx-border-width: 0 0 1 0;
     -fx-padding: 0;
+}
+/* .tab-header-background es un nodo HIJO separado de .tab-header-area que
+   trae su propio fondo gris de Modena por defecto — sin esto se pinta
+   encima. En claro coincidía casi por casualidad con el gris esperado, por
+   eso no se notaba tanto como en oscuro, pero es el mismo bug real. */
+.results-tabs .tab-header-background {
+    -fx-background-color: #FFFFFF; /* --surface */
 }
 .results-tabs .tab {
     -fx-background-color: transparent;
@@ -343,6 +425,10 @@
     -fx-border-color: transparent transparent #E2E8F0 transparent; /* --border */
     -fx-border-width: 0 0 1 0;
     -fx-padding: 0;
+}
+/* Ver nota completa junto a .results-tabs .tab-header-background más arriba. */
+.query-tabs .tab-header-background {
+    -fx-background-color: #FFFFFF; /* --surface */
 }
 .query-tabs .tab {
     -fx-background-color: transparent;
@@ -397,7 +483,22 @@
 .results-table .column-header-background {
     -fx-background-color: #F1F5F9; /* --surface-alt */
 }
+/* .filler es OTRO nodo hijo más — la franja que la tabla pinta después de
+   la última columna real cuando sobra ancho — cuarta vez que aparece este
+   mismo patrón (fondo propio de Modena sin anular). En claro casi no se
+   notaba, pero es el mismo bug real que en oscuro. */
+.results-table .filler {
+    -fx-background-color: #F1F5F9; /* --surface-alt */
+}
+/* Cada .column-header individual (uno por columna) trae su propio fondo gris
+   de Modena por defecto — sin anularlo acá también, se pinta encima del
+   fondo de .column-header-background de arriba (el contenedor completo),
+   sin importar qué color se le ponga a ese padre. Mismo síntoma que el
+   engrane del riel (Modena rellenando algo que un override "de más arriba"
+   no alcanza a cubrir) — hallazgo real del usuario, se veía igual de gris
+   en claro y en oscuro porque el gris de Modena no cambia con el tema. */
 .results-table .column-header {
+    -fx-background-color: #F1F5F9; /* --surface-alt */
     -fx-border-color: transparent transparent #E2E8F0 transparent; /* --border */
 }
 .results-table .column-header .label {
@@ -418,6 +519,11 @@
 .results-table .table-cell {
     -fx-text-fill: #0F172A;
     -fx-padding: 8 14 8 14;
+}
+/* Ver nota completa en styles-dark.css — placeholder de TableView sin filas. */
+.results-table .placeholder,
+.results-table .placeholder .label {
+    -fx-text-fill: #475569; /* --text-muted */
 }
 
 /* ---- Log de la pestaña Diagnóstico — líneas con hora, más reciente arriba. */
@@ -574,4 +680,37 @@
 }
 .combo-box:focused {
     -fx-border-color: #6366F1;
+}
+/* La lista desplegable es un popup APARTE del cuadro cerrado (mismo patrón
+   que .context-menu) — sin esto usa el ListView blanco/negro de Modena por
+   defecto, aunque el cuadro cerrado sí tuviera estilo. */
+.combo-box-popup .list-view {
+    -fx-background-color: #FFFFFF; /* --surface */
+    -fx-border-color: #E2E8F0; /* --border */
+    -fx-border-width: 1;
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-effect: dropshadow(gaussian, rgba(15,23,42,0.15), 30, 0, 0, 10); /* --shadow-md */
+    -fx-padding: 4;
+}
+.combo-box-popup .list-cell {
+    -fx-background-color: transparent;
+    -fx-text-fill: #0F172A; /* --text */
+    -fx-padding: 6 10 6 10;
+    -fx-background-radius: 6;
+}
+.combo-box-popup .list-cell:filled:hover,
+.combo-box-popup .list-cell:filled:selected {
+    -fx-background-color: #F1F5F9; /* --surface-alt */
+}
+
+/* Tooltip — otro popup nunca estilizado (los del árbol: statusDot/modeIcon,
+   y el de newQueryTabButton). Caja clara de Modena por defecto, mal en
+   oscuro; acá se ve bien por casualidad, mismo bug real igual. */
+.tooltip {
+    -fx-background-color: #0F172A; /* --text (fondo oscuro sobre claro, como un tooltip nativo típico) */
+    -fx-text-fill: #F8FAFC; /* --background */
+    -fx-background-radius: 6;
+    -fx-padding: 5 9 5 9;
+    -fx-font-size: 11.5px;
 }

@@ -1,0 +1,135 @@
+name: faro-bodegas-test
+
+# 6 bodegas de prueba para Faro: 3 PostgreSQL (12/14/16) + 3 SQL Server
+# (2017/2019/2022), una versión de motor distinta por contenedor a
+# propósito. Cada una trae la misma tabla `productos` con 500,000 filas
+# (subido de 20,000 el 2026-08-22, a pedido explícito del usuario, para
+# probar la app con más volumen), con texto en español (acentos/ñ/
+# comillas) para forzar el tema de codificación. Ver README.md de esta
+# carpeta para instrucciones de uso.
+#
+# Límites de memoria/CPU abajo: 512m para Postgres (subido de 256m junto
+# con las 500,000 filas — ~200MB reales de datos+índice a ese tamaño, 256m
+# se quedaba muy justo entre eso y lo que Postgres necesita para correr).
+# SQL Server NO puede correr con 256m — Microsoft documenta 2GB como
+# mínimo real para el contenedor, y con menos simplemente no arranca (o
+# crashea al segundo intento). Si quieres comprobarlo tú mismo, bájalo y
+# verás que el contenedor entra en reinicio constante — no es un límite
+# arbitrario que puse por precaución, es el piso real de la imagen
+# oficial.
+#
+# Importante: la VM de Podman en sí (no cada contenedor) tenía asignados
+# solo 2GB en total cuando se armó esto, insuficiente para las 6 bodegas
+# a la vez (3 de SQL Server ya piden 2GB cada una). Si vas a levantar las
+# 6 juntas, sube la memoria de la VM primero:
+#   podman machine stop
+#   podman machine set --memory 8192
+#   podman machine start
+
+services:
+  bodega1-pg12:
+    image: docker.io/library/postgres:12
+    container_name: faro-bodega1-pg12
+    environment:
+      POSTGRES_USER: faro
+      POSTGRES_PASSWORD: Faro_Test_2026!
+      POSTGRES_DB: bodega
+    ports:
+      - "55432:5432"
+    volumes:
+      - pg12-data:/var/lib/postgresql/data
+      - ./init/postgres/seed.sql:/docker-entrypoint-initdb.d/01_seed.sql:ro
+    mem_limit: 512m
+    cpus: 0.5
+    restart: unless-stopped
+
+  bodega2-pg14:
+    image: docker.io/library/postgres:14
+    container_name: faro-bodega2-pg14
+    environment:
+      POSTGRES_USER: faro
+      POSTGRES_PASSWORD: Faro_Test_2026!
+      POSTGRES_DB: bodega
+    ports:
+      - "55433:5432"
+    volumes:
+      - pg14-data:/var/lib/postgresql/data
+      - ./init/postgres/seed.sql:/docker-entrypoint-initdb.d/01_seed.sql:ro
+    mem_limit: 512m
+    cpus: 0.5
+    restart: unless-stopped
+
+  bodega3-pg16:
+    image: docker.io/library/postgres:16
+    container_name: faro-bodega3-pg16
+    environment:
+      POSTGRES_USER: faro
+      POSTGRES_PASSWORD: Faro_Test_2026!
+      POSTGRES_DB: bodega
+    ports:
+      - "55434:5432"
+    volumes:
+      - pg16-data:/var/lib/postgresql/data
+      - ./init/postgres/seed.sql:/docker-entrypoint-initdb.d/01_seed.sql:ro
+    mem_limit: 512m
+    cpus: 0.5
+    restart: unless-stopped
+
+  bodega4-mssql2017:
+    image: mcr.microsoft.com/mssql/server:2017-latest
+    container_name: faro-bodega4-mssql2017
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: Faro_Test_2026!
+    ports:
+      - "55435:1433"
+    volumes:
+      - mssql2017-data:/var/opt/mssql
+      - ./init/mssql/seed.sql:/docker-entrypoint-initdb.d/seed.sql:ro
+      - ./init/mssql/entrypoint.sh:/entrypoint-init.sh:ro
+    command: ["/bin/bash", "/entrypoint-init.sh"]
+    mem_limit: 2g
+    cpus: 1
+    restart: unless-stopped
+
+  bodega5-mssql2019:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: faro-bodega5-mssql2019
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: Faro_Test_2026!
+    ports:
+      - "55436:1433"
+    volumes:
+      - mssql2019-data:/var/opt/mssql
+      - ./init/mssql/seed.sql:/docker-entrypoint-initdb.d/seed.sql:ro
+      - ./init/mssql/entrypoint.sh:/entrypoint-init.sh:ro
+    command: ["/bin/bash", "/entrypoint-init.sh"]
+    mem_limit: 2g
+    cpus: 1
+    restart: unless-stopped
+
+  bodega6-mssql2022:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: faro-bodega6-mssql2022
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: Faro_Test_2026!
+    ports:
+      - "55437:1433"
+    volumes:
+      - mssql2022-data:/var/opt/mssql
+      - ./init/mssql/seed.sql:/docker-entrypoint-initdb.d/seed.sql:ro
+      - ./init/mssql/entrypoint.sh:/entrypoint-init.sh:ro
+    command: ["/bin/bash", "/entrypoint-init.sh"]
+    mem_limit: 2g
+    cpus: 1
+    restart: unless-stopped
+
+volumes:
+  pg12-data:
+  pg14-data:
+  pg16-data:
+  mssql2017-data:
+  mssql2019-data:
+  mssql2022-data:

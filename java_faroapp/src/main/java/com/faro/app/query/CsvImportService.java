@@ -10,6 +10,9 @@ import java.util.stream.Collectors;
 import com.faro.app.data.CredentialStore;
 import com.faro.app.model.DatabaseEntry;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javafx.concurrent.Task;
 
 /**
@@ -35,6 +38,8 @@ import javafx.concurrent.Task;
  */
 public final class CsvImportService {
 
+    private static final Logger log = LoggerFactory.getLogger(CsvImportService.class);
+
     private static final int BATCH_SIZE = 500;
     private static final Pattern SAFE_IDENTIFIER = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*$");
 
@@ -47,10 +52,13 @@ public final class CsvImportService {
         return new Task<>() {
             @Override
             protected Integer call() throws Exception {
+                log.info("Importando CSV '{}' a '{}'.'{}'", file.getFileName(), database.alias(), tableName);
                 validateIdentifier(tableName);
 
                 List<List<String>> rows = CsvParser.parse(file);
                 if (rows.size() < 2) {
+                    log.warn("Import abortado — '{}' tiene {} línea(s), se necesitan al menos 2 (encabezado + 1 fila).",
+                            file.getFileName(), rows.size());
                     return 0;
                 }
                 List<String> headers = rows.get(0);
@@ -71,6 +79,7 @@ public final class CsvImportService {
                 String columnList = String.join(", ", headers);
                 String placeholders = headers.stream().map(h -> "?").collect(Collectors.joining(", "));
                 String sql = "INSERT INTO " + tableName + " (" + columnList + ") VALUES (" + placeholders + ")";
+                log.debug("SQL de import: {}", sql);
 
                 int inserted = 0;
                 int totalDataRows = rows.size() - 1;
@@ -87,6 +96,8 @@ public final class CsvImportService {
                             inserted++;
                             if (inserted % BATCH_SIZE == 0) {
                                 statement.executeBatch();
+                                log.debug("Import '{}' → '{}': {} de {} fila(s) enviadas.",
+                                        file.getFileName(), tableName, inserted, totalDataRows);
                             }
                             updateProgress(inserted, totalDataRows);
                         }
@@ -94,6 +105,7 @@ public final class CsvImportService {
                     }
                     conn.commit();
                 }
+                log.info("Import completo — {} fila(s) insertadas en '{}'.'{}'", inserted, database.alias(), tableName);
                 return inserted;
             }
         };

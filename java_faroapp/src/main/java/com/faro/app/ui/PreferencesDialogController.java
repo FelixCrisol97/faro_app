@@ -2,6 +2,9 @@ package com.faro.app.ui;
 
 import com.faro.app.data.AppPreferences;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javafx.fxml.FXML;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
@@ -9,8 +12,10 @@ import javafx.scene.control.TabPane;
 import javafx.scene.control.TextField;
 import javafx.stage.Stage;
 
-/** Controlador del diálogo "Preferencias" — Rendimiento (real) / Atajos (referencia) / Apariencia (tema claro/oscuro real). */
+/** Controlador del diálogo "Preferencias" — Rendimiento (real) / Atajos (referencia) / Apariencia (tema claro/oscuro, real). */
 public class PreferencesDialogController {
+
+    private static final Logger log = LoggerFactory.getLogger(PreferencesDialogController.class);
 
     private static final String THEME_LIGHT = "Claro";
     private static final String THEME_DARK = "Oscuro";
@@ -58,12 +63,17 @@ public class PreferencesDialogController {
             boolean wasDark = preferences.isDarkTheme();
             boolean nowDark = THEME_DARK.equals(themeCombo.getValue());
             preferences.setDarkTheme(nowDark);
+
             if (wasDark != nowDark && onThemeChanged != null) {
                 onThemeChanged.run();
             }
 
+            log.info("Preferencias guardadas — maxConcurrent={}, poolSize={}, queryTimeout={}s, tema={}",
+                    preferences.maxConcurrentDatabases(), preferences.defaultPoolSize(),
+                    preferences.defaultQueryTimeoutSeconds(), nowDark ? "oscuro" : "claro");
             stage.close();
         } catch (NumberFormatException e) {
+            log.debug("Guardado de preferencias rechazado — campo de Rendimiento no numérico.");
             statusLabel.setText("Los tres campos de Rendimiento deben ser números enteros.");
         }
     }

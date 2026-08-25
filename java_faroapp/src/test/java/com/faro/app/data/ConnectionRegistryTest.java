@@ -33,11 +33,4 @@ class ConnectionRegistryTest {
         assertTrue(all.stream().anyMatch(db -> db.alias().equals("Bodega Sur")));
         assertTrue(all.stream().anyMatch(db -> db.alias().equals("crisol")));
     }
-
-    @Test
-    void withDemoDataIsNeverEmpty() {
-        ConnectionRegistry registry = ConnectionRegistry.withDemoData();
-
-        assertTrue(registry.allDatabases().size() > 0);
-    }
 }

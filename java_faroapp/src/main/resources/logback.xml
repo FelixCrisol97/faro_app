@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Configuración de logging de Faro. Escribe SIEMPRE a logs/faro-app.log,
+  relativo al directorio desde donde se arrancó la app (java_faroapp/ con
+  `mvn javafx:run`; la carpeta del .exe/jar empaquetado con jpackage) — la
+  carpeta "logs" se crea sola si no existe, no hace falta prepararla a mano.
+
+  Dos niveles distintos a propósito (pedido del usuario: "muchísimos logs...
+  trazabilidad completa"):
+    - Archivo (FILE): DEBUG de com.faro.app — todo lo que la app hace,
+      completo, para revisar después de un bug sin tener que reproducirlo
+      en vivo con el usuario mirando.
+    - Consola (CONSOLE, solo visible con `mvn javafx:run`): INFO — para no
+      inundar la terminal mientras se desarrolla.
+  Librerías de terceros (HikariCP, drivers JDBC, RichTextFX) se quedan en el
+  nivel raíz (INFO) — no necesitamos su detalle interno, solo el nuestro.
+-->
+<configuration>
+    <property name="LOG_DIR" value="logs" />
+
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/faro-app.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <!-- Un archivo por día, partido además si pasa de 20MB en el mismo día
+                 (una corrida con millones de filas puede generar mucho detalle) —
+                 se guardan 14 días o 500MB en total, lo que se llene primero, para
+                 que la carpeta no crezca sin límite en una máquina de pruebas que
+                 se queda corriendo mucho tiempo. -->
+            <fileNamePattern>${LOG_DIR}/faro-app.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>20MB</maxFileSize>
+            <maxHistory>14</maxHistory>
+            <totalSizeCap>500MB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{40} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>INFO</level>
+        </filter>
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %-5level %logger{25} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="com.faro.app" level="DEBUG" additivity="true" />
+
+    <root level="INFO">
+        <appender-ref ref="FILE" />
+        <appender-ref ref="CONSOLE" />
+    </root>
+</configuration>

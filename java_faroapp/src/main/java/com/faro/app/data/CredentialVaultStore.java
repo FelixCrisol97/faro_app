@@ -10,6 +10,9 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.sun.jna.platform.win32.Crypt32Util;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Guarda/carga {@link CredentialStore} cifrado en disco con DPAPI (Windows
  * Data Protection API, vía {@code Crypt32Util} de jna-platform) — el
@@ -37,6 +40,8 @@ import com.sun.jna.platform.win32.Crypt32Util;
  */
 public final class CredentialVaultStore {
 
+    private static final Logger log = LoggerFactory.getLogger(CredentialVaultStore.class);
+
     public static final Path DEFAULT_FILE =
             Path.of(System.getProperty("user.home"), ".faro", "credentials.dat");
 
@@ -61,6 +66,10 @@ public final class CredentialVaultStore {
             Files.createDirectories(file.getParent());
         }
         Files.write(file, encrypted);
+        // Nunca se loguea el usuario/contraseña en sí — solo cuántas entradas se
+        // guardaron, para trazabilidad sin filtrar secretos al archivo de log.
+        log.info("Credenciales guardadas (cifradas, DPAPI) en {} — {} entrada(s), default={}",
+                file, credentials.entries().size(), credentials.getDefault().isPresent());
     }
 
     public static void load(CredentialStore credentials, Path file) throws IOException {
@@ -79,6 +88,8 @@ public final class CredentialVaultStore {
             CredentialStore.Credentials def = fromJson(root.getAsJsonObject("default"));
             credentials.setDefault(def.user(), def.password());
         }
+        log.info("Credenciales cargadas (descifradas, DPAPI) desde {} — {} entrada(s), default={}",
+                file, credentials.entries().size(), credentials.getDefault().isPresent());
     }
 
     private static JsonObject toJson(CredentialStore.Credentials creds) {

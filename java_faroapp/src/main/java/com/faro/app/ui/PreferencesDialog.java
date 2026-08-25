@@ -43,8 +43,7 @@ public final class PreferencesDialog {
             }
 
             Scene scene = new Scene(root, 460, 420);
-            scene.getStylesheets().add(PreferencesDialog.class
-                    .getResource(Theme.stylesheetResourcePath(preferences.isDarkTheme())).toExternalForm());
+            Theme.applyTo(scene, preferences.isDarkTheme());
 
             Stage stage = new Stage();
             stage.setTitle("Preferencias");

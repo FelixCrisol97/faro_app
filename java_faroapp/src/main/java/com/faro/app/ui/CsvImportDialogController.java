@@ -10,6 +10,9 @@ import com.faro.app.model.DatabaseEntry;
 import com.faro.app.query.ConnectionPoolManager;
 import com.faro.app.query.CsvImportService;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javafx.concurrent.Task;
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
@@ -23,6 +26,8 @@ import javafx.util.StringConverter;
 
 /** Controlador del diálogo "Importar CSV a una tabla" — ver {@link CsvImportService}. */
 public class CsvImportDialogController {
+
+    private static final Logger log = LoggerFactory.getLogger(CsvImportDialogController.class);
 
     @FXML private ComboBox<DatabaseEntry> databaseCombo;
     @FXML private TextField tableNameField;
@@ -69,6 +74,7 @@ public class CsvImportDialogController {
         if (file != null) {
             chosenFile = file;
             fileLabel.setText(file.getName());
+            log.debug("Archivo CSV elegido: {}", file.getAbsolutePath());
         }
     }
 
@@ -99,14 +105,18 @@ public class CsvImportDialogController {
         progressBar.progressProperty().unbind();
         statusLabel.setText("Importando…");
 
+        log.info("Importando CSV '{}' a '{}'.'{}'", chosenFile.getName(), database.alias(), tableName.trim());
         Task<Integer> task = CsvImportService.importCsv(
                 database, creds.get(), pool, Path.of(chosenFile.getAbsolutePath()), tableName.trim());
         progressBar.progressProperty().bind(task.progressProperty());
         task.setOnSucceeded(e -> {
+            log.info("Importación de '{}' completa — {} fila(s) a '{}'.'{}'",
+                    chosenFile.getName(), task.getValue(), database.alias(), tableName.trim());
             importButton.setDisable(false);
             statusLabel.setText(task.getValue() + " fila(s) importada(s) a " + tableName + ".");
         });
         task.setOnFailed(e -> {
+            log.warn("Importación de '{}' falló: {}", chosenFile.getName(), task.getException().getMessage());
             importButton.setDisable(false);
             statusLabel.setText("Error al importar: " + task.getException().getMessage());
         });

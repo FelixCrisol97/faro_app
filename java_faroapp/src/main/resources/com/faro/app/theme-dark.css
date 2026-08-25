@@ -1,0 +1,51 @@
+/*
+ * Paleta — tema oscuro. Ver el comentario completo en `theme-light.css`
+ * (mismo mecanismo de "looked-up colors" de JavaFX, mismo `.root`). Valores
+ * reales de `demo_html/styles.css` `[data-theme='dark']` y
+ * `AppAccent.indigo.dark` — `--warn-base` se deja igual que en claro (así
+ * lo define `app_colors.dart` para los dos temas), y `--accent-soft` es
+ * `rgba(129,140,248,.18)` de verdad (JavaFX sí pinta fondos
+ * semitransparentes — ver historial en README, "el modo oscuro está
+ * horrible" fue por una aproximación sólida inventada a mano que ya no
+ * existe en este sistema).
+ */
+.root {
+    -token-background: #0F172A;
+    -token-surface: #1E293B;
+    -token-surface-alt: #334155;
+    -token-text: #F1F5F9;
+    -token-text-muted: #AEBACB;
+    -token-border: #334155;
+
+    -token-success-base: #34D399;
+    -token-error-base: #F87171;
+    -token-warn-base: #B45309;
+
+    /* Variantes "soft" — ver la explicación completa en theme-light.css.
+       -token-warn-base se deja igual que en claro a propósito (así lo
+       define app_colors.dart), pero warn-soft/-text sí siguen los valores
+       reales de faro-java-prototipo.html, que son propios de ese panel. */
+    -token-success-soft: rgba(52,211,153,.16);
+    -token-success-soft-text: #6EE7B7;
+    -token-error-soft: rgba(248,113,113,.16);
+    -token-error-soft-text: #FCA5A5;
+    -token-warn-soft: rgba(180,83,9,.22);
+    -token-warn-soft-text: #FCD34D;
+
+    -token-accent-base: #818CF8;
+    -token-accent-hover: #A5B4FC;
+    -token-accent-active: #6366F1;
+    -token-accent-soft: rgba(129,140,248,.18);
+    -token-accent-soft-text: #C7D2FE;
+
+    /* Selección de texto del editor SQL — token propio, ver la explicación
+       completa en theme-light.css. En oscuro el mismo problema aplica
+       aunque menos: el usuario reportó que con accent-soft (.18 de opacidad)
+       se seguía viendo "opaco"/débil — más intensidad que el accent-soft
+       compartido, pedido explícito del usuario. */
+    -token-editor-selection: rgba(129,140,248,.45);
+
+    /* Mismo gris inferido para los dos casos en oscuro — ver theme-light.css. */
+    -token-gray-icon: #64748B;
+    -token-gray-border: #64748B;
+}

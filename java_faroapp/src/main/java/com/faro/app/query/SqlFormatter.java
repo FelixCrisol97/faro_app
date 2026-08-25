@@ -30,14 +30,28 @@ import java.util.regex.Pattern;
  */
 public final class SqlFormatter {
 
-    /** Público a propósito — {@code SqlAutocomplete} reusa este mismo set en vez de mantener una segunda lista de palabras clave separada. */
+    /**
+     * Público a propósito — {@code SqlAutocomplete} reusa este mismo set en
+     * vez de mantener una segunda lista de palabras clave separada.
+     * Ampliado 2026-08-22 (pedido explícito del usuario, "más sugerencias
+     * de palabras reservadas de SQL, como exec, procedure") con el resto
+     * del vocabulario DDL/procedural común a PostgreSQL y SQL Server — las
+     * de control de flujo/transacciones (DECLARE/BEGIN/COMMIT/...) también
+     * sirven para autocompletar dentro de un procedimiento/función, no
+     * solo en una sentencia suelta.
+     */
     public static final Set<String> KEYWORDS = Set.of(
             "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES", "UPDATE", "SET",
             "DELETE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "FULL", "CROSS", "ON",
             "GROUP", "BY", "ORDER", "HAVING", "AND", "OR", "NOT", "IN", "AS", "DISTINCT",
             "LIMIT", "OFFSET", "UNION", "ALL", "CASE", "WHEN", "THEN", "ELSE", "END",
             "NULL", "IS", "LIKE", "BETWEEN", "EXISTS", "CREATE", "TABLE", "ALTER",
-            "DROP", "WITH", "TOP", "ASC", "DESC");
+            "DROP", "WITH", "TOP", "ASC", "DESC",
+            "EXEC", "EXECUTE", "CALL", "PROCEDURE", "FUNCTION", "TRIGGER", "VIEW", "INDEX",
+            "DECLARE", "BEGIN", "COMMIT", "ROLLBACK", "TRANSACTION",
+            "PRIMARY", "KEY", "FOREIGN", "REFERENCES", "DEFAULT", "CHECK", "UNIQUE",
+            "CONSTRAINT", "COLUMN", "RENAME", "TRUNCATE", "MERGE", "USING", "RETURNS",
+            "GRANT", "REVOKE", "IDENTITY", "OUTPUT");
 
     private static final Set<String> NEWLINE_BEFORE = Set.of(
             "SELECT", "FROM", "WHERE", "GROUP", "ORDER", "HAVING",

@@ -3,6 +3,9 @@ package com.faro.app.query;
 import java.sql.SQLException;
 import java.sql.Statement;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.LongProperty;
 import javafx.beans.property.ObjectProperty;
@@ -39,11 +42,17 @@ import javafx.beans.property.StringProperty;
  */
 public class ExecutionStatus {
 
+    private static final Logger log = LoggerFactory.getLogger(ExecutionStatus.class);
+
+    /** Cuánto esperar tras {@code Statement.cancel()} antes de disparar el respaldo KILL/pg_cancel_backend — ver el comentario en {@link #cancelQuery()}. */
+    private static final long KILL_FALLBACK_GRACE_MILLIS = 1500;
+
     public enum State {
         RUNNING, SUCCEEDED, FAILED, CANCELLED
     }
 
     private final StringProperty databaseAlias = new SimpleStringProperty();
+    private final StringProperty host = new SimpleStringProperty("");
     private final ObjectProperty<State> state = new SimpleObjectProperty<>(State.RUNNING);
     private final IntegerProperty rowCount = new SimpleIntegerProperty();
     private final LongProperty elapsedMillis = new SimpleLongProperty();
@@ -53,12 +62,17 @@ public class ExecutionStatus {
     private volatile boolean cancelRequested;
     private volatile Runnable killFallback;
 
-    public ExecutionStatus(String databaseAlias) {
+    public ExecutionStatus(String databaseAlias, String host) {
         this.databaseAlias.set(databaseAlias);
+        this.host.set(host);
     }
 
     public StringProperty databaseAliasProperty() {
         return databaseAlias;
+    }
+
+    public StringProperty hostProperty() {
+        return host;
     }
 
     public ObjectProperty<State> stateProperty() {
@@ -89,10 +103,17 @@ public class ExecutionStatus {
     public void attachStatement(Statement statement) {
         this.statement = statement;
         if (statement != null && cancelRequested) {
+            log.info("[{}] Cancelación pedida ANTES de que el Statement existiera — disparando ahora que ya está listo.",
+                    databaseAlias.get());
             try {
                 statement.cancel();
-            } catch (SQLException ignored) {
-                // Mismo motivo que en cancelQuery() — no es un error real.
+                log.info("[{}] Statement.cancel() (tardío) OK.", databaseAlias.get());
+            } catch (SQLException e) {
+                // Mismo motivo que en cancelQuery() — no es un error real, la consulta ya
+                // pudo haber terminado sola. DEBUG (no WARN) a propósito: es el camino
+                // esperado con más frecuencia, no una falla real.
+                log.debug("[{}] Statement.cancel() (tardío) lanzó SQLException (probablemente ya había terminado): {}",
+                        databaseAlias.get(), e.getMessage());
             }
         }
     }
@@ -116,11 +137,18 @@ public class ExecutionStatus {
     public void cancelQuery() {
         cancelRequested = true;
         Statement current = statement;
+        log.info("[{}] Cancelación pedida por el usuario — Statement activo={}, respaldo KILL disponible={}.",
+                databaseAlias.get(), current != null, killFallback != null);
         if (current != null) {
             try {
                 current.cancel();
-            } catch (SQLException ignored) {
-                // El Statement ya pudo haberse cerrado si la consulta terminó justo antes del cancel — no es un error real.
+                log.info("[{}] Statement.cancel() enviado al driver correctamente.", databaseAlias.get());
+            } catch (SQLException e) {
+                // El Statement ya pudo haberse cerrado si la consulta terminó justo antes del
+                // cancel — no es un error real, DEBUG a propósito (mismo criterio que
+                // attachStatement() arriba).
+                log.debug("[{}] Statement.cancel() lanzó SQLException (probablemente ya había terminado): {}",
+                        databaseAlias.get(), e.getMessage());
             }
         }
         Runnable fallback = killFallback;
@@ -128,7 +156,35 @@ public class ExecutionStatus {
             // Corre en su propio hilo — killBackend() abre una conexión nueva del pool y
             // puede bloquearse esperando una si el pool está saturado (ver README); no
             // queremos trabar el hilo de JavaFX cuando el clic viene del botón "Cancelar".
-            Thread thread = new Thread(fallback, "faro-kill-fallback");
+            //
+            // Margen antes de disparar KILL (agregado 2026-08-25, hallazgo real en log de
+            // producción del usuario): KILL <spid>/pg_cancel_backend antes se disparaba
+            // SIEMPRE, al mismo tiempo que Statement.cancel(), sin esperar a ver si
+            // cancel() ya bastaba solo. Para PostgreSQL no importaba (pg_cancel_backend
+            // solo interrumpe la consulta, la conexión sigue viva) — pero para SQL Server,
+            // KILL cierra la sesión completa a nivel de servidor, así que mataba conexiones
+            // que Statement.cancel() ya había cancelado bien solo, forzando una reconexión
+            // (TCP+TLS+login, ~600-700ms) la próxima vez que esa base se usara, para nada.
+            // Ahora este hilo espera {@link #KILL_FALLBACK_GRACE_MILLIS} y solo dispara KILL
+            // si la consulta SIGUE corriendo para entonces (`statement` es volatile y
+            // QueryExecutionService#runOne lo pone en null en su `finally`, sin importar el
+            // desenlace — leerlo acá es seguro y no necesita un campo nuevo).
+            Thread thread = new Thread(() -> {
+                try {
+                    Thread.sleep(KILL_FALLBACK_GRACE_MILLIS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                if (statement == null) {
+                    log.debug("[{}] Statement.cancel() ya bastó ({} ms) — respaldo KILL no hace falta, conexión intacta.",
+                            databaseAlias.get(), KILL_FALLBACK_GRACE_MILLIS);
+                    return;
+                }
+                log.info("[{}] Statement.cancel() no bastó tras {} ms — disparando respaldo KILL/pg_cancel_backend.",
+                        databaseAlias.get(), KILL_FALLBACK_GRACE_MILLIS);
+                fallback.run();
+            }, "faro-kill-fallback");
             thread.setDaemon(true);
             thread.start();
         }

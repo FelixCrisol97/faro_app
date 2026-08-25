@@ -13,10 +13,11 @@ import javafx.scene.control.TableView;
  * {@code TableView<ObservableList<Object>>} en vez de una clase de fila
  * fija porque un resultado real de SQL tiene columnas que cambian según la
  * consulta — no se pueden conocer en tiempo de compilación. {@link #create()}
- * arma una tabla con una consulta de ejemplo (la misma que trae precargada
- * {@link SqlEditorFactory}); {@link #populate} reemplaza columnas y filas
- * de una tabla ya existente con un resultado real — ver
- * {@code MainController#onRunQuery}.
+ * arma una tabla vacía (sin datos de ejemplo, se quitaron a pedido del
+ * usuario, 2026-08-22 — ver {@link com.faro.app.data.ConnectionRegistry}
+ * para el mismo pedido aplicado al árbol de conexiones); {@link #populate}
+ * reemplaza columnas y filas de una tabla ya existente con un resultado
+ * real — ver {@code MainController#onRunQuery}.
  *
  * <p>Si se marcan bases de motores distintos con formas de resultado
  * distintas en una misma corrida, las columnas de la tabla salen de la
@@ -30,21 +31,12 @@ import javafx.scene.control.TableView;
  */
 public final class ResultsTableFactory {
 
-    private static final String[] DEMO_COLUMN_NAMES = {"id", "nombre", "total"};
-
     private ResultsTableFactory() {
     }
 
     public static TableView<ObservableList<Object>> create() {
         TableView<ObservableList<Object>> table = new TableView<>();
         table.getStyleClass().add("results-table");
-
-        populate(table, List.of(DEMO_COLUMN_NAMES), List.of(
-                List.of(1, "Refresco de cola 600ml", 1284.50),
-                List.of(2, "Detergente en polvo 1kg", 932.00),
-                List.of(3, "Aceite vegetal 1L", 2110.75),
-                List.of(4, "Papel higiénico 4pz", 1560.20)));
-
         return table;
     }
 

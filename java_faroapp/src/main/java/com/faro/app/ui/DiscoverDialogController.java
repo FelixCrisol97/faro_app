@@ -11,6 +11,9 @@ import com.faro.app.model.ServerMode;
 import com.faro.app.query.DiscoveredDatabase;
 import com.faro.app.query.DiscoveryService;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javafx.concurrent.Task;
 import javafx.fxml.FXML;
 import javafx.scene.control.CheckBox;
@@ -22,6 +25,8 @@ import javafx.stage.Stage;
 
 /** Controlador del diálogo "Descubrir bases de datos" — ver {@link DiscoveryService}. */
 public class DiscoverDialogController {
+
+    private static final Logger log = LoggerFactory.getLogger(DiscoverDialogController.class);
 
     @FXML private TextField hostField;
     @FXML private TextField userField;
@@ -56,6 +61,11 @@ public class DiscoverDialogController {
         });
     }
 
+    /** Precarga el host — usado por "Descubrir bases en esta IP…" del menú contextual de una fila del árbol (ver ConnectionTreeCell), para no obligar a retipear un host que la app ya conoce. */
+    void setInitialHost(String host) {
+        hostField.setText(host);
+    }
+
     List<DatabaseEntry> addedDatabases() {
         return added;
     }
@@ -73,14 +83,17 @@ public class DiscoverDialogController {
         searchStatusLabel.setText("Buscando…");
 
         int myGeneration = ++searchGeneration;
+        log.info("Descubriendo bases en '{}' (generación {})", lastHost, myGeneration);
         Task<List<DiscoveredDatabase>> task =
                 DiscoveryService.discover(lastHost, userField.getText(), passwordField.getText());
         task.setOnSucceeded(e -> {
             if (myGeneration != searchGeneration) {
                 // Una búsqueda más nueva ya empezó mientras esta corría — descartar, no mezclar.
+                log.debug("Descarto resultados de la generación {} (vieja) — ya corre la {}.", myGeneration, searchGeneration);
                 return;
             }
             List<DiscoveredDatabase> found = task.getValue();
+            log.info("Descubrimiento en '{}' completo — {} base(s) encontradas.", lastHost, found.size());
             if (found.isEmpty()) {
                 searchStatusLabel.setText("No se encontró ninguna base accesible en ese host.");
                 return;
@@ -92,7 +105,10 @@ public class DiscoverDialogController {
                 resultsBox.getChildren().add(checkBox);
             }
         });
-        task.setOnFailed(e -> searchStatusLabel.setText("Error al buscar: " + task.getException().getMessage()));
+        task.setOnFailed(e -> {
+            log.warn("Descubrimiento en '{}' falló: {}", lastHost, task.getException().getMessage());
+            searchStatusLabel.setText("Error al buscar: " + task.getException().getMessage());
+        });
 
         Thread thread = new Thread(task, "faro-discover");
         thread.setDaemon(true);
@@ -111,6 +127,7 @@ public class DiscoverDialogController {
             credentials.put(dbEntry.id(), userField.getText(), passwordField.getText());
             added.add(dbEntry);
         }
+        log.info("{} base(s) agregadas desde el descubrimiento de '{}'.", added.size(), lastHost);
         stage.close();
     }
 

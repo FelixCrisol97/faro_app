@@ -27,8 +27,7 @@ public final class CredentialsDialog {
             controller.attachCredentialStore(credentials);
 
             Scene scene = new Scene(root, 380, 260);
-            scene.getStylesheets().add(CredentialsDialog.class
-                    .getResource(Theme.stylesheetResourcePath(preferences.isDarkTheme())).toExternalForm());
+            Theme.applyTo(scene, preferences.isDarkTheme());
 
             Stage stage = new Stage();
             stage.setTitle("Credenciales por defecto");

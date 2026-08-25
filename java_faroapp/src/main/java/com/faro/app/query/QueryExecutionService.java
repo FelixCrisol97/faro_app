@@ -24,6 +24,9 @@ import com.faro.app.model.DatabaseEntry;
 import com.faro.app.model.DbEngine;
 import com.faro.app.model.ServerMode;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javafx.application.Platform;
 import javafx.concurrent.Task;
 
@@ -61,30 +64,51 @@ import javafx.concurrent.Task;
  */
 public final class QueryExecutionService {
 
+    private static final Logger log = LoggerFactory.getLogger(QueryExecutionService.class);
+
     private static final Set<String> READ_ONLY_LEADING_KEYWORDS =
             Set.of("SELECT", "WITH", "SHOW", "EXPLAIN", "DESCRIBE", "DESC");
     private static final Pattern LEADING_NOISE =
             Pattern.compile("\\A(?:\\s+|--[^\\n]*\\n|/\\*.*?\\*/)*", Pattern.DOTALL);
+
+    /**
+     * Palabras que de verdad arrancan una sentencia nueva — usado solo
+     * para reconocer el error real de abajo, un set aparte de
+     * {@link SqlFormatter#KEYWORDS} (que también trae FROM/WHERE/JOIN/etc,
+     * palabras que NO empiezan una sentencia y darían falsos positivos).
+     */
+    private static final Set<String> STATEMENT_START_KEYWORDS = Set.of(
+            "SELECT", "WITH", "SHOW", "EXPLAIN", "DESCRIBE", "DESC",
+            "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "TRUNCATE", "MERGE",
+            "GRANT", "REVOKE", "BEGIN", "COMMIT", "ROLLBACK", "CALL", "EXEC", "EXECUTE", "DECLARE");
+    /** PostgreSQL reporta justo la primera palabra de la sentencia siguiente cuando falta el `;` que las separa — ver {@link #enrichErrorMessage}. */
+    private static final Pattern PG_SYNTAX_ERROR_NEAR_WORD =
+            Pattern.compile("syntax error at or near \"(\\w+)\"", Pattern.CASE_INSENSITIVE);
 
     private QueryExecutionService() {
     }
 
     public static Task<QueryResult> execute(
             List<DatabaseEntry> databases, CredentialStore credentials, ConnectionPoolManager pool,
-            Map<String, ExecutionStatus> statusByDatabaseId, String sql, int maxConcurrentDatabases) {
+            Map<String, ExecutionStatus> statusByDatabaseId, String sql, int maxConcurrentDatabases,
+            int fetchSize, Map<DbEngine, String> engineVersions) {
         return new Task<>() {
             @Override
             protected QueryResult call() throws InterruptedException {
+                long startedAt = System.currentTimeMillis();
                 AtomicReference<List<String>> columnsRef = new AtomicReference<>();
                 List<List<Object>> rows = Collections.synchronizedList(new ArrayList<>());
                 List<String> errors = Collections.synchronizedList(new ArrayList<>());
 
                 int poolSize = Math.min(Math.max(1, databases.size()), Math.max(1, maxConcurrentDatabases));
+                log.info("Ejecutando consulta contra {} base(s), concurrencia={}, fetchSize={}, sql.length={}",
+                        databases.size(), poolSize, fetchSize, sql.length());
                 ExecutorService executor = Executors.newFixedThreadPool(poolSize);
                 try {
                     List<Callable<Void>> jobs = databases.stream()
                         .<Callable<Void>>map(db -> () -> {
-                            runOne(db, credentials, pool, sql, statusByDatabaseId.get(db.id()), columnsRef, rows, errors);
+                            runOne(db, credentials, pool, sql, statusByDatabaseId.get(db.id()), columnsRef, rows, errors,
+                                    fetchSize, engineVersions);
                             return null;
                         })
                         .toList();
@@ -94,6 +118,9 @@ public final class QueryExecutionService {
                 }
 
                 List<String> columns = columnsRef.get();
+                long elapsed = System.currentTimeMillis() - startedAt;
+                log.info("Corrida completa en {} ms — {} fila(s) combinadas, {} error(es) — {}/{} bases con error",
+                        elapsed, rows.size(), errors.size(), errors.size(), databases.size());
                 return new QueryResult(columns == null ? List.of() : columns, new ArrayList<>(rows), new ArrayList<>(errors));
             }
         };
@@ -119,8 +146,10 @@ public final class QueryExecutionService {
         return new Task<>() {
             @Override
             protected QueryResult call() throws SQLException {
+                log.info("Explicando plan de ejecución para '{}' ({})", db.alias(), db.engine());
                 Optional<CredentialStore.Credentials> creds = credentials.resolve(db.id());
                 if (creds.isEmpty()) {
+                    log.warn("EXPLAIN abortado para '{}' — sin credenciales guardadas.", db.alias());
                     throw new IllegalStateException("Sin usuario/contraseña guardados para " + db.alias());
                 }
 
@@ -143,7 +172,11 @@ public final class QueryExecutionService {
                             }
                         }
                     }
+                } catch (SQLException e) {
+                    log.warn("EXPLAIN falló para '{}': {}", db.alias(), e.getMessage());
+                    throw e;
                 }
+                log.info("EXPLAIN de '{}' completo — {} fila(s) de plan.", db.alias(), rows.size());
                 return new QueryResult(columns, rows, List.of());
             }
         };
@@ -169,71 +202,142 @@ public final class QueryExecutionService {
         }
     }
 
+    /**
+     * <b>Corre el script completo, no una sola sentencia</b> — hallazgo
+     * real del usuario (2026-08-22): antes esto mandaba TODO el texto del
+     * editor tal cual a una sola llamada {@code executeQuery(sql)}, que
+     * truena en PostgreSQL apenas el script tiene más de una sentencia
+     * ("Multiple ResultSets were returned by the query.") y en SQL Server
+     * corre algo sin avisar cuál sentencia quedó reflejada. Ahora
+     * {@link SqlStatementSplitter#split} parte el script primero (respeta
+     * comentarios/strings/bloques {@code $$…$$}), y cada sentencia corre
+     * por separado con {@code Statement.execute(...)} (no
+     * {@code executeQuery}, que además truena sola con cualquier sentencia
+     * que no devuelva {@code ResultSet} — un script de solo
+     * {@code UPDATE}/{@code INSERT} ya fallaba por esto mismo antes de
+     * hoy). Se detiene en la primera sentencia que falle (mismo criterio
+     * de diseño ya usado en la versión Flutter anterior de este proyecto:
+     * por base, en orden, para en el primer error). Solo la ÚLTIMA
+     * sentencia que sí devolvió un {@code ResultSet} queda visible en
+     * Resultados — mismo criterio que pgAdmin/SSMS corriendo un script
+     * completo (un {@code UPDATE} de limpieza después de un
+     * {@code SELECT} no borra los resultados que sí importan).
+     */
     private static void runOne(
             DatabaseEntry db, CredentialStore credentials, ConnectionPoolManager pool, String sql,
             ExecutionStatus status, AtomicReference<List<String>> columnsRef,
-            List<List<Object>> rows, List<String> errors) {
+            List<List<Object>> rows, List<String> errors, int fetchSize,
+            Map<DbEngine, String> engineVersions) {
         long startedAt = System.currentTimeMillis();
+        log.debug("[{}] Iniciando ejecución ({})", db.alias(), db.engine());
 
         Optional<CredentialStore.Credentials> creds = credentials.resolve(db.id());
         if (creds.isEmpty()) {
             String message = "Sin usuario/contraseña guardados";
+            log.warn("[{}] Ejecución abortada — {}", db.alias(), message);
             errors.add(db.alias() + ": " + message
                     + " (edítala y guarda unas propias, o define credenciales por defecto)");
             reportFailure(status, message, startedAt);
             return;
         }
 
-        if (db.mode() == ServerMode.READ_ONLY && !isReadOnlyStatement(sql)) {
-            String message = "Base de solo lectura — la consulta debe empezar con "
-                    + "SELECT/WITH/SHOW/EXPLAIN/DESCRIBE";
-            errors.add(db.alias() + ": " + message);
-            reportFailure(status, message, startedAt);
-            return;
+        List<String> statements = SqlStatementSplitter.split(sql);
+        log.debug("[{}] Script partido en {} sentencia(s).", db.alias(), statements.size());
+        if (db.mode() == ServerMode.READ_ONLY) {
+            for (String statement : statements) {
+                if (!isReadOnlyStatement(statement)) {
+                    String message = "Base de solo lectura — la consulta debe empezar con "
+                            + "SELECT/WITH/SHOW/EXPLAIN/DESCRIBE";
+                    log.warn("[{}] Ejecución rechazada — {}", db.alias(), message);
+                    errors.add(db.alias() + ": " + message);
+                    reportFailure(status, message, startedAt);
+                    return;
+                }
+            }
         }
 
         int rowCount = 0;
         try (Connection conn = pool.getConnection(db, creds.get());
-             Statement statement = conn.createStatement()) {
+             Statement jdbcStatement = conn.createStatement()) {
+            // Versión real del motor para la barra de estado de abajo
+            // ("PostgreSQL 15.4 · SQL Server 2019", igual que
+            // faro-java-prototipo.html) — getDatabaseProductVersion() es
+            // información que el driver ya trae del handshake de conexión,
+            // no un viaje de red aparte, así que es seguro pedirlo en cada
+            // ejecución sin costo real; el chequeo de abajo solo evita
+            // escribir en el mapa compartido de más.
+            if (!engineVersions.containsKey(db.engine())) {
+                try {
+                    engineVersions.put(db.engine(), conn.getMetaData().getDatabaseProductVersion());
+                } catch (SQLException ignored) {
+                    // Mejor esfuerzo — sin versión real, la barra de estado
+                    // simplemente no muestra nada para este motor todavía.
+                }
+            }
+
             if (status != null) {
-                status.attachStatement(statement);
+                status.attachStatement(jdbcStatement);
                 attachKillFallback(status, db, creds.get(), pool, conn);
             }
-            statement.setQueryTimeout(db.queryTimeoutSeconds());
+            jdbcStatement.setQueryTimeout(db.queryTimeoutSeconds());
+            jdbcStatement.setFetchSize(fetchSize);
 
-            try (ResultSet rs = statement.executeQuery(sql)) {
-                ResultSetMetaData meta = rs.getMetaData();
-                int columnCount = meta.getColumnCount();
-                List<String> columnNames = new ArrayList<>();
-                columnNames.add("Base de datos");
-                for (int i = 1; i <= columnCount; i++) {
-                    columnNames.add(meta.getColumnLabel(i));
+            List<String> lastColumnNames = null;
+            List<List<Object>> lastRows = null;
+            int statementIndex = 0;
+            for (String statement : statements) {
+                statementIndex++;
+                log.debug("[{}] Sentencia {}/{}: {}", db.alias(), statementIndex, statements.size(), truncateForLog(statement));
+                boolean hasResultSet = jdbcStatement.execute(statement);
+                if (!hasResultSet) {
+                    continue;
                 }
-                columnsRef.compareAndSet(null, columnNames);
-
-                while (rs.next()) {
-                    List<Object> row = new ArrayList<>(columnCount + 1);
-                    row.add(db.alias());
+                try (ResultSet rs = jdbcStatement.getResultSet()) {
+                    ResultSetMetaData meta = rs.getMetaData();
+                    int columnCount = meta.getColumnCount();
+                    List<String> columnNames = new ArrayList<>();
+                    columnNames.add("Base de datos");
                     for (int i = 1; i <= columnCount; i++) {
-                        row.add(rs.getObject(i));
+                        columnNames.add(meta.getColumnLabel(i));
                     }
-                    rows.add(row);
-                    rowCount++;
+
+                    List<List<Object>> theseRows = new ArrayList<>();
+                    while (rs.next()) {
+                        List<Object> row = new ArrayList<>(columnCount + 1);
+                        row.add(db.alias());
+                        for (int i = 1; i <= columnCount; i++) {
+                            row.add(rs.getObject(i));
+                        }
+                        theseRows.add(row);
+                    }
+                    lastColumnNames = columnNames;
+                    lastRows = theseRows;
                 }
             }
+            if (lastColumnNames != null) {
+                columnsRef.compareAndSet(null, lastColumnNames);
+                rows.addAll(lastRows);
+                rowCount = lastRows.size();
+            }
+            long elapsed = System.currentTimeMillis() - startedAt;
+            log.info("[{}] OK — {} fila(s) en {} ms.", db.alias(), rowCount, elapsed);
             reportSuccess(status, rowCount, startedAt);
         } catch (SQLException e) {
             if (status != null && status.wasCancelRequested()) {
+                log.info("[{}] Cancelado por el usuario tras {} ms.", db.alias(), System.currentTimeMillis() - startedAt);
                 reportCancelled(status, startedAt);
             } else {
-                errors.add(db.alias() + ": " + e.getMessage());
-                reportFailure(status, e.getMessage(), startedAt);
+                String message = enrichErrorMessage(db.engine(), e.getMessage());
+                log.warn("[{}] Falló tras {} ms: {}", db.alias(), System.currentTimeMillis() - startedAt, message);
+                errors.add(db.alias() + ": " + message);
+                reportFailure(status, message, startedAt);
             }
         } catch (RuntimeException e) {
             // Ej. HikariPool.PoolInitializationException (no checked) al armar el pool con
             // una URL/config inválida — sin este catch, executor.invokeAll() se traga la
             // excepción en su Future descartado y esa fila se quedaba en "Ejecutando…" para
             // siempre, sin ningún error visible (hallazgo real de /code-review).
+            log.error("[{}] Excepción no esperada tras {} ms.", db.alias(), System.currentTimeMillis() - startedAt, e);
             errors.add(db.alias() + ": " + e.getMessage());
             reportFailure(status, String.valueOf(e.getMessage()), startedAt);
         } finally {
@@ -241,6 +345,43 @@ public final class QueryExecutionService {
                 status.attachStatement(null);
             }
         }
+    }
+
+    /** Recorta el texto de una sentencia para el log — un INSERT con miles de literales no debe volar el archivo de log. */
+    private static String truncateForLog(String statement) {
+        String oneLine = statement.replace('\n', ' ').replace('\r', ' ').strip();
+        return oneLine.length() > 500 ? oneLine.substring(0, 500) + "… (truncado, " + oneLine.length() + " caracteres)" : oneLine;
+    }
+
+    /**
+     * Aclara el mensaje crudo de PostgreSQL cuando el error real es un
+     * script con varias sentencias SIN {@code ;} entre ellas — hallazgo
+     * real del usuario (2026-08-22): "en SQL Server sí corre, en Postgres
+     * no". No es un bug de Faro — a diferencia de T-SQL (donde el `;` es
+     * opcional entre sentencias, cada una se reconoce por su propia
+     * palabra clave inicial), el estándar SQL/PostgreSQL de verdad
+     * requiere `;` para separar sentencias dentro de un mismo bloque; sin
+     * eso, el parser de Postgres ve "DELETE ... SELECT ..." como una sola
+     * sentencia inválida y truena justo en la palabra que empieza la
+     * "siguiente" sentencia que el usuario tenía en mente.
+     *
+     * <p><b>Deliberadamente NO se intenta partir el script solo</b> —
+     * adivinar dónde va el `;` que falta, buscando palabras como
+     * {@code SELECT} a la mitad del texto, rompería sentencias legítimas
+     * con subconsultas (ej. {@code INSERT INTO x SELECT * FROM y} también
+     * "empieza" con `SELECT` a la mitad, sin ser dos sentencias). Más
+     * seguro explicar el error real que adivinar mal una corrección.
+     */
+    private static String enrichErrorMessage(DbEngine engine, String rawMessage) {
+        if (engine != DbEngine.POSTGRES || rawMessage == null) {
+            return rawMessage;
+        }
+        Matcher matcher = PG_SYNTAX_ERROR_NEAR_WORD.matcher(rawMessage);
+        if (matcher.find() && STATEMENT_START_KEYWORDS.contains(matcher.group(1).toUpperCase(Locale.ROOT))) {
+            return rawMessage + " — ¿Falta un punto y coma (;) antes de esto? PostgreSQL necesita ';' "
+                    + "entre cada sentencia de un script (SQL Server es más permisivo con esto).";
+        }
+        return rawMessage;
     }
 
     /**
@@ -258,7 +399,10 @@ public final class QueryExecutionService {
             ConnectionPoolManager pool, Connection conn) {
         Integer backendId = fetchBackendId(db.engine(), conn);
         if (backendId != null) {
+            log.debug("[{}] Respaldo de cancelación listo — backend id={}.", db.alias(), backendId);
             status.attachKillFallback(() -> killBackend(db, creds, pool, backendId));
+        } else {
+            log.debug("[{}] No se pudo leer el pid/spid del backend — sin respaldo de cancelación para esta base.", db.alias());
         }
     }
 
@@ -270,6 +414,7 @@ public final class QueryExecutionService {
         try (Statement s = conn.createStatement(); ResultSet rs = s.executeQuery(query)) {
             return rs.next() ? rs.getInt(1) : null;
         } catch (SQLException e) {
+            log.debug("No se pudo leer el pid/spid del backend: {}", e.getMessage());
             return null;
         }
     }
@@ -292,14 +437,16 @@ public final class QueryExecutionService {
             case POSTGRES -> "SELECT pg_cancel_backend(" + backendId + ")";
             case SQL_SERVER -> "KILL " + backendId;
         };
+        log.info("[{}] Disparando respaldo de cancelación: {}", db.alias(), command);
         try (Connection killConn = pool.getConnection(db, creds);
              Statement s = killConn.createStatement()) {
             s.execute(command);
+            log.info("[{}] Respaldo de cancelación enviado correctamente (backend id={}).", db.alias(), backendId);
         } catch (SQLException e) {
             // No es un error para el usuario — Statement.cancel() ya es el camino
             // principal, esto es solo el respaldo. La sesión ya pudo haber
             // terminado sola antes de que este comando llegara.
-            System.err.println("Respaldo KILL/pg_cancel_backend falló para " + db.alias() + ": " + e.getMessage());
+            log.warn("[{}] Respaldo KILL/pg_cancel_backend falló (backend id={}): {}", db.alias(), backendId, e.getMessage());
         }
     }
 

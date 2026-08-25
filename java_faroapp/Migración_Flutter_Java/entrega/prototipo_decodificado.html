@@ -1,0 +1,986 @@
+﻿<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="429367a3-ada7-4121-84c9-dfd91c4a9945"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:'Sora';src:url("c7cd3cd3-0e2e-493a-8800-a32e3f79fb42") format('truetype');font-weight:100 900;font-display:swap}
+@font-face{font-family:'Manrope';src:url("9a4cc76f-f8a5-4674-bf48-72deb43b7008") format('truetype');font-weight:100 900;font-display:swap}
+@font-face{font-family:'JetBrainsMono';src:url("f5a79103-ab5e-46ae-b341-5bf2ec1c40d8") format('truetype');font-weight:100 900;font-display:swap}
+:root{
+--font-heading:'Sora',ui-sans-serif,system-ui,sans-serif;
+--font-body:'Manrope',ui-sans-serif,system-ui,sans-serif;
+--font-mono:'JetBrainsMono',ui-monospace,Consolas,monospace;
+--radius-control:9px;--radius-chip:6px;--radius-container:14px;
+--shadow-sm:0 1px 2px rgba(15,23,42,.04),0 4px 12px rgba(15,23,42,.04);
+--shadow-md:0 10px 30px rgba(15,23,42,.15);
+--shadow-lg:0 20px 50px rgba(15,23,42,.25);
+--backdrop:rgba(15,23,42,.55);
+--background:#f8fafc;--surface:#ffffff;--surface-alt:#f1f5f9;--text:#0f172a;--text-muted:#475569;--border:#e2e8f0;
+--success-base:#059669;--success-soft:#ecfdf5;--success-soft-text:#047857;
+--error-base:#dc2626;--error-soft:#fef2f2;--error-soft-text:#b91c1c;
+--warn-base:#b45309;--warn-soft:#fef3c7;--warn-soft-text:#92400e;
+--accent-base:#6366F1;--accent-hover:#4F46E5;--accent-active:#4338CA;--accent-soft:#EEF2FF;--accent-soft-text:#4338CA;
+}
+[data-theme='dark']{--background:#0f172a;--surface:#1e293b;--surface-alt:#334155;--text:#f1f5f9;--text-muted:#aebacb;--border:#334155;
+--success-base:#34d399;--success-soft:rgba(52,211,153,.16);--success-soft-text:#6ee7b7;
+--error-base:#f87171;--error-soft:rgba(248,113,113,.16);--error-soft-text:#fca5a5;
+--warn-base:#fbbf24;--warn-soft:rgba(180,83,9,.22);--warn-soft-text:#fcd34d;
+--shadow-sm:0 1px 2px rgba(0,0,0,.2),0 4px 12px rgba(0,0,0,.18);
+--shadow-md:0 10px 30px rgba(0,0,0,.4);--shadow-lg:0 20px 50px rgba(0,0,0,.5);--backdrop:rgba(2,6,23,.66)}
+[data-theme='light'][data-accent='indigo']{--accent-base:#6366F1;--accent-hover:#4F46E5;--accent-active:#4338CA;--accent-soft:#EEF2FF;--accent-soft-text:#4338CA}
+[data-theme='dark'][data-accent='indigo']{--accent-base:#818CF8;--accent-hover:#A5B4FC;--accent-active:#6366F1;--accent-soft:rgba(129,140,248,.18);--accent-soft-text:#C7D2FE}
+[data-theme='light'][data-accent='violet']{--accent-base:#8B5CF6;--accent-hover:#7C3AED;--accent-active:#6D28D9;--accent-soft:#F5F3FF;--accent-soft-text:#6D28D9}
+[data-theme='dark'][data-accent='violet']{--accent-base:#A78BFA;--accent-hover:#C4B5FD;--accent-active:#8B5CF6;--accent-soft:rgba(167,139,250,.18);--accent-soft-text:#DDD6FE}
+[data-theme='light'][data-accent='blue']{--accent-base:#2563EB;--accent-hover:#1D4ED8;--accent-active:#1E40AF;--accent-soft:#EFF6FF;--accent-soft-text:#1D4ED8}
+[data-theme='dark'][data-accent='blue']{--accent-base:#60A5FA;--accent-hover:#93C5FD;--accent-active:#3B82F6;--accent-soft:rgba(96,165,250,.18);--accent-soft-text:#BFDBFE}
+[data-theme='light'][data-accent='teal']{--accent-base:#0D9488;--accent-hover:#0F766E;--accent-active:#115E59;--accent-soft:#F0FDFA;--accent-soft-text:#0F766E}
+[data-theme='dark'][data-accent='teal']{--accent-base:#2DD4BF;--accent-hover:#5EEAD4;--accent-active:#14B8A6;--accent-soft:rgba(45,212,191,.18);--accent-soft-text:#99F6E4}
+[data-theme='light'][data-accent='rose']{--accent-base:#E11D48;--accent-hover:#BE123C;--accent-active:#9F1239;--accent-soft:#FFF1F2;--accent-soft-text:#BE123C}
+[data-theme='dark'][data-accent='rose']{--accent-base:#FB7185;--accent-hover:#FDA4AF;--accent-active:#F43F5E;--accent-soft:rgba(251,113,133,.18);--accent-soft-text:#FECDD3}
+[data-theme='light'][data-accent='amber']{--accent-base:#D97706;--accent-hover:#B45309;--accent-active:#92400E;--accent-soft:#FFFBEB;--accent-soft-text:#B45309}
+[data-theme='dark'][data-accent='amber']{--accent-base:#FBBF24;--accent-hover:#FCD34D;--accent-active:#F59E0B;--accent-soft:rgba(251,191,36,.18);--accent-soft-text:#FDE68A}
+*{box-sizing:border-box}
+body{margin:0}
+*{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px;border:2px solid var(--surface)}
+::selection{background:var(--accent-soft);color:var(--accent-soft-text)}
+a{color:var(--accent-base);text-decoration:none}
+a:hover{color:var(--accent-hover)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes toastIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
+</style>
+</helmet>
+
+<div data-theme="{{ theme }}" data-accent="{{ accent }}" style="height:100vh;min-height:760px;display:flex;flex-direction:column;background:var(--background);color:var(--text);font-family:var(--font-body);font-size:13px;font-weight:500;overflow:hidden;position:relative;-webkit-font-smoothing:antialiased">
+
+  <div style="height:30px;flex:none;display:flex;align-items:center;gap:8px;padding:0 0 0 12px;background:var(--surface-alt);border-bottom:1px solid var(--border);user-select:none">
+    <div style="width:12px;height:12px;border-radius:3px;background:var(--accent-base)"></div>
+    <div style="font-family:var(--font-heading);font-weight:600;font-size:11.5px;letter-spacing:.01em">Faro</div>
+    <div style="color:var(--text-muted);font-size:11.5px;white-space:nowrap">â€” Cliente SQL multi-base Â· Bodegas Centro</div>
+    <div style="flex:1"></div>
+    <div style="display:flex;align-items:stretch;height:30px">
+      <div style="width:44px;display:flex;align-items:center;justify-content:center;color:var(--text-muted)" style-hover="background:var(--border)"><svg width="11" height="11" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14"></path></svg></div>
+      <div style="width:44px;display:flex;align-items:center;justify-content:center;color:var(--text-muted)" style-hover="background:var(--border)"><svg width="11" height="11" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg></div>
+      <div style="width:44px;display:flex;align-items:center;justify-content:center;color:var(--text-muted)" style-hover="background:#dc2626;color:#fff"><svg width="11" height="11" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"></path></svg></div>
+    </div>
+  </div>
+
+  <div style="height:32px;flex:none;display:flex;align-items:stretch;background:var(--surface);border-bottom:1px solid var(--border);padding:0 4px;position:relative;z-index:60;user-select:none">
+    <sc-if value="{{ javaMap }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;right:8px;top:5px;z-index:5;font-family:var(--font-mono);font-size:9.5px;font-weight:600;background:var(--accent-base);color:#fff;padding:2px 6px;border-radius:5px">MenuBar</div></sc-if>
+    <div style="position:relative;display:flex;align-items:center">
+      <div sc-camel-on-click="{{ mArchivo }}" style="{{ mS.archivo }}" style-hover="background:var(--surface-alt)">Archivo</div>
+      <sc-if value="{{ menuArchivo }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;top:32px;left:0;min-width:280px;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-md);padding:6px;z-index:70">
+          <div sc-camel-on-click="{{ miNewTab }}" style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Nueva consulta</span><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted)">Ctrl+T</span></div>
+          <div sc-camel-on-click="{{ miToast }}" style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Abrir archivo .sqlâ€¦</span><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted)">Ctrl+O</span></div>
+          <div sc-camel-on-click="{{ miToast }}" style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Guardar</span><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted)">Ctrl+G</span></div>
+          <div sc-camel-on-click="{{ miToast }}" style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Guardar comoâ€¦</span></div>
+          <div style="height:1px;background:var(--border);margin:5px 2px"></div>
+          <div sc-camel-on-click="{{ miExport }}" style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Exportar resultados a CSVâ€¦</span></div>
+          <div sc-camel-on-click="{{ miToast }}" style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Exportar script SQLâ€¦</span></div>
+          <div style="height:1px;background:var(--border);margin:5px 2px"></div>
+          <div sc-camel-on-click="{{ miToast }}" style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer;color:var(--text-muted)" style-hover="background:var(--surface-alt)"><span style="flex:1">Salir</span><span style="font-family:var(--font-mono);font-size:10.5px">Alt+F4</span></div>
+        </div>
+      </sc-if>
+    </div>
+    <div style="position:relative;display:flex;align-items:center">
+      <div sc-camel-on-click="{{ mEditar }}" style="{{ mS.editar }}" style-hover="background:var(--surface-alt)">Editar</div>
+      <sc-if value="{{ menuEditar }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;top:32px;left:0;min-width:260px;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-md);padding:6px;z-index:70">
+          <div sc-camel-on-click="{{ miToast }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Buscar en el script</span><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted)">Ctrl+F</span></div>
+          <div sc-camel-on-click="{{ miToast }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Formatear SQL</span><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted)">Ctrl+L</span></div>
+          <div sc-camel-on-click="{{ miToast }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Autocompletado</span><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted)">Ctrl+Espacio</span></div>
+        </div>
+      </sc-if>
+    </div>
+    <div style="position:relative;display:flex;align-items:center">
+      <div sc-camel-on-click="{{ mConsulta }}" style="{{ mS.consulta }}" style-hover="background:var(--surface-alt)">Consulta</div>
+      <sc-if value="{{ menuConsulta }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;top:32px;left:0;min-width:300px;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-md);padding:6px;z-index:70">
+          <div sc-camel-on-click="{{ miRun }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Ejecutar en las bases seleccionadas</span><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted)">F5</span></div>
+          <div sc-camel-on-click="{{ miCancel }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Cancelar ejecuciÃ³n</span><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted)">Esc</span></div>
+          <div style="height:1px;background:var(--border);margin:5px 2px"></div>
+          <div sc-camel-on-click="{{ miToast }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Guardar como favorito</span></div>
+          <div sc-camel-on-click="{{ miToast }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Explicar plan de ejecuciÃ³n</span></div>
+        </div>
+      </sc-if>
+    </div>
+    <div style="position:relative;display:flex;align-items:center">
+      <div sc-camel-on-click="{{ mConexiones }}" style="{{ mS.conexiones }}" style-hover="background:var(--surface-alt)">Conexiones</div>
+      <sc-if value="{{ menuConexiones }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;top:32px;left:0;min-width:300px;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-md);padding:6px;z-index:70">
+          <div sc-camel-on-click="{{ openAddDb }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Agregar base de datosâ€¦</span></div>
+          <div sc-camel-on-click="{{ miToast }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Descubrir bases en esta IPâ€¦</span></div>
+          <div sc-camel-on-click="{{ miToast }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Probar todas las conexiones</span></div>
+          <div style="height:1px;background:var(--border);margin:5px 2px"></div>
+          <div sc-camel-on-click="{{ miToast }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Importar configuraciÃ³nâ€¦</span></div>
+          <div sc-camel-on-click="{{ miToast }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Exportar configuraciÃ³nâ€¦</span></div>
+        </div>
+      </sc-if>
+    </div>
+    <div style="position:relative;display:flex;align-items:center">
+      <div sc-camel-on-click="{{ mVer }}" style="{{ mS.ver }}" style-hover="background:var(--surface-alt)">Ver</div>
+      <sc-if value="{{ menuVer }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;top:32px;left:0;min-width:290px;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-md);padding:6px;z-index:70">
+          <div sc-camel-on-click="{{ dockConexiones }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Panel de conexiones</span><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted)">Alt+1</span></div>
+          <div sc-camel-on-click="{{ dockHistorial }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Historial</span><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted)">Alt+2</span></div>
+          <div sc-camel-on-click="{{ dockFavoritos }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Favoritos</span><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted)">Alt+3</span></div>
+          <div style="height:1px;background:var(--border);margin:5px 2px"></div>
+          <div sc-camel-on-click="{{ toggleJavaMap }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Mapa de controles JavaFX</span></div>
+        </div>
+      </sc-if>
+    </div>
+    <div style="position:relative;display:flex;align-items:center">
+      <div sc-camel-on-click="{{ mHerramientas }}" style="{{ mS.herramientas }}" style-hover="background:var(--surface-alt)">Herramientas</div>
+      <sc-if value="{{ menuHerramientas }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;top:32px;left:0;min-width:280px;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-md);padding:6px;z-index:70">
+          <div sc-camel-on-click="{{ openCsv }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Importar CSV a una tablaâ€¦</span></div>
+          <div sc-camel-on-click="{{ openPrefs }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Preferenciasâ€¦</span><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted)">Ctrl+,</span></div>
+        </div>
+      </sc-if>
+    </div>
+    <div style="position:relative;display:flex;align-items:center">
+      <div sc-camel-on-click="{{ mAyuda }}" style="{{ mS.ayuda }}" style-hover="background:var(--surface-alt)">Ayuda</div>
+      <sc-if value="{{ menuAyuda }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;top:32px;left:0;min-width:240px;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-md);padding:6px;z-index:70">
+          <div sc-camel-on-click="{{ openAtajos }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Atajos de teclado</span></div>
+          <div sc-camel-on-click="{{ miToast }}" style="display:flex;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="flex:1">Acerca de Faro</span></div>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <div style="height:44px;flex:none;display:flex;align-items:center;gap:6px;padding:0 10px;background:var(--surface);border-bottom:1px solid var(--border);position:relative;z-index:40;overflow-x:auto;overflow-y:hidden">
+    <sc-if value="{{ javaMap }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;right:8px;top:-9px;z-index:5;font-family:var(--font-mono);font-size:9.5px;font-weight:600;background:var(--accent-base);color:#fff;padding:2px 6px;border-radius:5px">ToolBar</div></sc-if>
+    <sc-if value="{{ idle }}" hint-placeholder-val="{{ true }}">
+      <button sc-camel-on-click="{{ run }}" style="display:inline-flex;align-items:center;gap:7px;border:1px solid transparent;border-radius:var(--radius-control);padding:8px 14px;background:var(--accent-base);color:#fff;font-family:var(--font-body);font-weight:600;font-size:13px;cursor:pointer" style-hover="background:var(--accent-hover)">
+        <svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="currentColor"><path d="M7 4l13 8-13 8z"></path></svg><span>Ejecutar</span><span style="font-family:var(--font-mono);font-size:10.5px;opacity:.8">F5</span>
+      </button>
+    </sc-if>
+    <sc-if value="{{ busy }}" hint-placeholder-val="{{ false }}">
+      <button sc-camel-on-click="{{ cancel }}" style="display:inline-flex;align-items:center;gap:7px;border:1px solid var(--border);border-radius:var(--radius-control);padding:8px 14px;background:transparent;color:var(--error-base);font-family:var(--font-body);font-weight:600;font-size:13px;cursor:pointer" style-hover="background:var(--error-soft)">
+        <svg width="13" height="13" sc-camel-view-box="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg><span>Cancelar</span>
+      </button>
+    </sc-if>
+    <div style="width:1px;height:22px;background:var(--border);margin:0 4px"></div>
+    <button sc-camel-on-click="{{ miToast }}" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:var(--radius-control);padding:8px 12px;background:transparent;color:var(--text);font-family:var(--font-body);font-weight:600;font-size:12.5px;cursor:pointer" style-hover="background:var(--surface-alt)"><svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14v4a2 2 0 002 2h12a2 2 0 002-2v-4M12 3v13M8 7l4-4 4 4"></path></svg>Abrir</button>
+    <button sc-camel-on-click="{{ miToast }}" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:var(--radius-control);padding:8px 12px;background:transparent;color:var(--text);font-family:var(--font-body);font-weight:600;font-size:12.5px;cursor:pointer" style-hover="background:var(--surface-alt)"><svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"></path><path d="M17 21v-8H7v8M7 3v5h8"></path></svg>Guardar</button>
+    <button sc-camel-on-click="{{ miToast }}" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:var(--radius-control);padding:8px 12px;background:transparent;color:var(--text);font-family:var(--font-body);font-weight:600;font-size:12.5px;cursor:pointer" style-hover="background:var(--surface-alt)"><svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h12M3 18h8"></path></svg>Formatear</button>
+    <button sc-camel-on-click="{{ miToast }}" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:var(--radius-control);padding:8px 12px;background:transparent;color:var(--text);font-family:var(--font-body);font-weight:600;font-size:12.5px;cursor:pointer" style-hover="background:var(--surface-alt)"><svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l2.6 5.6 6.4.8-4.7 4.3 1.3 6.3L12 17l-5.6 3 1.3-6.3L3 9.4l6.4-.8z"></path></svg>Favorito</button>
+    <div style="width:1px;height:22px;background:var(--border);margin:0 4px"></div>
+    <div style="display:flex;align-items:center;gap:7px;padding:6px 10px;background:var(--accent-soft);color:var(--accent-soft-text);border-radius:999px;font-weight:600;font-size:12px;white-space:nowrap;flex:none">
+      <svg width="13" height="13" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><ellipse cx="12" cy="6" rx="8" ry="3"></ellipse><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"></path><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"></path></svg>
+      20 bases seleccionadas
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;color:var(--text-muted);font-size:12px;margin-left:2px;white-space:nowrap;flex:none">
+      <span>Timeout</span>
+      <div sc-camel-on-click="{{ openPrefs }}" style="display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;padding:4px 10px;cursor:pointer;color:var(--text);font-weight:600" style-hover="background:var(--surface-alt)">30 s<svg width="11" height="11" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 9l6 6 6-6"></path></svg></div>
+    </div>
+    <div style="flex:1"></div>
+    <div sc-camel-on-click="{{ toggleJavaMap }}" style="{{ mapBtnStyle }}" style-hover="background:var(--surface-alt)">
+      <svg width="13" height="13" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3L3 6v15l6-3 6 3 6-3V3l-6 3-6-3z"></path><path d="M9 3v15M15 6v15"></path></svg>Mapa JavaFX
+    </div>
+    <div sc-camel-on-click="{{ toggleTheme }}" style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);border-radius:var(--radius-control);color:var(--text-muted);cursor:pointer" style-hover="background:var(--surface-alt)">
+      <svg width="15" height="15" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"></path></svg>
+    </div>
+  </div>
+
+  <div style="flex:1;min-height:0;display:flex">
+
+    <div style="width:46px;flex:none;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding-top:8px;gap:4px;position:relative">
+      <sc-if value="{{ javaMap }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;left:4px;bottom:8px;z-index:5;writing-mode:vertical-rl;font-family:var(--font-mono);font-size:9px;font-weight:600;background:var(--accent-base);color:#fff;padding:5px 2px;border-radius:5px">ToolWindow rail</div></sc-if>
+      <div sc-camel-on-click="{{ dockConexiones }}" title="Conexiones (Alt+1)" style="{{ railS.conexiones }}"><svg width="17" height="17" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="6" rx="8" ry="3"></ellipse><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"></path><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"></path></svg></div>
+      <div sc-camel-on-click="{{ dockHistorial }}" title="Historial (Alt+2)" style="{{ railS.historial }}"><svg width="17" height="17" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg></div>
+      <div sc-camel-on-click="{{ dockFavoritos }}" title="Favoritos (Alt+3)" style="{{ railS.favoritos }}"><svg width="17" height="17" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l2.6 5.6 6.4.8-4.7 4.3 1.3 6.3L12 17l-5.6 3 1.3-6.3L3 9.4l6.4-.8z"></path></svg></div>
+      <div style="flex:1"></div>
+      <div sc-camel-on-click="{{ openPrefs }}" title="Preferencias" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;color:var(--text-muted);cursor:pointer;margin-bottom:8px" style-hover="background:var(--surface-alt)"><svg width="17" height="17" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.6 1.6 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-1.8-.3 1.6 1.6 0 00-1 1.5V21a2 2 0 11-4 0v-.1A1.6 1.6 0 008 19.4a1.6 1.6 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.6 1.6 0 00.3-1.8 1.6 1.6 0 00-1.5-1H2a2 2 0 110-4h.1A1.6 1.6 0 004.6 8a1.6 1.6 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.6 1.6 0 001.8.3H9a1.6 1.6 0 001-1.5V2a2 2 0 114 0v.1a1.6 1.6 0 001 1.5 1.6 1.6 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.6 1.6 0 00-.3 1.8V9a1.6 1.6 0 001.5 1H22a2 2 0 110 4h-.1a1.6 1.6 0 00-1.5 1z"></path></svg></div>
+    </div>
+
+    <div style="width:306px;flex:none;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0;position:relative">
+      <sc-if value="{{ javaMap }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;right:6px;bottom:6px;z-index:20;font-family:var(--font-mono);font-size:9.5px;font-weight:600;background:var(--accent-base);color:#fff;padding:2px 6px;border-radius:5px">TreeView&lt;ConnNode&gt; + CheckBoxTreeCell</div></sc-if>
+
+      <div style="height:34px;flex:none;display:flex;align-items:center;padding:0 10px;border-bottom:1px solid var(--border);font-family:var(--font-heading);font-weight:600;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted)">
+        {{ dockTitle }}
+      </div>
+
+      <sc-if value="{{ isConexiones }}" hint-placeholder-val="{{ true }}">
+        <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+          <div style="padding:8px 8px 4px;position:relative">
+            <svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="position:absolute;left:19px;top:19px;color:var(--text-muted)"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>
+            <input placeholder="Buscar servidor o base de datosâ€¦" style="width:100%;background:var(--background);border:1px solid var(--border);border-radius:999px;padding:7px 12px 7px 32px;color:var(--text);font-family:var(--font-body);font-size:12.5px;outline:none">
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;padding:4px 10px 8px">
+            <div style="display:inline-flex;background:var(--surface-alt);border-radius:10px;padding:3px;gap:2px;flex:1">
+              <button sc-camel-on-click="{{ setIndividual }}" style="{{ segS.individual }}">Individual</button>
+              <button sc-camel-on-click="{{ setMasiva }}" style="{{ segS.masiva }}">Masiva</button>
+            </div>
+            <div sc-camel-on-click="{{ openAddDb }}" title="Agregar base de datos" style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid var(--border);border-radius:9px;color:var(--text-muted);cursor:pointer" style-hover="background:var(--surface-alt)"><svg width="15" height="15" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"></path></svg></div>
+          </div>
+
+          <div style="flex:1;min-height:0;overflow:auto;padding:0 6px 10px">
+            <div sc-camel-on-click="{{ tglBodegas }}" style="display:flex;align-items:center;gap:6px;padding:6px 6px;border-radius:8px;cursor:pointer" style-hover="background:var(--surface-alt)">
+              <span style="{{ chevS.bodegas }}"><svg width="13" height="13" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"></path></svg></span>
+              <svg width="15" height="15" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" style="color:var(--text-muted)"><rect x="3" y="4" width="18" height="7" rx="2"></rect><rect x="3" y="13" width="18" height="7" rx="2"></rect><path d="M7 8h.01M7 17h.01"></path></svg>
+              <span style="flex:1;font-size:12.5px;font-weight:600">Bodegas Centro</span>
+              <span style="font-size:11px;color:var(--text-muted)">12</span>
+            </div>
+            <sc-if value="{{ exp.bodegas }}" hint-placeholder-val="{{ true }}">
+              <div style="padding-left:18px">
+                <div sc-camel-on-context-menu="{{ showCtx }}" style="{{ rowS.norte }}" style-hover="background:var(--surface-alt)">
+                  <span sc-camel-on-click="{{ tglNorte }}" style="{{ chevS.norte }}"><svg width="12" height="12" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"></path></svg></span>
+                  <span sc-camel-on-click="{{ chkNorte }}" style="{{ chkS.norte }}"><svg width="10" height="10" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2"><path d="M4 12.5l5 5L20 6.5"></path></svg></span>
+                  <span style="width:7px;height:7px;border-radius:50%;background:var(--success-base);flex:none"></span>
+                  <span style="flex:1;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Bodega Norte</span>
+                  <span style="font-family:var(--font-mono);font-size:9.5px;color:var(--text-muted);background:var(--surface-alt);border-radius:4px;padding:1px 4px">PG</span>
+                </div>
+                <sc-if value="{{ exp.norte }}" hint-placeholder-val="{{ true }}">
+                  <div style="padding-left:22px">
+                    <div sc-camel-on-click="{{ tglTables }}" style="display:flex;align-items:center;gap:5px;padding:4px 6px;border-radius:6px;cursor:pointer" style-hover="background:var(--surface-alt)">
+                      <span style="{{ chevS.tables }}"><svg width="11" height="11" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"></path></svg></span>
+                      <span style="font-size:12px">Tablas</span>
+                      <span style="font-family:var(--font-mono);font-size:9.5px;font-weight:700;color:var(--text-muted);background:var(--surface-alt);border-radius:5px;padding:1px 5px">4</span>
+                    </div>
+                    <sc-if value="{{ exp.tables }}" hint-placeholder-val="{{ true }}">
+                      <div style="padding-left:16px;display:flex;flex-direction:column">
+                        <div sc-camel-on-context-menu="{{ showCtx }}" style="display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:5px;cursor:pointer;font-size:12px" style-hover="background:var(--surface-alt)"><svg width="12" height="12" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" style="color:var(--text-muted)"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18M9 3v18"></path></svg>productos</div>
+                        <div sc-camel-on-context-menu="{{ showCtx }}" style="display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:5px;cursor:pointer;font-size:12px" style-hover="background:var(--surface-alt)"><svg width="12" height="12" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" style="color:var(--text-muted)"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18M9 3v18"></path></svg>existencias</div>
+                        <div sc-camel-on-context-menu="{{ showCtx }}" style="display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:5px;cursor:pointer;font-size:12px" style-hover="background:var(--surface-alt)"><svg width="12" height="12" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" style="color:var(--text-muted)"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18M9 3v18"></path></svg>movimientos</div>
+                        <div sc-camel-on-context-menu="{{ showCtx }}" style="display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:5px;cursor:pointer;font-size:12px" style-hover="background:var(--surface-alt)"><svg width="12" height="12" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" style="color:var(--text-muted)"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18M9 3v18"></path></svg>inventario_detalle</div>
+                      </div>
+                    </sc-if>
+                    <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;border-radius:6px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="color:var(--text-muted);display:flex"><svg width="11" height="11" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"></path></svg></span><span style="font-size:12px">Vistas</span><span style="font-family:var(--font-mono);font-size:9.5px;font-weight:700;color:var(--text-muted);background:var(--surface-alt);border-radius:5px;padding:1px 5px">1</span></div>
+                    <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;border-radius:6px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="color:var(--text-muted);display:flex"><svg width="11" height="11" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"></path></svg></span><span style="font-size:12px">Funciones</span><span style="font-family:var(--font-mono);font-size:9.5px;font-weight:700;color:var(--text-muted);background:var(--surface-alt);border-radius:5px;padding:1px 5px">1</span></div>
+                    <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;border-radius:6px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="color:var(--text-muted);display:flex"><svg width="11" height="11" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"></path></svg></span><span style="font-size:12px">Procedimientos</span><span style="font-family:var(--font-mono);font-size:9.5px;font-weight:700;color:var(--text-muted);background:var(--surface-alt);border-radius:5px;padding:1px 5px">1</span></div>
+                    <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;border-radius:6px;cursor:pointer" style-hover="background:var(--surface-alt)"><span style="color:var(--text-muted);display:flex"><svg width="11" height="11" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"></path></svg></span><span style="font-size:12px">Triggers</span><span style="font-family:var(--font-mono);font-size:9.5px;font-weight:700;color:var(--text-muted);background:var(--surface-alt);border-radius:5px;padding:1px 5px">1</span></div>
+                  </div>
+                </sc-if>
+                <div sc-camel-on-context-menu="{{ showCtx }}" style="{{ rowS.sur }}" style-hover="background:var(--surface-alt)">
+                  <span style="color:var(--text-muted);display:flex"><svg width="12" height="12" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"></path></svg></span>
+                  <span sc-camel-on-click="{{ chkSur }}" style="{{ chkS.sur }}"><svg width="10" height="10" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2"><path d="M4 12.5l5 5L20 6.5"></path></svg></span>
+                  <span style="width:7px;height:7px;border-radius:50%;background:var(--success-base);flex:none"></span>
+                  <span style="flex:1;font-size:12.5px">Bodega Sur</span>
+                  <span style="font-family:var(--font-mono);font-size:9.5px;color:var(--text-muted);background:var(--surface-alt);border-radius:4px;padding:1px 4px">PG</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;padding:5px 6px;color:var(--text-muted);font-size:11.5px;padding-left:26px">+ 10 bodegas mÃ¡s</div>
+              </div>
+            </sc-if>
+
+            <div sc-camel-on-click="{{ tglSucursales }}" style="display:flex;align-items:center;gap:6px;padding:6px;border-radius:8px;cursor:pointer;margin-top:2px" style-hover="background:var(--surface-alt)">
+              <span style="{{ chevS.sucursales }}"><svg width="13" height="13" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"></path></svg></span>
+              <svg width="15" height="15" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" style="color:var(--text-muted)"><rect x="3" y="4" width="18" height="7" rx="2"></rect><rect x="3" y="13" width="18" height="7" rx="2"></rect><path d="M7 8h.01M7 17h.01"></path></svg>
+              <span style="flex:1;font-size:12.5px;font-weight:600">Sucursales Muebles TX</span>
+              <span style="font-size:11px;color:var(--text-muted)">8</span>
+            </div>
+            <sc-if value="{{ exp.sucursales }}" hint-placeholder-val="{{ true }}">
+              <div style="padding-left:18px">
+                <div sc-camel-on-context-menu="{{ showCtx }}" style="{{ rowS.reforma }}" style-hover="background:var(--surface-alt)">
+                  <span style="color:var(--text-muted);display:flex"><svg width="12" height="12" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"></path></svg></span>
+                  <span sc-camel-on-click="{{ chkReforma }}" style="{{ chkS.reforma }}"><svg width="10" height="10" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2"><path d="M4 12.5l5 5L20 6.5"></path></svg></span>
+                  <span style="width:7px;height:7px;border-radius:50%;background:var(--warn-base);flex:none"></span>
+                  <span style="flex:1;font-size:12.5px">Tienda Reforma</span>
+                  <span style="font-family:var(--font-mono);font-size:9.5px;color:var(--text-muted);background:var(--surface-alt);border-radius:4px;padding:1px 4px">MSSQL</span>
+                </div>
+                <div sc-camel-on-context-menu="{{ showCtx }}" style="{{ rowS.polanco }}" style-hover="background:var(--surface-alt)">
+                  <span style="color:var(--text-muted);display:flex"><svg width="12" height="12" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"></path></svg></span>
+                  <span sc-camel-on-click="{{ chkPolanco }}" style="{{ chkS.polanco }}"><svg width="10" height="10" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2"><path d="M4 12.5l5 5L20 6.5"></path></svg></span>
+                  <span style="width:7px;height:7px;border-radius:50%;background:var(--text-muted);flex:none"></span>
+                  <span style="flex:1;font-size:12.5px">Tienda Polanco</span>
+                  <span style="background:var(--warn-soft);color:var(--warn-soft-text);border-radius:4px;padding:1px 5px;font-size:9.5px;font-weight:700">SIN RESTRICCIONES</span>
+                </div>
+              </div>
+            </sc-if>
+
+            <div sc-camel-on-click="{{ tglSinGrupo }}" style="display:flex;align-items:center;gap:6px;padding:6px;border-radius:8px;cursor:pointer;margin-top:2px" style-hover="background:var(--surface-alt)">
+              <span style="{{ chevS.singrupo }}"><svg width="13" height="13" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"></path></svg></span>
+              <span style="flex:1;font-size:11.5px;font-weight:700;letter-spacing:.04em;color:var(--text-muted);text-transform:uppercase">Sin grupo</span>
+              <span style="font-size:11px;color:var(--text-muted)">1</span>
+            </div>
+            <sc-if value="{{ exp.singrupo }}" hint-placeholder-val="{{ true }}">
+              <div style="padding-left:18px">
+                <div sc-camel-on-context-menu="{{ showCtx }}" style="{{ rowS.crisol }}" style-hover="background:var(--surface-alt)">
+                  <span style="color:var(--text-muted);display:flex"><svg width="12" height="12" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"></path></svg></span>
+                  <span sc-camel-on-click="{{ chkCrisol }}" style="{{ chkS.crisol }}"><svg width="10" height="10" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2"><path d="M4 12.5l5 5L20 6.5"></path></svg></span>
+                  <span style="width:7px;height:7px;border-radius:50%;background:var(--success-base);flex:none"></span>
+                  <span style="flex:1;font-size:12.5px">crisol</span>
+                  <span style="font-family:var(--font-mono);font-size:9.5px;color:var(--text-muted);background:var(--surface-alt);border-radius:4px;padding:1px 4px">PG</span>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isHistorial }}" hint-placeholder-val="{{ false }}">
+        <div style="flex:1;min-height:0;overflow:auto;padding:10px">
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-sm);padding:10px;margin-bottom:8px">
+            <div style="display:flex;align-items:center;gap:6px"><span style="font-size:12px;font-weight:700;color:var(--text-muted)">10:42</span><span style="background:var(--success-soft);color:var(--success-soft-text);border-radius:5px;padding:1px 6px;font-size:10px;font-weight:700">20 bases Â· 4.2 s</span></div>
+            <div style="font-family:var(--font-mono);font-size:11px;margin:6px 0;color:var(--text)">SELECT p.sku, e.cantidad FROM productos p JOIN existencias eâ€¦</div>
+            <div style="display:flex;gap:8px;color:var(--text-muted);font-size:11px"><span>1,240 filas</span><span>Â·</span><span>Bodegas Centro</span></div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-sm);padding:10px;margin-bottom:8px">
+            <div style="display:flex;align-items:center;gap:6px"><span style="font-size:12px;font-weight:700;color:var(--text-muted)">10:31</span><span style="background:var(--error-soft);color:var(--error-soft-text);border-radius:5px;padding:1px 6px;font-size:10px;font-weight:700">cancelada</span></div>
+            <div style="font-family:var(--font-mono);font-size:11px;margin:6px 0">UPDATE existencias SET cantidad = 0 WHERE bodega = 4;</div>
+            <div style="display:flex;gap:8px;color:var(--text-muted);font-size:11px"><span>KILL enviado Â· 3 bases</span></div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-sm);padding:10px">
+            <div style="display:flex;align-items:center;gap:6px"><span style="font-size:12px;font-weight:700;color:var(--text-muted)">09:58</span><span style="background:var(--success-soft);color:var(--success-soft-text);border-radius:5px;padding:1px 6px;font-size:10px;font-weight:700">1 base Â· 180 ms</span></div>
+            <div style="font-family:var(--font-mono);font-size:11px;margin:6px 0">SELECT COUNT(*) FROM movimientos WHERE fecha &gt; CURRENT_DATE - 7;</div>
+            <div style="display:flex;gap:8px;color:var(--text-muted);font-size:11px"><span>1 fila</span><span>Â·</span><span>crisol</span></div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isFavoritos }}" hint-placeholder-val="{{ false }}">
+        <div style="flex:1;min-height:0;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px">
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-sm);padding:10px">
+            <div style="font-family:var(--font-heading);font-weight:600;font-size:13px">Existencias bajas</div>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin:6px 0">SELECT p.sku, e.cantidad FROM productos p JOIN existencias e ONâ€¦</div>
+            <div style="display:flex;gap:6px"><span style="background:var(--accent-soft);color:var(--accent-soft-text);border-radius:5px;padding:2px 7px;font-size:10.5px;font-weight:700">Bodegas</span><span style="background:var(--surface-alt);color:var(--text-muted);border-radius:5px;padding:2px 7px;font-size:10.5px;font-weight:700">Diario</span></div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-sm);padding:10px">
+            <div style="font-family:var(--font-heading);font-weight:600;font-size:13px">Ventas por sucursal</div>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin:6px 0">SELECT s.nombre, SUM(v.total) FROM ventas v JOIN sucursales sâ€¦</div>
+            <div style="display:flex;gap:6px"><span style="background:var(--surface-alt);color:var(--text-muted);border-radius:5px;padding:2px 7px;font-size:10.5px;font-weight:700">MSSQL</span></div>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+
+      <div style="height:36px;flex:none;display:flex;align-items:stretch;background:var(--surface);border-bottom:1px solid var(--border);position:relative">
+        <sc-if value="{{ javaMap }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;right:8px;top:8px;z-index:5;font-family:var(--font-mono);font-size:9.5px;font-weight:600;background:var(--accent-base);color:#fff;padding:2px 6px;border-radius:5px">TabPane</div></sc-if>
+        <div sc-camel-on-click="{{ tab1 }}" style="{{ tabS.t1 }}">
+          <svg width="13" height="13" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"></path><path d="M14 2v6h6"></path></svg>
+          <span>existencias_bajas.sql</span>
+          <span style="color:var(--warn-base);font-size:15px;line-height:0">â€¢</span>
+        </div>
+        <div sc-camel-on-click="{{ tab2 }}" style="{{ tabS.t2 }}">
+          <svg width="13" height="13" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"></path><path d="M14 2v6h6"></path></svg>
+          <span>Tienda Polanco</span>
+        </div>
+        <div sc-camel-on-click="{{ miNewTab }}" style="display:flex;align-items:center;justify-content:center;width:34px;color:var(--text-muted);cursor:pointer" style-hover="background:var(--surface-alt)"><svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"></path></svg></div>
+      </div>
+
+      <div style="flex:1;min-height:0;display:flex;flex-direction:column;padding:10px;gap:0">
+
+        <div style="flex:0 0 34%;min-height:120px;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-container);box-shadow:var(--shadow-sm);overflow:hidden;position:relative">
+          <sc-if value="{{ javaMap }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;right:8px;top:8px;z-index:15;font-family:var(--font-mono);font-size:9.5px;font-weight:600;background:var(--accent-base);color:#fff;padding:2px 6px;border-radius:5px">CodeArea (RichTextFX)</div></sc-if>
+          <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--border)">
+            <span style="font-family:var(--font-heading);font-weight:600;font-size:13.5px;white-space:nowrap">Bodegas Centro Â· 20 bases</span>
+            <span style="background:var(--surface-alt);color:var(--text-muted);border-radius:6px;padding:2px 8px;font-size:10.5px;font-weight:700;letter-spacing:.02em;white-space:nowrap">SOLO LECTURA</span>
+            <div style="flex:1"></div>
+            <span style="color:var(--text-muted);font-size:11.5px;white-space:nowrap">Ln 5, Col 24 Â· UTF-8 Â· PostgreSQL + SQL Server</span>
+          </div>
+          <div style="flex:1;min-height:0;display:flex;background:var(--surface-alt);overflow:auto">
+            <div style="flex:none;text-align:right;padding:12px 8px 12px 10px;color:var(--text-muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.55;user-select:none">
+              <div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div>
+            </div>
+            <div style="flex:1;min-width:0;padding:12px 14px;font-family:var(--font-mono);font-size:13px;line-height:1.55;color:var(--text)">
+              <div style="white-space:pre"><span style="color:var(--text-muted);font-style:italic">-- Existencias bajas en las 20 bodegas</span></div>
+              <div style="white-space:pre"><span style="color:var(--accent-base);font-weight:600">SELECT</span> p.sku, p.nombre, e.cantidad, p.precio, p.categoria</div>
+              <div style="white-space:pre"><span style="color:var(--accent-base);font-weight:600">FROM</span> productos p</div>
+              <div style="white-space:pre"><span style="color:var(--accent-base);font-weight:600">JOIN</span> existencias e <span style="color:var(--accent-base);font-weight:600">ON</span> e.producto_id = p.id</div>
+              <div style="white-space:pre"><span style="color:var(--accent-base);font-weight:600">WHERE</span> e.cantidad &lt; <span style="color:var(--warn-base)">20</span></div>
+              <div style="white-space:pre"><span style="color:var(--accent-base);font-weight:600">ORDER BY</span> e.cantidad <span style="color:var(--accent-base);font-weight:600">ASC</span>;</div>
+              <div style="white-space:pre">&nbsp;</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="height:8px;flex:none;display:flex;align-items:center;cursor:ns-resize"><div style="height:2px;width:100%;background:var(--border);border-radius:2px"></div></div>
+
+        <div style="flex:1;min-height:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-container);box-shadow:var(--shadow-sm);overflow:hidden;position:relative">
+          <sc-if value="{{ javaMap }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;right:8px;bottom:8px;z-index:15;font-family:var(--font-mono);font-size:9.5px;font-weight:600;background:var(--accent-base);color:#fff;padding:2px 6px;border-radius:5px">TabPane inferior + TableView virtualizada</div></sc-if>
+
+          <div style="display:flex;align-items:stretch;border-bottom:1px solid var(--border);background:var(--surface);flex:none">
+            <div sc-camel-on-click="{{ btResultados }}" style="{{ btS.resultados }}">Resultados<span style="{{ badgeS.resultados }}">1,240</span></div>
+            <div sc-camel-on-click="{{ btEjecucion }}" style="{{ btS.ejecucion }}">EjecuciÃ³n<span style="{{ badgeS.ejecucion }}">{{ execBadge }}</span></div>
+            <div sc-camel-on-click="{{ btMensajes }}" style="{{ btS.mensajes }}">DiagnÃ³stico<span style="{{ badgeS.mensajes }}">3</span></div>
+            <div style="flex:1"></div>
+            <div style="display:flex;align-items:center;gap:6px;padding:0 10px">
+              <button sc-camel-on-click="{{ exportCsv }}" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;padding:5px 12px;background:transparent;color:var(--text);font-family:var(--font-body);font-weight:600;font-size:12px;cursor:pointer" style-hover="background:var(--surface-alt)"><svg width="13" height="13" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15v4a2 2 0 002 2h12a2 2 0 002-2v-4M12 3v13M8 12l4 4 4-4"></path></svg>Exportar CSV</button>
+              <div sc-camel-on-click="{{ releaseMem }}" title="Liberar resultados de memoria" style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;color:var(--text-muted);cursor:pointer" style-hover="background:var(--surface-alt)"><svg width="15" height="15" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 5 5-6 6H5a2 2 0 01-2-2z"></path><path d="M14 6l4 4M9 11l7-7 4 4-7 7"></path></svg></div>
+            </div>
+          </div>
+
+          <sc-if value="{{ showResults }}" hint-placeholder-val="{{ true }}">
+            <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+              <div style="display:flex;flex-wrap:wrap;gap:5px;padding:9px 12px 7px">
+                <sc-for list="{{ pills }}" as="p" hint-placeholder-count="4">
+                  <div sc-camel-on-click="{{ p.onClick }}" style="{{ p.style }}">{{ p.label }}</div>
+                </sc-for>
+              </div>
+              <div style="flex:1;min-height:0;overflow:auto">
+                <sc-raw-table style="border-collapse:collapse;width:max-content;min-width:100%;font-size:12.5px">
+                  <sc-raw-thead>
+                    <sc-raw-tr>
+                      <sc-raw-th style="position:sticky;top:0;z-index:2;background:var(--surface-alt);text-align:left;padding:7px 14px;border-bottom:1px solid var(--border);font-weight:700;font-size:12px;white-space:nowrap;min-width:110px">sku<span style="display:block;font-weight:500;font-size:10px;color:var(--text-muted)">text</span></sc-raw-th>
+                      <sc-raw-th style="position:sticky;top:0;z-index:2;background:var(--surface-alt);text-align:left;padding:7px 14px;border-bottom:1px solid var(--border);font-weight:700;font-size:12px;white-space:nowrap;min-width:200px">nombre<span style="display:block;font-weight:500;font-size:10px;color:var(--text-muted)">text</span></sc-raw-th>
+                      <sc-raw-th style="position:sticky;top:0;z-index:2;background:var(--surface-alt);text-align:left;padding:7px 14px;border-bottom:1px solid var(--border);font-weight:700;font-size:12px;white-space:nowrap;min-width:100px">cantidad<span style="display:block;font-weight:500;font-size:10px;color:var(--text-muted)">integer</span></sc-raw-th>
+                      <sc-raw-th style="position:sticky;top:0;z-index:2;background:var(--surface-alt);text-align:left;padding:7px 14px;border-bottom:1px solid var(--border);font-weight:700;font-size:12px;white-space:nowrap;min-width:110px">precio<span style="display:block;font-weight:500;font-size:10px;color:var(--text-muted)">numeric(10,2)</span></sc-raw-th>
+                      <sc-raw-th style="position:sticky;top:0;z-index:2;background:var(--surface-alt);text-align:left;padding:7px 14px;border-bottom:1px solid var(--border);font-weight:700;font-size:12px;white-space:nowrap;min-width:140px">categoria<span style="display:block;font-weight:500;font-size:10px;color:var(--text-muted)">text</span></sc-raw-th>
+                      <sc-raw-th style="position:sticky;top:0;z-index:2;background:var(--surface-alt);text-align:left;padding:7px 14px;border-bottom:1px solid var(--border);font-weight:700;font-size:12px;white-space:nowrap;min-width:150px">base_origen<span style="display:block;font-weight:500;font-size:10px;color:var(--text-muted)">text</span></sc-raw-th>
+                    </sc-raw-tr>
+                  </sc-raw-thead>
+                  <sc-raw-tbody>
+                    <sc-raw-tr style-hover="background:var(--surface-alt)"><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono);font-size:12px">P-014</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Silla NÃ³rdica Roble</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">3</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">1,890.00</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Sillas</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;color:var(--text-muted)">Bodega Norte</sc-raw-td></sc-raw-tr>
+                    <sc-raw-tr style-hover="background:var(--surface-alt)"><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono);font-size:12px">P-007</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Mesa Comedor Nogal 180</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">4</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">12,400.00</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Mesas</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;color:var(--text-muted)">Bodega Norte</sc-raw-td></sc-raw-tr>
+                    <sc-raw-tr style-hover="background:var(--surface-alt)"><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono);font-size:12px">P-031</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Librero Modular 5 Niveles</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">6</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">7,250.00</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Almacenaje</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;color:var(--text-muted)">Bodega Sur</sc-raw-td></sc-raw-tr>
+                    <sc-raw-tr style-hover="background:var(--surface-alt)"><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono);font-size:12px">P-002</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">SofÃ¡ Lino 3 Plazas</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">7</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">18,990.00</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Salas</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;color:var(--text-muted)">Bodega Sur</sc-raw-td></sc-raw-tr>
+                    <sc-raw-tr style-hover="background:var(--surface-alt)"><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono);font-size:12px">P-045</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">BurÃ³ Minimal Nogal</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">9</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">3,150.00</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">RecÃ¡maras</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;color:var(--text-muted)">Bodega 4</sc-raw-td></sc-raw-tr>
+                    <sc-raw-tr style-hover="background:var(--surface-alt)"><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono);font-size:12px">P-019</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Cabecera Tapizada Queen</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">11</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">6,780.00</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">RecÃ¡maras</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;color:var(--text-muted)">Bodega 4</sc-raw-td></sc-raw-tr>
+                    <sc-raw-tr style-hover="background:var(--surface-alt)"><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono);font-size:12px">P-060</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Banco Alto Industrial</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">12</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">1,240.00</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Sillas</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;color:var(--text-muted)">Bodega 7</sc-raw-td></sc-raw-tr>
+                    <sc-raw-tr style-hover="background:var(--surface-alt)"><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono);font-size:12px">P-023</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Mesa Centro Cristal</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">14</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">4,320.00</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Mesas</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;color:var(--text-muted)">Bodega 7</sc-raw-td></sc-raw-tr>
+                    <sc-raw-tr style-hover="background:var(--surface-alt)"><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono);font-size:12px">P-088</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Perchero de Pie Haya</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">15</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">980.00</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Accesorios</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;color:var(--text-muted)">Bodega 11</sc-raw-td></sc-raw-tr>
+                    <sc-raw-tr style-hover="background:var(--surface-alt)"><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono);font-size:12px">P-051</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Escritorio Compacto 120</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">17</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">5,600.00</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Oficina</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;color:var(--text-muted)">Bodega 11</sc-raw-td></sc-raw-tr>
+                    <sc-raw-tr style-hover="background:var(--surface-alt)"><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono);font-size:12px">P-072</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Repisa Flotante 90 cm</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">18</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">640.00</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Almacenaje</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;color:var(--text-muted)">Bodega 15</sc-raw-td></sc-raw-tr>
+                    <sc-raw-tr style-hover="background:var(--surface-alt)"><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono);font-size:12px">P-096</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Silla Ejecutiva Malla</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">19</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;font-family:var(--font-mono)">4,890.00</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap">Oficina</sc-raw-td><sc-raw-td style="padding:7px 14px;border-bottom:1px solid var(--border);white-space:nowrap;color:var(--text-muted)">Bodega 15</sc-raw-td></sc-raw-tr>
+                  </sc-raw-tbody>
+                </sc-raw-table>
+              </div>
+              <div style="flex:none;display:flex;align-items:center;gap:12px;padding:8px 12px;border-top:1px solid var(--border)">
+                <div style="flex:none;width:170px;height:6px;border-radius:999px;background:var(--surface-alt);overflow:hidden"><div style="{{ loadedBarStyle }}"></div></div>
+                <span style="font-size:11.5px;color:var(--text-muted)">{{ loadedLabel }}</span>
+                <button sc-camel-on-click="{{ loadMore }}" style="border:1px solid var(--border);border-radius:999px;padding:4px 12px;background:transparent;color:var(--text);font-family:var(--font-body);font-weight:600;font-size:11.5px;cursor:pointer" style-hover="background:var(--surface-alt)">Cargar 200 mÃ¡s</button>
+                <div style="flex:1"></div>
+                <span style="font-size:11.5px;color:var(--text-muted)">Scroll virtualizado Â· 60 fps</span>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ showExec }}" hint-placeholder-val="{{ false }}">
+            <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+              <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--border)">
+                <span style="font-size:12px;font-weight:600">{{ execSummary }}</span>
+                <div style="flex:1"></div>
+                <span style="font-size:11.5px;color:var(--text-muted)">Pool 14/40 Â· 6 hilos activos</span>
+              </div>
+              <div style="flex:1;min-height:0;overflow:auto">
+                <sc-for list="{{ execRows }}" as="r" hint-placeholder-count="6">
+                  <div style="display:flex;align-items:center;gap:12px;padding:8px 12px;border-bottom:1px solid var(--border)">
+                    <span style="width:9px;height:9px;border-radius:50%;flex:none;background:{{ r.dot }}"></span>
+                    <span style="width:150px;flex:none;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</span>
+                    <span style="width:120px;flex:none;font-family:var(--font-mono);font-size:10.5px;color:var(--text-muted)">{{ r.host }}</span>
+                    <span style="{{ r.badge }}">{{ r.status }}</span>
+                    <div style="flex:1;min-width:60px;height:5px;border-radius:999px;background:var(--surface-alt);overflow:hidden"><div style="{{ r.bar }}"></div></div>
+                    <span style="width:80px;flex:none;text-align:right;font-family:var(--font-mono);font-size:11.5px">{{ r.rows }}</span>
+                    <span style="width:70px;flex:none;text-align:right;font-family:var(--font-mono);font-size:11.5px;color:var(--text-muted)">{{ r.ms }}</span>
+                    <span sc-camel-on-click="{{ cancel }}" title="Cancelar esta base" style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;color:var(--text-muted);cursor:pointer" style-hover="background:var(--surface-alt)"><svg width="12" height="12" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"></path></svg></span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ showMsgs }}" hint-placeholder-val="{{ false }}">
+            <div style="flex:1;min-height:0;overflow:auto;padding:10px 12px;font-family:var(--font-mono);font-size:11.5px;line-height:1.9">
+              <div><span style="color:var(--text-muted)">10:42:03.118</span> <span style="color:var(--success-base);font-weight:700">INFO </span> HikariPool-bodegas â€” conexiÃ³n establecida (14/40 activas)</div>
+              <div><span style="color:var(--text-muted)">10:42:03.402</span> <span style="color:var(--success-base);font-weight:700">INFO </span> 20 sentencias enviadas Â· sc-camel-fetch-size=500 Â· timeout=30 s</div>
+              <div><span style="color:var(--text-muted)">10:42:05.771</span> <span style="color:var(--warn-base);font-weight:700">WARN </span> Tienda Reforma â€” respuesta lenta (2,4 s) Â· reintento 1 de 2</div>
+              <div><span style="color:var(--text-muted)">10:42:07.010</span> <span style="color:var(--error-base);font-weight:700">ERROR</span> Bodega 18 â€” Login timeout expired (SQLState 08S01)</div>
+              <div><span style="color:var(--text-muted)">10:42:07.240</span> <span style="color:var(--text-muted);font-weight:700">DEBUG</span> Statement.cancel() enviado a 3 sesiones Â· KILL 74, 91, 112</div>
+              <div><span style="color:var(--text-muted)">10:42:09.006</span> <span style="color:var(--success-base);font-weight:700">INFO </span> EjecuciÃ³n completada â€” 1,240 filas en 4.2 s</div>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:28px;flex:none;display:flex;align-items:center;gap:14px;padding:0 12px;background:var(--surface);border-top:1px solid var(--border);font-size:11.5px;color:var(--text-muted);position:relative">
+    <sc-if value="{{ javaMap }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;right:8px;top:-11px;z-index:5;font-family:var(--font-mono);font-size:9.5px;font-weight:600;background:var(--accent-base);color:#fff;padding:2px 6px;border-radius:5px">StatusBar (ControlsFX)</div></sc-if>
+    <span style="display:flex;align-items:center;gap:6px"><span style="width:7px;height:7px;border-radius:50%;background:var(--success-base)"></span>20 conexiones Â· pool 14/40</span>
+    <span>{{ statusRun }}</span>
+    <span>Timeout 30 s Â· fetch 500</span>
+    <div style="flex:1"></div>
+    <sc-if value="{{ exporting }}" hint-placeholder-val="{{ false }}">
+      <span style="display:flex;align-items:center;gap:7px;color:var(--accent-soft-text)">
+        <span style="width:11px;height:11px;border:2px solid var(--accent-base);border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite"></span>
+        {{ exportLabel }}
+      </span>
+    </sc-if>
+    <span>Memoria 214 MB</span>
+    <span>PostgreSQL 15.4 Â· SQL Server 2019 Â· JDK 21</span>
+  </div>
+
+  <sc-if value="{{ ctxOpen }}" hint-placeholder-val="{{ false }}">
+    <div sc-camel-on-click="{{ closeCtx }}" style="position:absolute;inset:0;z-index:300"></div>
+  </sc-if>
+  <sc-if value="{{ ctxOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="{{ ctxStyle }}">
+      <div sc-camel-on-click="{{ miToast }}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;cursor:pointer;font-size:12.5px" style-hover="background:var(--surface-alt)">Generar SELECT</div>
+      <div sc-camel-on-click="{{ miToast }}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;cursor:pointer;font-size:12.5px" style-hover="background:var(--surface-alt)">Generar UPDATE</div>
+      <div sc-camel-on-click="{{ miToast }}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;cursor:pointer;font-size:12.5px" style-hover="background:var(--surface-alt)">Generar script CREATE</div>
+      <div sc-camel-on-click="{{ openCsv }}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;cursor:pointer;font-size:12.5px" style-hover="background:var(--surface-alt)">Importar CSVâ€¦</div>
+      <div style="height:1px;background:var(--border);margin:5px 2px"></div>
+      <div sc-camel-on-click="{{ miNewTab }}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;cursor:pointer;font-size:12.5px" style-hover="background:var(--surface-alt)">Abrir en pestaÃ±a</div>
+      <div sc-camel-on-click="{{ miToast }}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;cursor:pointer;font-size:12.5px" style-hover="background:var(--surface-alt)">Abrir en ventana nueva</div>
+      <div sc-camel-on-click="{{ miToast }}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;cursor:pointer;font-size:12.5px" style-hover="background:var(--surface-alt)">Credencialesâ€¦</div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ dialogAddDb }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;background:var(--backdrop);display:flex;align-items:center;justify-content:center;z-index:400">
+      <div style="width:520px;max-height:88%;background:var(--surface);border-radius:var(--radius-container);box-shadow:var(--shadow-lg);display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:16px 18px 0;font-family:var(--font-heading);font-weight:600;font-size:17px">Agregar base de datos</div>
+        <div style="padding:14px 18px;overflow:auto;display:flex;flex-direction:column;gap:12px">
+          <div style="display:inline-flex;background:var(--surface-alt);border-radius:10px;padding:3px;gap:2px;align-self:flex-start">
+            <button style="border:none;background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm);border-radius:7px;padding:6px 14px;font-family:var(--font-body);font-weight:600;font-size:12.5px;cursor:pointer">PostgreSQL</button>
+            <button style="border:none;background:transparent;color:var(--text-muted);border-radius:7px;padding:6px 14px;font-family:var(--font-body);font-weight:600;font-size:12.5px;cursor:pointer">SQL Server</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div style="display:flex;flex-direction:column;gap:5px"><label style="font-size:11.5px;font-weight:600;color:var(--text-muted)">Nombre visible</label><input value="Bodega Oriente" style="width:100%;background:var(--background);border:1px solid var(--border);border-radius:999px;padding:9px 13px;color:var(--text);font-family:var(--font-body);font-size:12.5px;outline:none"></div>
+            <div style="display:flex;flex-direction:column;gap:5px"><label style="font-size:11.5px;font-weight:600;color:var(--text-muted)">Base de datos</label><input value="bodega" style="width:100%;background:var(--background);border:1px solid var(--border);border-radius:999px;padding:9px 13px;color:var(--text);font-family:var(--font-body);font-size:12.5px;outline:none"></div>
+            <div style="display:flex;flex-direction:column;gap:5px"><label style="font-size:11.5px;font-weight:600;color:var(--text-muted)">Host</label><input value="192.168.1.24" style="width:100%;background:var(--background);border:1px solid var(--border);border-radius:999px;padding:9px 13px;color:var(--text);font-family:var(--font-body);font-size:12.5px;outline:none"></div>
+            <div style="display:flex;flex-direction:column;gap:5px"><label style="font-size:11.5px;font-weight:600;color:var(--text-muted)">Puerto</label><input value="5432" style="width:100%;background:var(--background);border:1px solid var(--border);border-radius:999px;padding:9px 13px;color:var(--text);font-family:var(--font-mono);font-size:12.5px;outline:none"></div>
+            <div style="display:flex;flex-direction:column;gap:5px"><label style="font-size:11.5px;font-weight:600;color:var(--text-muted)">Usuario</label><input value="faro_ro" style="width:100%;background:var(--background);border:1px solid var(--border);border-radius:999px;padding:9px 13px;color:var(--text);font-family:var(--font-body);font-size:12.5px;outline:none"></div>
+            <div style="display:flex;flex-direction:column;gap:5px"><label style="font-size:11.5px;font-weight:600;color:var(--text-muted)">ContraseÃ±a</label><input type="password" value="secreta" style="width:100%;background:var(--background);border:1px solid var(--border);border-radius:999px;padding:9px 13px;color:var(--text);font-family:var(--font-body);font-size:12.5px;outline:none"></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <label style="font-size:11.5px;font-weight:600;color:var(--text-muted)">Modo de ejecuciÃ³n</label>
+            <div style="display:flex;gap:8px">
+              <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--accent-base);background:var(--accent-soft);border-radius:999px;padding:7px 14px;cursor:pointer"><span style="width:12px;height:12px;border-radius:50%;border:4px solid var(--accent-base)"></span><span style="font-size:12.5px;font-weight:600;color:var(--accent-soft-text)">Solo lectura</span></div>
+              <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:999px;padding:7px 14px;cursor:pointer"><span style="width:12px;height:12px;border-radius:50%;border:2px solid var(--border)"></span><span style="font-size:12.5px;font-weight:600">Sin restricciones</span></div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div style="display:flex;flex-direction:column;gap:5px"><label style="font-size:11.5px;font-weight:600;color:var(--text-muted)">Conexiones del pool</label><input value="4" style="width:100%;background:var(--background);border:1px solid var(--border);border-radius:999px;padding:9px 13px;color:var(--text);font-family:var(--font-mono);font-size:12.5px;outline:none"></div>
+            <div style="display:flex;flex-direction:column;gap:5px"><label style="font-size:11.5px;font-weight:600;color:var(--text-muted)">Timeout de consulta (s)</label><input value="30" style="width:100%;background:var(--background);border:1px solid var(--border);border-radius:999px;padding:9px 13px;color:var(--text);font-family:var(--font-mono);font-size:12.5px;outline:none"></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;background:var(--success-soft);color:var(--success-soft-text);border-radius:10px;padding:9px 12px;font-size:12px;font-weight:600">
+            <svg width="14" height="14" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M4 12.5l5 5L20 6.5"></path></svg>
+            ConexiÃ³n correcta Â· PostgreSQL 15.4 Â· 42 ms
+          </div>
+        </div>
+        <div style="padding:12px 18px 16px;display:flex;gap:8px;align-items:center;border-top:1px solid var(--border)">
+          <button sc-camel-on-click="{{ miToast }}" style="border:1px solid var(--border);border-radius:var(--radius-control);padding:9px 14px;background:transparent;color:var(--text);font-family:var(--font-body);font-weight:600;font-size:12.5px;cursor:pointer" style-hover="background:var(--surface-alt)">Probar conexiÃ³n</button>
+          <div style="flex:1"></div>
+          <button sc-camel-on-click="{{ closeDialog }}" style="border:1px solid var(--border);border-radius:var(--radius-control);padding:9px 16px;background:transparent;color:var(--text);font-family:var(--font-body);font-weight:600;font-size:12.5px;cursor:pointer" style-hover="background:var(--surface-alt)">Cancelar</button>
+          <button sc-camel-on-click="{{ saveDialog }}" style="border:1px solid transparent;border-radius:var(--radius-control);padding:9px 18px;background:var(--accent-base);color:#fff;font-family:var(--font-body);font-weight:600;font-size:12.5px;cursor:pointer" style-hover="background:var(--accent-hover)">Guardar</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ dialogCsv }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;background:var(--backdrop);display:flex;align-items:center;justify-content:center;z-index:400">
+      <div style="width:460px;background:var(--surface);border-radius:var(--radius-container);box-shadow:var(--shadow-lg);display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:16px 18px 0;font-family:var(--font-heading);font-weight:600;font-size:17px">Importar CSV</div>
+        <div style="padding:14px 18px;display:flex;flex-direction:column;gap:12px">
+          <p style="font-size:12.5px;color:var(--text-muted)">Importar filas a <b style="color:var(--text)">productos</b> en Bodega Norte.</p>
+          <div style="border:1.5px dashed var(--border);border-radius:12px;padding:20px;text-align:center;color:var(--text-muted);font-size:12.5px">Arrastra el archivo .csv aquÃ­ o <span style="color:var(--accent-base);font-weight:600;cursor:pointer">bÃºscalo en tu equipo</span></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div style="display:flex;flex-direction:column;gap:5px"><label style="font-size:11.5px;font-weight:600;color:var(--text-muted)">Separador</label><input value=";" style="width:100%;background:var(--background);border:1px solid var(--border);border-radius:999px;padding:9px 13px;color:var(--text);font-family:var(--font-mono);font-size:12.5px;outline:none"></div>
+            <div style="display:flex;flex-direction:column;gap:5px"><label style="font-size:11.5px;font-weight:600;color:var(--text-muted)">TamaÃ±o de lote</label><input value="1000" style="width:100%;background:var(--background);border:1px solid var(--border);border-radius:999px;padding:9px 13px;color:var(--text);font-family:var(--font-mono);font-size:12.5px;outline:none"></div>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><span style="width:15px;height:15px;border-radius:4px;background:var(--accent-base);display:flex;align-items:center;justify-content:center;color:#fff"><svg width="10" height="10" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2"><path d="M4 12.5l5 5L20 6.5"></path></svg></span>La primera fila contiene los encabezados</label>
+        </div>
+        <div style="padding:12px 18px 16px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border)">
+          <button sc-camel-on-click="{{ closeDialog }}" style="border:1px solid var(--border);border-radius:var(--radius-control);padding:9px 16px;background:transparent;color:var(--text);font-family:var(--font-body);font-weight:600;font-size:12.5px;cursor:pointer" style-hover="background:var(--surface-alt)">Cancelar</button>
+          <button sc-camel-on-click="{{ saveDialog }}" style="border:1px solid transparent;border-radius:var(--radius-control);padding:9px 18px;background:var(--accent-base);color:#fff;font-family:var(--font-body);font-weight:600;font-size:12.5px;cursor:pointer" style-hover="background:var(--accent-hover)">Importar</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ dialogPrefs }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;background:var(--backdrop);display:flex;align-items:center;justify-content:center;z-index:400">
+      <div style="width:640px;height:440px;background:var(--surface);border-radius:var(--radius-container);box-shadow:var(--shadow-lg);display:flex;overflow:hidden">
+        <div style="width:170px;flex:none;background:var(--surface-alt);padding:14px 8px;display:flex;flex-direction:column;gap:2px">
+          <div style="font-family:var(--font-heading);font-weight:600;font-size:14px;padding:0 8px 10px">Preferencias</div>
+          <div sc-camel-on-click="{{ pTabApariencia }}" style="{{ prefS.apariencia }}">Apariencia</div>
+          <div sc-camel-on-click="{{ pTabRendimiento }}" style="{{ prefS.rendimiento }}">Rendimiento</div>
+          <div sc-camel-on-click="{{ pTabAtajos }}" style="{{ prefS.atajos }}">Atajos</div>
+        </div>
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+          <div style="flex:1;min-height:0;overflow:auto;padding:18px">
+            <sc-if value="{{ prefApariencia }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:18px">
+                <div>
+                  <div style="font-family:var(--font-heading);font-weight:600;font-size:13.5px;margin-bottom:8px">Tema</div>
+                  <div style="display:inline-flex;background:var(--surface-alt);border-radius:10px;padding:3px;gap:2px">
+                    <button sc-camel-on-click="{{ themeLight }}" style="{{ themeS.light }}">Claro</button>
+                    <button sc-camel-on-click="{{ themeDark }}" style="{{ themeS.dark }}">Oscuro</button>
+                  </div>
+                </div>
+                <div>
+                  <div style="font-family:var(--font-heading);font-weight:600;font-size:13.5px;margin-bottom:8px">Color de acento</div>
+                  <div style="display:flex;gap:10px">
+                    <div sc-camel-on-click="{{ accIndigo }}" style="{{ accS.indigo }}"><span style="display:block;width:100%;height:100%;border-radius:50%;background:#6366F1"></span></div>
+                    <div sc-camel-on-click="{{ accVioleta }}" style="{{ accS.violet }}"><span style="display:block;width:100%;height:100%;border-radius:50%;background:#8B5CF6"></span></div>
+                    <div sc-camel-on-click="{{ accBlue }}" style="{{ accS.blue }}"><span style="display:block;width:100%;height:100%;border-radius:50%;background:#2563EB"></span></div>
+                    <div sc-camel-on-click="{{ accTeal }}" style="{{ accS.teal }}"><span style="display:block;width:100%;height:100%;border-radius:50%;background:#0D9488"></span></div>
+                    <div sc-camel-on-click="{{ accRose }}" style="{{ accS.rose }}"><span style="display:block;width:100%;height:100%;border-radius:50%;background:#E11D48"></span></div>
+                    <div sc-camel-on-click="{{ accAmber }}" style="{{ accS.amber }}"><span style="display:block;width:100%;height:100%;border-radius:50%;background:#D97706"></span></div>
+                  </div>
+                </div>
+                <div>
+                  <div style="font-family:var(--font-heading);font-weight:600;font-size:13.5px;margin-bottom:8px">TamaÃ±o de fuente del editor</div>
+                  <div style="display:flex;align-items:center;gap:10px"><span style="font-family:var(--font-mono);font-size:12px">13 px</span><div style="flex:1;height:4px;background:var(--surface-alt);border-radius:999px;position:relative"><div style="position:absolute;left:0;top:0;bottom:0;width:40%;background:var(--accent-base);border-radius:999px"></div><div style="position:absolute;left:40%;top:-5px;width:14px;height:14px;border-radius:50%;background:var(--accent-base)"></div></div></div>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ prefRendimiento }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:14px">
+                <div style="display:flex;align-items:center;gap:12px"><span style="flex:1;font-size:12.5px">Timeout de consulta</span><input value="30 s" style="width:110px;background:var(--background);border:1px solid var(--border);border-radius:999px;padding:8px 13px;color:var(--text);font-family:var(--font-mono);font-size:12.5px;outline:none"></div>
+                <div style="display:flex;align-items:center;gap:12px"><span style="flex:1;font-size:12.5px">Timeout de conexiÃ³n</span><input value="8 s" style="width:110px;background:var(--background);border:1px solid var(--border);border-radius:999px;padding:8px 13px;color:var(--text);font-family:var(--font-mono);font-size:12.5px;outline:none"></div>
+                <div style="display:flex;align-items:center;gap:12px"><span style="flex:1;font-size:12.5px">Conexiones mÃ¡ximas por servidor</span><input value="8" style="width:110px;background:var(--background);border:1px solid var(--border);border-radius:999px;padding:8px 13px;color:var(--text);font-family:var(--font-mono);font-size:12.5px;outline:none"></div>
+                <div style="display:flex;align-items:center;gap:12px"><span style="flex:1;font-size:12.5px">Filas por bloque (fetch size)</span><input value="500" style="width:110px;background:var(--background);border:1px solid var(--border);border-radius:999px;padding:8px 13px;color:var(--text);font-family:var(--font-mono);font-size:12.5px;outline:none"></div>
+                <div style="display:flex;align-items:center;gap:12px"><span style="flex:1;font-size:12.5px">Cancelar tambiÃ©n en el servidor (KILL / pg_cancel_backend)</span><span style="width:38px;height:21px;border-radius:999px;background:var(--accent-base);position:relative;flex:none"><span style="position:absolute;right:3px;top:3px;width:15px;height:15px;border-radius:50%;background:#fff"></span></span></div>
+                <div style="display:flex;align-items:center;gap:12px"><span style="flex:1;font-size:12.5px">Exportar CSV en segundo plano (streaming)</span><span style="width:38px;height:21px;border-radius:999px;background:var(--accent-base);position:relative;flex:none"><span style="position:absolute;right:3px;top:3px;width:15px;height:15px;border-radius:50%;background:#fff"></span></span></div>
+                <div style="display:flex;align-items:center;gap:12px"><span style="flex:1;font-size:12.5px">Liberar resultados al cerrar la pestaÃ±a</span><span style="width:38px;height:21px;border-radius:999px;background:var(--border);position:relative;flex:none"><span style="position:absolute;left:3px;top:3px;width:15px;height:15px;border-radius:50%;background:var(--surface)"></span></span></div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ prefAtajos }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:9px">
+                <div style="display:flex;align-items:center;gap:12px"><span style="font-family:var(--font-mono);font-size:11px;background:var(--surface-alt);border:1px solid var(--border);border-radius:6px;padding:3px 8px;min-width:96px;text-align:center">F5</span><span style="font-size:12.5px">Ejecutar en las bases seleccionadas</span></div>
+                <div style="display:flex;align-items:center;gap:12px"><span style="font-family:var(--font-mono);font-size:11px;background:var(--surface-alt);border:1px solid var(--border);border-radius:6px;padding:3px 8px;min-width:96px;text-align:center">Esc</span><span style="font-size:12.5px">Cancelar la ejecuciÃ³n en curso</span></div>
+                <div style="display:flex;align-items:center;gap:12px"><span style="font-family:var(--font-mono);font-size:11px;background:var(--surface-alt);border:1px solid var(--border);border-radius:6px;padding:3px 8px;min-width:96px;text-align:center">Ctrl+F</span><span style="font-size:12.5px">Buscar dentro del script</span></div>
+                <div style="display:flex;align-items:center;gap:12px"><span style="font-family:var(--font-mono);font-size:11px;background:var(--surface-alt);border:1px solid var(--border);border-radius:6px;padding:3px 8px;min-width:96px;text-align:center">Ctrl+Espacio</span><span style="font-size:12.5px">Autocompletado de tablas y columnas</span></div>
+                <div style="display:flex;align-items:center;gap:12px"><span style="font-family:var(--font-mono);font-size:11px;background:var(--surface-alt);border:1px solid var(--border);border-radius:6px;padding:3px 8px;min-width:96px;text-align:center">Ctrl+T</span><span style="font-size:12.5px">Nueva pestaÃ±a de consulta</span></div>
+                <div style="display:flex;align-items:center;gap:12px"><span style="font-family:var(--font-mono);font-size:11px;background:var(--surface-alt);border:1px solid var(--border);border-radius:6px;padding:3px 8px;min-width:96px;text-align:center">Alt+1 / 2 / 3</span><span style="font-size:12.5px">Conexiones Â· Historial Â· Favoritos</span></div>
+              </div>
+            </sc-if>
+          </div>
+          <div style="padding:12px 18px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border)">
+            <button sc-camel-on-click="{{ closeDialog }}" style="border:1px solid var(--border);border-radius:var(--radius-control);padding:9px 16px;background:transparent;color:var(--text);font-family:var(--font-body);font-weight:600;font-size:12.5px;cursor:pointer" style-hover="background:var(--surface-alt)">Cerrar</button>
+            <button sc-camel-on-click="{{ saveDialog }}" style="border:1px solid transparent;border-radius:var(--radius-control);padding:9px 18px;background:var(--accent-base);color:#fff;font-family:var(--font-body);font-weight:600;font-size:12.5px;cursor:pointer" style-hover="background:var(--accent-hover)">Aplicar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ toastOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;left:50%;bottom:46px;transform:translateX(-50%);background:#0f172a;color:#f1f5f9;padding:10px 16px;border-radius:10px;font-size:12.5px;box-shadow:var(--shadow-md);z-index:500;animation:toastIn .18s ease">{{ toast }}</div>
+  </sc-if>
+
+  <sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ false }}">
+    <div sc-camel-on-click="{{ closeMenu }}" style="position:absolute;inset:0;z-index:50"></div>
+  </sc-if>
+
+  
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script="" data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;light&quot;,&quot;dark&quot;],&quot;default&quot;:&quot;light&quot;,&quot;tsType&quot;:&quot;'light'|'dark'&quot;,&quot;section&quot;:&quot;Apariencia&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;indigo&quot;,&quot;violet&quot;,&quot;blue&quot;,&quot;teal&quot;,&quot;rose&quot;,&quot;amber&quot;],&quot;default&quot;:&quot;indigo&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Apariencia&quot;},&quot;javaMap&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Handoff&quot;}}">
+class Component extends DCLogic {
+  state = {
+    theme: this.props.theme ?? 'light',
+    accent: this.props.accent ?? 'indigo',
+    javaMap: this.props.javaMap ?? false,
+    dock: 'conexiones',
+    menu: null,
+    phase: 'done',
+    progress: 100,
+    bottom: 'resultados',
+    dialog: null,
+    prefTab: 'apariencia',
+    ctx: null,
+    toast: null,
+    pill: 'all',
+    mass: true,
+    loaded: 200,
+    exporting: false,
+    exportPct: 0,
+    exp: { bodegas: true, sucursales: true, singrupo: true, norte: true, tables: true },
+    sel: { norte: true, sur: true, reforma: true, polanco: true, crisol: false },
+  };
+
+  DBS = [
+    { name: 'Bodega Norte', host: '192.168.1.10:5432', rows: 148, ms: 310 },
+    { name: 'Bodega Sur', host: '192.168.1.11:5432', rows: 132, ms: 402 },
+    { name: 'Bodega 4', host: '192.168.1.14:5432', rows: 96, ms: 512 },
+    { name: 'Bodega 7', host: '192.168.1.17:5432', rows: 121, ms: 690 },
+    { name: 'Bodega 11', host: '192.168.1.21:5432', rows: 88, ms: 1180 },
+    { name: 'Bodega 15', host: '192.168.1.25:5432', rows: 145, ms: 1420 },
+    { name: 'Tienda Reforma', host: '10.20.4.10:1433', rows: 210, ms: 2410 },
+    { name: 'Bodega 18', host: '192.168.1.28:5432', rows: 0, ms: 8000 },
+  ];
+
+  componentDidMount() {
+    this._key = (e) => {
+      if (e.key === 'F5') { e.preventDefault(); this.run(); }
+      if (e.key === 'Escape') { this.setState({ menu: null, ctx: null, dialog: null }); if (this.state.phase === 'running') this.cancel(); }
+    };
+    window.addEventListener('keydown', this._key);
+  }
+  componentWillUnmount() {
+    window.removeEventListener('keydown', this._key);
+    clearInterval(this._t); clearInterval(this._e); clearTimeout(this._c); clearTimeout(this._toast);
+  }
+
+  say(msg) {
+    clearTimeout(this._toast);
+    this.setState({ toast: msg });
+    this._toast = setTimeout(() => this.setState({ toast: null }), 2600);
+  }
+
+  run() {
+    if (this.state.phase === 'running') return;
+    clearInterval(this._t);
+    this.setState({ phase: 'running', progress: 0, bottom: 'ejecucion' });
+    this._t = setInterval(() => {
+      const p = Math.min(100, this.state.progress + 4);
+      if (p >= 100) {
+        clearInterval(this._t);
+        this.setState({ progress: 100, phase: 'done', bottom: 'resultados', loaded: 200 });
+        this.say('EjecuciÃ³n completada â€” 1,240 filas en 4.2 s');
+      } else this.setState({ progress: p });
+    }, 90);
+  }
+
+  cancel() {
+    if (this.state.phase !== 'running') return;
+    clearInterval(this._t);
+    this.setState({ phase: 'cancelling' });
+    this._c = setTimeout(() => {
+      this.setState({ phase: 'cancelled' });
+      this.say('Cancelada en el servidor Â· KILL 74, 91 Â· pg_cancel_backend(112)');
+    }, 1100);
+  }
+
+  exportCsv() {
+    if (this.state.exporting) return;
+    clearInterval(this._e);
+    this.setState({ exporting: true, exportPct: 0 });
+    this._e = setInterval(() => {
+      const p = this.state.exportPct + 7;
+      if (p >= 100) {
+        clearInterval(this._e);
+        this.setState({ exporting: false, exportPct: 100 });
+        this.say('CSV exportado â€” 1,240 filas Â· 1.1 MB');
+      } else this.setState({ exportPct: p });
+    }, 130);
+  }
+
+  tgl(k) { this.setState(s => ({ exp: { ...s.exp, [k]: !s.exp[k] } })); }
+  chk(k) { this.setState(s => ({ sel: { ...s.sel, [k]: !s.sel[k] } })); }
+
+  menuStyle(k) {
+    const on = this.state.menu === k;
+    return 'display:flex;align-items:center;padding:0 11px;height:32px;font-size:12.5px;font-weight:600;cursor:pointer;border-radius:0;' +
+      (on ? 'background:var(--accent-soft);color:var(--accent-soft-text)' : 'color:var(--text)');
+  }
+  railStyle(k) {
+    const on = this.state.dock === k;
+    return 'display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;cursor:pointer;' +
+      (on ? 'background:var(--accent-soft);color:var(--accent-base)' : 'color:var(--text-muted)');
+  }
+  segStyle(on) {
+    return 'flex:1;border:none;border-radius:7px;padding:6px 10px;font-family:var(--font-body);font-weight:600;font-size:12px;cursor:pointer;' +
+      (on ? 'background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm)' : 'background:transparent;color:var(--text-muted)');
+  }
+  chevStyle(on) {
+    return 'display:flex;flex:none;color:var(--text-muted);transition:transform .12s ease;cursor:pointer;' + (on ? 'transform:rotate(90deg)' : '');
+  }
+  chkStyle(on) {
+    return 'display:flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:4px;flex:none;cursor:pointer;' +
+      (on ? 'background:var(--accent-base);color:#fff;border:1px solid var(--accent-base)' : 'background:transparent;color:transparent;border:1.5px solid var(--border)');
+  }
+  rowStyle(on) {
+    return 'display:flex;align-items:center;gap:6px;padding:5px 6px;border-radius:8px;cursor:pointer;' +
+      (on ? 'background:var(--accent-soft)' : '');
+  }
+  bottomStyle(k) {
+    const on = this.state.bottom === k;
+    return 'display:flex;align-items:center;gap:7px;padding:9px 14px;font-size:12.5px;font-weight:600;cursor:pointer;border-bottom:2px solid ' +
+      (on ? 'var(--accent-base);color:var(--text)' : 'transparent;color:var(--text-muted)');
+  }
+  badgeStyle(k) {
+    const on = this.state.bottom === k;
+    return 'font-family:var(--font-mono);font-size:10px;font-weight:700;border-radius:5px;padding:1px 5px;' +
+      (on ? 'background:var(--accent-soft);color:var(--accent-soft-text)' : 'background:var(--surface-alt);color:var(--text-muted)');
+  }
+  tabStyle(k) {
+    const on = this.props.activeTab ? this.props.activeTab === k : this._tab === k;
+    return 'display:flex;align-items:center;gap:7px;padding:0 14px;font-size:12.5px;cursor:pointer;border-bottom:2px solid ' +
+      (on ? 'var(--accent-base);color:var(--text);background:var(--background)' : 'transparent;color:var(--text-muted)');
+  }
+  prefStyle(k) {
+    const on = this.state.prefTab === k;
+    return 'padding:8px 10px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;' +
+      (on ? 'background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm)' : 'color:var(--text-muted)');
+  }
+  accStyle(k) {
+    const on = this.state.accent === k;
+    return 'width:34px;height:34px;border-radius:50%;padding:3px;cursor:pointer;border:2px solid ' + (on ? 'var(--text)' : 'transparent');
+  }
+
+  execRows() {
+    const { phase, progress } = this.state;
+    const n = this.DBS.length;
+    return this.DBS.map((d, i) => {
+      const start = (i / n) * 100;
+      let status, dot, pct, rows, ms;
+      if (phase === 'done') { status = i === 7 ? 'error' : 'listo'; pct = 100; rows = i === 7 ? 'â€”' : d.rows; ms = i === 7 ? 'timeout' : (d.ms / 1000).toFixed(1) + ' s'; }
+      else if (phase === 'cancelled') { status = progress > start ? 'listo' : 'cancelada'; pct = progress > start ? 100 : 0; rows = progress > start ? d.rows : 'â€”'; ms = progress > start ? (d.ms / 1000).toFixed(1) + ' s' : 'KILL'; }
+      else if (phase === 'cancelling') { status = progress > start ? 'listo' : 'cancelando'; pct = progress > start ? 100 : 40; rows = progress > start ? d.rows : 'â€”'; ms = 'â€”'; }
+      else {
+        if (progress > start + 12) { status = 'listo'; pct = 100; rows = d.rows; ms = (d.ms / 1000).toFixed(1) + ' s'; }
+        else if (progress > start) { status = 'ejecutando'; pct = Math.round(((progress - start) / 12) * 100); rows = 'â€”'; ms = 'â€¦'; }
+        else { status = 'en cola'; pct = 0; rows = 'â€”'; ms = 'â€”'; }
+      }
+      const map = {
+        listo: ['var(--success-base)', 'var(--success-soft)', 'var(--success-soft-text)'],
+        ejecutando: ['var(--accent-base)', 'var(--accent-soft)', 'var(--accent-soft-text)'],
+        'en cola': ['var(--border)', 'var(--surface-alt)', 'var(--text-muted)'],
+        cancelando: ['var(--warn-base)', 'var(--warn-soft)', 'var(--warn-soft-text)'],
+        cancelada: ['var(--warn-base)', 'var(--warn-soft)', 'var(--warn-soft-text)'],
+        error: ['var(--error-base)', 'var(--error-soft)', 'var(--error-soft-text)'],
+      };
+      const [dotC, bg, fg] = map[status];
+      return {
+        name: d.name, host: d.host, status, rows: String(rows), ms: String(ms), dot: dotC,
+        badge: 'width:86px;flex:none;text-align:center;border-radius:5px;padding:2px 6px;font-size:10px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;background:' + bg + ';color:' + fg,
+        bar: 'height:100%;width:' + pct + '%;border-radius:999px;background:' + dotC + ';transition:width .12s linear',
+      };
+    });
+  }
+
+  renderVals() {
+    const s = this.state;
+    const pillDefs = [
+      ['all', 'Todas Â· 1,240 filas'], ['norte', 'Bodega Norte Â· 148'], ['sur', 'Bodega Sur Â· 132'],
+      ['reforma', 'Tienda Reforma Â· 210'], ['error', 'Bodega 18 Â· timeout'],
+    ];
+    const statusRun = s.phase === 'running' ? 'Ejecutandoâ€¦ ' + s.progress + '%'
+      : s.phase === 'cancelling' ? 'Cancelando en el servidorâ€¦'
+      : s.phase === 'cancelled' ? 'EjecuciÃ³n cancelada'
+      : 'Ãšltima ejecuciÃ³n 4.2 s Â· 1,240 filas';
+
+    return {
+      theme: s.theme, accent: s.accent, javaMap: s.javaMap,
+      menuOpen: !!s.menu, menuArchivo: s.menu === 'archivo', menuEditar: s.menu === 'editar',
+      menuConsulta: s.menu === 'consulta', menuConexiones: s.menu === 'conexiones', menuVer: s.menu === 'ver',
+      menuHerramientas: s.menu === 'herramientas', menuAyuda: s.menu === 'ayuda',
+      mS: {
+        archivo: this.menuStyle('archivo'), editar: this.menuStyle('editar'), consulta: this.menuStyle('consulta'),
+        conexiones: this.menuStyle('conexiones'), ver: this.menuStyle('ver'), herramientas: this.menuStyle('herramientas'), ayuda: this.menuStyle('ayuda'),
+      },
+      mArchivo: () => this.setState({ menu: s.menu === 'archivo' ? null : 'archivo' }),
+      mEditar: () => this.setState({ menu: s.menu === 'editar' ? null : 'editar' }),
+      mConsulta: () => this.setState({ menu: s.menu === 'consulta' ? null : 'consulta' }),
+      mConexiones: () => this.setState({ menu: s.menu === 'conexiones' ? null : 'conexiones' }),
+      mVer: () => this.setState({ menu: s.menu === 'ver' ? null : 'ver' }),
+      mHerramientas: () => this.setState({ menu: s.menu === 'herramientas' ? null : 'herramientas' }),
+      mAyuda: () => this.setState({ menu: s.menu === 'ayuda' ? null : 'ayuda' }),
+      closeMenu: () => this.setState({ menu: null }),
+      miToast: () => { this.setState({ menu: null, ctx: null }); this.say('AcciÃ³n de demostraciÃ³n â€” la app real la ejecuta contra la base'); },
+      miNewTab: () => { this.setState({ menu: null, ctx: null }); this.say('Nueva pestaÃ±a de consulta'); },
+      miRun: () => { this.setState({ menu: null }); this.run(); },
+      miCancel: () => { this.setState({ menu: null }); this.cancel(); },
+      miExport: () => { this.setState({ menu: null }); this.exportCsv(); },
+
+      idle: s.phase !== 'running' && s.phase !== 'cancelling',
+      busy: s.phase === 'running' || s.phase === 'cancelling',
+      run: () => this.run(), cancel: () => this.cancel(), exportCsv: () => this.exportCsv(),
+      toggleTheme: () => this.setState({ theme: s.theme === 'dark' ? 'light' : 'dark' }),
+      toggleJavaMap: () => this.setState({ javaMap: !s.javaMap, menu: null }),
+      mapBtnStyle: 'display:inline-flex;align-items:center;gap:6px;flex:none;white-space:nowrap;border:1px solid ' + (s.javaMap ? 'var(--accent-base)' : 'var(--border)') +
+        ';border-radius:999px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;' +
+        (s.javaMap ? 'background:var(--accent-soft);color:var(--accent-soft-text)' : 'color:var(--text-muted)'),
+
+      dockTitle: s.dock === 'conexiones' ? 'Conexiones' : s.dock === 'historial' ? 'Historial' : 'Favoritos',
+      isConexiones: s.dock === 'conexiones', isHistorial: s.dock === 'historial', isFavoritos: s.dock === 'favoritos',
+      railS: { conexiones: this.railStyle('conexiones'), historial: this.railStyle('historial'), favoritos: this.railStyle('favoritos') },
+      dockConexiones: () => this.setState({ dock: 'conexiones', menu: null }),
+      dockHistorial: () => this.setState({ dock: 'historial', menu: null }),
+      dockFavoritos: () => this.setState({ dock: 'favoritos', menu: null }),
+
+      segS: { individual: this.segStyle(!s.mass), masiva: this.segStyle(s.mass) },
+      setIndividual: () => this.setState({ mass: false }), setMasiva: () => this.setState({ mass: true }),
+
+      exp: s.exp,
+      chevS: {
+        bodegas: this.chevStyle(s.exp.bodegas), sucursales: this.chevStyle(s.exp.sucursales),
+        singrupo: this.chevStyle(s.exp.singrupo), norte: this.chevStyle(s.exp.norte), tables: this.chevStyle(s.exp.tables),
+      },
+      tglBodegas: () => this.tgl('bodegas'), tglSucursales: () => this.tgl('sucursales'),
+      tglSinGrupo: () => this.tgl('singrupo'), tglNorte: () => this.tgl('norte'), tglTables: () => this.tgl('tables'),
+      chkS: {
+        norte: this.chkStyle(s.sel.norte), sur: this.chkStyle(s.sel.sur), reforma: this.chkStyle(s.sel.reforma),
+        polanco: this.chkStyle(s.sel.polanco), crisol: this.chkStyle(s.sel.crisol),
+      },
+      chkNorte: () => this.chk('norte'), chkSur: () => this.chk('sur'), chkReforma: () => this.chk('reforma'),
+      chkPolanco: () => this.chk('polanco'), chkCrisol: () => this.chk('crisol'),
+      rowS: {
+        norte: this.rowStyle(s.sel.norte), sur: this.rowStyle(s.sel.sur), reforma: this.rowStyle(s.sel.reforma),
+        polanco: this.rowStyle(s.sel.polanco), crisol: this.rowStyle(s.sel.crisol),
+      },
+
+      tabS: {
+        t1: 'display:flex;align-items:center;gap:7px;padding:0 14px;font-size:12.5px;cursor:pointer;white-space:nowrap;border-bottom:2px solid var(--accent-base);color:var(--text);background:var(--background)',
+        t2: 'display:flex;align-items:center;gap:7px;padding:0 14px;font-size:12.5px;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;color:var(--text-muted)',
+      },
+      tab1: () => this.say('PestaÃ±a activa'), tab2: () => this.say('Cada pestaÃ±a mantiene su propia conexiÃ³n y resultados'),
+
+      btS: { resultados: this.bottomStyle('resultados'), ejecucion: this.bottomStyle('ejecucion'), mensajes: this.bottomStyle('mensajes') },
+      badgeS: { resultados: this.badgeStyle('resultados'), ejecucion: this.badgeStyle('ejecucion'), mensajes: this.badgeStyle('mensajes') },
+      btResultados: () => this.setState({ bottom: 'resultados' }), btEjecucion: () => this.setState({ bottom: 'ejecucion' }), btMensajes: () => this.setState({ bottom: 'mensajes' }),
+      showResults: s.bottom === 'resultados', showExec: s.bottom === 'ejecucion', showMsgs: s.bottom === 'mensajes',
+      execBadge: s.phase === 'running' ? s.progress + '%' : '20',
+      execSummary: s.phase === 'running' ? 'Ejecutando en 20 bases Â· ' + s.progress + '%'
+        : s.phase === 'cancelling' ? 'Cancelando: enviando KILL / pg_cancel_backend a las sesiones activas'
+        : s.phase === 'cancelled' ? 'Cancelada â€” sesiones terminadas tambiÃ©n en el servidor'
+        : '20 bases Â· 19 correctas Â· 1 con error Â· 4.2 s',
+      execRows: this.execRows(),
+
+      pills: pillDefs.map(([k, label]) => ({
+        label, onClick: () => this.setState({ pill: k }),
+        style: 'display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:4px 11px;font-size:11px;font-weight:700;letter-spacing:.02em;cursor:pointer;white-space:nowrap;border:1px solid ' +
+          (s.pill === k ? 'var(--accent-base);background:var(--accent-soft);color:var(--accent-soft-text)'
+            : k === 'error' ? 'transparent;background:var(--error-soft);color:var(--error-soft-text)'
+            : 'transparent;background:var(--success-soft);color:var(--success-soft-text)'),
+      })),
+      loadedBarStyle: 'height:100%;width:' + Math.min(100, (s.loaded / 1240) * 100) + '%;background:var(--accent-base);border-radius:999px;transition:width .2s ease',
+      loadedLabel: s.loaded.toLocaleString('es-MX') + ' de 1,240 filas en memoria',
+      loadMore: () => this.setState({ loaded: Math.min(1240, s.loaded + 200) }),
+      releaseMem: () => { this.setState({ loaded: 0 }); this.say('Resultados liberados de memoria'); },
+
+      exporting: s.exporting, exportLabel: 'Exportando CSVâ€¦ ' + s.exportPct + '%',
+      statusRun,
+
+      ctxOpen: !!s.ctx,
+      ctxStyle: s.ctx ? 'position:fixed;z-index:320;min-width:230px;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-md);padding:6px;left:' + s.ctx.x + 'px;top:' + s.ctx.y + 'px' : 'display:none',
+      showCtx: (e) => { e.preventDefault(); this.setState({ ctx: { x: e.clientX, y: e.clientY } }); },
+      closeCtx: () => this.setState({ ctx: null }),
+
+      dialogAddDb: s.dialog === 'adddb', dialogCsv: s.dialog === 'csv', dialogPrefs: s.dialog === 'prefs',
+      openAddDb: () => this.setState({ dialog: 'adddb', menu: null, ctx: null }),
+      openCsv: () => this.setState({ dialog: 'csv', menu: null, ctx: null }),
+      openPrefs: () => this.setState({ dialog: 'prefs', menu: null, prefTab: 'apariencia' }),
+      openAtajos: () => this.setState({ dialog: 'prefs', menu: null, prefTab: 'atajos' }),
+      closeDialog: () => this.setState({ dialog: null }),
+      saveDialog: () => { this.setState({ dialog: null }); this.say('Guardado'); },
+      prefS: { apariencia: this.prefStyle('apariencia'), rendimiento: this.prefStyle('rendimiento'), atajos: this.prefStyle('atajos') },
+      prefApariencia: s.prefTab === 'apariencia', prefRendimiento: s.prefTab === 'rendimiento', prefAtajos: s.prefTab === 'atajos',
+      pTabApariencia: () => this.setState({ prefTab: 'apariencia' }), pTabRendimiento: () => this.setState({ prefTab: 'rendimiento' }), pTabAtajos: () => this.setState({ prefTab: 'atajos' }),
+      themeS: { light: this.segStyle(s.theme === 'light'), dark: this.segStyle(s.theme === 'dark') },
+      themeLight: () => this.setState({ theme: 'light' }), themeDark: () => this.setState({ theme: 'dark' }),
+      accS: {
+        indigo: this.accStyle('indigo'), violet: this.accStyle('violet'), blue: this.accStyle('blue'),
+        teal: this.accStyle('teal'), rose: this.accStyle('rose'), amber: this.accStyle('amber'),
+      },
+      accIndigo: () => this.setState({ accent: 'indigo' }), accVioleta: () => this.setState({ accent: 'violet' }),
+      accBlue: () => this.setState({ accent: 'blue' }), accTeal: () => this.setState({ accent: 'teal' }),
+      accRose: () => this.setState({ accent: 'rose' }), accAmber: () => this.setState({ accent: 'amber' }),
+
+      toastOpen: !!s.toast, toast: s.toast,
+    };
+  }
+}
+
+</script>
+
+
+</body></html>

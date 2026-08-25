@@ -9,3 +9,12 @@ out/
 !gradle-wrapper.jar
 .idea/
 *.iml
+
+# Logs de la app (ver logback.xml) — *.log ya está en el .gitignore raíz,
+# esto es solo para que quede explícito dónde caen.
+logs/
+
+# META-INF/ suelto en la raíz de java_faroapp/ (visto esta sesión) es un
+# artefacto de build (manifest generado por el plugin de JAR de Maven) que
+# terminó fuera de target/ — nunca es código fuente real.
+META-INF/

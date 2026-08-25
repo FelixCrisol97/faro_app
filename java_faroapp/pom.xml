@@ -18,7 +18,7 @@
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <maven.compiler.release>21</maven.compiler.release>
+    <maven.compiler.release>25</maven.compiler.release>
     <javafx.version>21.0.8</javafx.version>
     <mainClass>com.faro.app.Main</mainClass>
   </properties>
@@ -85,6 +85,22 @@
       <version>5.14.0</version>
     </dependency>
 
+    <!-- Logging — SLF4J (API) + Logback (implementación real). Escribe a
+         logs/faro-app.log dentro del proyecto (ver logback.xml) para
+         trazabilidad completa sin depender de capturas/reproducir en vivo
+         (pedido explícito del usuario, 2026-08-24: "agreguemos muchísimos
+         logs... para ver la trazabilidad completa de la app"). -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>2.0.13</version>
+    </dependency>
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+      <version>1.5.6</version>
+    </dependency>
+
     <!-- Testing -->
     <dependency>
       <groupId>org.junit.jupiter</groupId>
@@ -105,13 +121,29 @@
       <!-- `mvn javafx:run` — arranca la app sin empaquetar; el runtime de
            JavaFX no va en el classpath normal (son módulos con partes
            nativas por plataforma), este plugin arma el module-path por su
-           cuenta a partir de las dependencias de arriba. -->
+           cuenta a partir de las dependencias de arriba.
+
+           <options>-Xmx4g (2026-08-22) — antes sin ningún -Xmx fijado, la
+           JVM corría con su límite por defecto (típicamente ~1/4 de la RAM
+           física). El usuario reportó un OutOfMemoryError real exportando
+           el resultado combinado de 6 bodegas x 500,000 filas (3 millones
+           de filas) — la causa real ya se arregló (MainController#
+           onExportResultsCsv duplicaba en memoria todo el resultado antes
+           de exportar), pero solo tener el resultado de ese tamaño
+           cargado en resultsTable ya compromete varios GB de heap por sí
+           solo (TableView no libera memoria de filas fuera de pantalla,
+           solo virtualiza qué se RENDERIZA). 4g es un margen explícito, no
+           una solución mágica — si algún equipo real tiene menos RAM
+           disponible, bajar este número. -->
       <plugin>
         <groupId>org.openjfx</groupId>
         <artifactId>javafx-maven-plugin</artifactId>
         <version>0.0.8</version>
         <configuration>
           <mainClass>${mainClass}</mainClass>
+          <options>
+            <option>-Xmx4g</option>
+          </options>
         </configuration>
       </plugin>
 
@@ -170,7 +202,7 @@
           <version>${javafx.version}</version>
           <classifier>win</classifier>
         </dependency>
-      </dependencies>
+      </dependencies> 
       <build>
         <plugins>
           <plugin>

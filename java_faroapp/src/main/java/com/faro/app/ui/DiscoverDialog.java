@@ -21,16 +21,24 @@ public final class DiscoverDialog {
     }
 
     public static List<DatabaseEntry> show(Window owner, CredentialStore credentials, AppPreferences preferences) {
+        return show(owner, credentials, preferences, null);
+    }
+
+    /** {@code initialHost} precarga el campo de host — usado por "Descubrir bases en esta IP…" del menú contextual de una fila (ver ConnectionTreeCell); {@code null} deja el campo vacío como antes. */
+    public static List<DatabaseEntry> show(
+            Window owner, CredentialStore credentials, AppPreferences preferences, String initialHost) {
         try {
             FXMLLoader loader = new FXMLLoader(
                     DiscoverDialog.class.getResource("/com/faro/app/discover-dialog.fxml"));
             Parent root = loader.load();
             DiscoverDialogController controller = loader.getController();
             controller.attachCredentialStore(credentials);
+            if (initialHost != null) {
+                controller.setInitialHost(initialHost);
+            }
 
             Scene scene = new Scene(root, 460, 520);
-            scene.getStylesheets().add(DiscoverDialog.class
-                    .getResource(Theme.stylesheetResourcePath(preferences.isDarkTheme())).toExternalForm());
+            Theme.applyTo(scene, preferences.isDarkTheme());
 
             Stage stage = new Stage();
             stage.setTitle("Descubrir bases de datos");

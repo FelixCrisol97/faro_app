@@ -5,6 +5,9 @@ import java.net.URL;
 
 import com.faro.app.ui.Theme;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javafx.application.Application;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Parent;
@@ -20,10 +23,22 @@ import javafx.stage.Stage;
  */
 public class Main extends Application {
 
+    private static final Logger log = LoggerFactory.getLogger(Main.class);
+
     private MainController controller;
 
     public static void main(String[] args) {
+        // Última red de seguridad: cualquier excepción que se escape sin capturar en
+        // CUALQUIER hilo (no solo el de JavaFX) queda en el log en vez de perderse en la
+        // consola o tumbar la app en silencio — crítico para una app de escritorio que el
+        // usuario corre solo, sin nadie mirando la terminal (pedido explícito 2026-08-24:
+        // "trazabilidad completa de la app").
+        Thread.setDefaultUncaughtExceptionHandler((thread, ex) ->
+                log.error("Excepción no capturada en el hilo '{}'", thread.getName(), ex));
+        log.info("Arrancando Faro — java.version={}, os={}",
+                System.getProperty("java.version"), System.getProperty("os.name"));
         launch(args);
+        log.info("launch() retornó — JVM cerrando.");
     }
 
     @Override
@@ -37,11 +52,7 @@ public class Main extends Application {
         Scene scene = new Scene(root, 1280, 800);
         // El tema (claro/oscuro) ya está cargado en las preferencias del controlador para
         // cuando llegamos acá — initialize() corrió como parte de loader.load() arriba.
-        // Theme.stylesheetResourcePath() devuelve una ruta absoluta ("/com/faro/app/..."),
-        // hace falta pasarla tal cual — Class.getResource() la resuelve desde la raíz del
-        // classpath, no relativa al paquete de Main (a diferencia de "styles.css" a secas).
-        scene.getStylesheets().add(Main.class
-                .getResource(Theme.stylesheetResourcePath(controller.isDarkTheme())).toExternalForm());
+        Theme.applyTo(scene, controller.isDarkTheme());
 
         stage.setTitle("Faro");
         stage.setMinWidth(960);
@@ -52,15 +63,20 @@ public class Main extends Application {
         // hacer en vez de perderlos en silencio (ver MainController#confirmCloseAllTabs).
         stage.setOnCloseRequest(event -> {
             if (!controller.confirmCloseAllTabs()) {
+                log.info("Cierre de ventana cancelado por el usuario — había pestañas con cambios sin guardar.");
                 event.consume();
+            } else {
+                log.info("Ventana cerrándose.");
             }
         });
         stage.show();
+        log.info("Ventana principal mostrada.");
     }
 
     /** Cierra los pools de HikariCP antes de que el JVM salga — si no, sus hilos internos pueden quedar colgados. */
     @Override
     public void stop() {
+        log.info("Cerrando Faro — liberando pools de conexión.");
         controller.shutdown();
     }
 
@@ -84,12 +100,14 @@ public class Main extends Application {
             // ya preveía para "no se pudo cargar la fuente" (hallazgo real de /code-review).
             URL url = Main.class.getResource(file);
             if (url == null) {
-                System.err.println("No se encontró el recurso de fuente: " + file);
+                log.warn("No se encontró el recurso de fuente: {}", file);
                 continue;
             }
             Font font = Font.loadFont(url.toExternalForm(), 12);
             if (font == null) {
-                System.err.println("No se pudo cargar la fuente: " + file);
+                log.warn("No se pudo cargar la fuente: {}", file);
+            } else {
+                log.debug("Fuente cargada: {}", file);
             }
         }
     }

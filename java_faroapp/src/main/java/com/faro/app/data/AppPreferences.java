@@ -20,6 +20,8 @@ public final class AppPreferences {
     private int defaultPoolSize = 4;
     private int defaultQueryTimeoutSeconds = 30;
     private boolean darkTheme;
+    /** Filas por bloque pedidas al driver JDBC ({@code Statement#setFetchSize}) — ver {@code QueryExecutionService#runOne}. Nota real: PgJDBC solo lo respeta con autocommit desactivado (no es el caso hoy) y lo ignora en silencio en autocommit — el driver de SQL Server sí lo respeta siempre. Se deja igual (no truena, solo no ayuda en Postgres todavía) para no meter cambios de semántica de transacciones solo por esto. */
+    private int fetchSize = 500;
 
     public int maxConcurrentDatabases() {
         return maxConcurrentDatabases;
@@ -51,5 +53,13 @@ public final class AppPreferences {
 
     public void setDarkTheme(boolean darkTheme) {
         this.darkTheme = darkTheme;
+    }
+
+    public int fetchSize() {
+        return fetchSize;
+    }
+
+    public void setFetchSize(int value) {
+        fetchSize = Math.max(1, value);
     }
 }

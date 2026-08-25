@@ -10,6 +10,9 @@ import com.faro.app.model.DatabaseEntry;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Un {@link HikariDataSource} por base de datos (no por servidor — un
  * "servidor" en este árbol es solo un agrupador libre, la conexión real
@@ -27,27 +30,55 @@ import com.zaxxer.hikari.HikariDataSource;
  */
 public final class ConnectionPoolManager {
 
+    private static final Logger log = LoggerFactory.getLogger(ConnectionPoolManager.class);
+
     private final Map<String, HikariDataSource> pools = new ConcurrentHashMap<>();
 
     public Connection getConnection(DatabaseEntry db, CredentialStore.Credentials credentials) throws SQLException {
         HikariDataSource dataSource = pools.computeIfAbsent(db.id(), id -> buildDataSource(db, credentials));
-        return dataSource.getConnection();
+        try {
+            return dataSource.getConnection();
+        } catch (SQLException e) {
+            log.warn("No se pudo obtener conexión del pool de '{}': {}", db.alias(), e.getMessage());
+            throw e;
+        }
     }
 
     /** Cierra y descarta el pool de una base — llamar después de editarla. */
     public void evict(String databaseId) {
         HikariDataSource removed = pools.remove(databaseId);
         if (removed != null) {
+            log.info("Pool descartado para databaseId={} (base editada).", databaseId);
             removed.close();
         }
     }
 
     public void closeAll() {
+        log.info("Cerrando todos los pools ({} abierto(s)).", pools.size());
         pools.values().forEach(HikariDataSource::close);
         pools.clear();
     }
 
+    /** {@code databaseCount} = bases con un pool abierto (uno por base, no por servidor — ver el javadoc de la clase); {@code activeConnections}/{@code totalConnections} sumados de todos esos pools. Para la barra de estado ("N conexiones · pool activo/total", igual que faro-java-prototipo.html). */
+    public PoolSummary poolSummary() {
+        int active = 0;
+        int total = 0;
+        for (HikariDataSource dataSource : pools.values()) {
+            var bean = dataSource.getHikariPoolMXBean();
+            if (bean != null) {
+                active += bean.getActiveConnections();
+                total += bean.getTotalConnections();
+            }
+        }
+        return new PoolSummary(pools.size(), active, total);
+    }
+
+    public record PoolSummary(int databaseCount, int activeConnections, int totalConnections) {
+    }
+
     private static HikariDataSource buildDataSource(DatabaseEntry db, CredentialStore.Credentials credentials) {
+        log.info("Creando pool para '{}' — {} (usuario={}, poolSize={})",
+                db.alias(), db.jdbcUrl(), credentials.user(), Math.max(1, db.poolSize()));
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl(db.jdbcUrl());
         config.setUsername(credentials.user());

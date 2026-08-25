@@ -20,6 +20,7 @@
 <?import javafx.scene.layout.Region?>
 <?import javafx.scene.layout.StackPane?>
 <?import javafx.scene.layout.VBox?>
+<?import javafx.scene.shape.Circle?>
 
 <!--
   Estado real vs. placeholder: ver "Estado actual" en README.md, no acá —
@@ -29,10 +30,11 @@
   Autocompletado, Guardar como favorito/Explicar plan, Importar/Exportar
   configuración, y el riel Ver (paneles acoplables).
 -->
-<!-- Sin `stylesheets="@styles.css"` fijo a propósito — Main.java decide entre
-     styles.css/styles-dark.css según AppPreferences#isDarkTheme() y lo
-     agrega al Scene directamente; si este FXML también trajera su propia
-     hoja fija, las dos convivirían con orden de cascada frágil. -->
+<!-- Sin `stylesheets="@..."` fijo a propósito — Main.java decide qué hojas
+     agregar al Scene según AppPreferences#isDarkTheme() (ver Theme.java:
+     paleta theme-light.css/theme-dark.css + app.css, sistema de variables
+     desde 2026-08-21); si este FXML también trajera su propia hoja fija,
+     las dos convivirían con orden de cascada frágil. -->
 <BorderPane fx:id="root" styleClass="app-root"
             xmlns="http://javafx.com/javafx" xmlns:fx="http://javafx.com/fxml"
             fx:controller="com.faro.app.MainController">
@@ -89,8 +91,14 @@
             </MenuBar>
             <HBox styleClass="toolbar" spacing="8" alignment="CENTER_LEFT">
                 <padding><Insets top="8" right="12" bottom="8" left="12"/></padding>
-                <Button fx:id="runButton" styleClass="button" onAction="#onRunQuery"/>
+                <!-- Sin onAction en el FXML a propósito — MainController#initialize()
+                     lo conecta a #onRunButtonClicked, que alterna entre correr
+                     y cancelar según si hay una consulta en curso (mismo botón,
+                     igual que faro-java-prototipo.html: {{ idle }}/{{ busy }}
+                     muestran "Ejecutar"/"Cancelar" en el mismo lugar). -->
+                <Button fx:id="runButton" styleClass="button"/>
                 <Region styleClass="toolbar-separator"/>
+                <Button fx:id="newQueryButton" text="Nueva consulta" styleClass="button-secondary" onAction="#onNewQueryTab"/>
                 <Button fx:id="openButton" text="Abrir" styleClass="button-secondary" onAction="#onOpenFile"/>
                 <Button fx:id="saveButton" text="Guardar" styleClass="button-secondary" onAction="#onSaveFile"/>
                 <Button fx:id="formatButton" text="Formatear" styleClass="button-secondary" onAction="#onFormatSql"/>
@@ -98,68 +106,75 @@
                 <Region styleClass="toolbar-separator"/>
                 <Label fx:id="selectedCountLabel" styleClass="toolbar-pill"/>
                 <Region HBox.hgrow="ALWAYS"/>
-                <Button fx:id="testConnectionButton" text="Probar conexión de prueba" styleClass="button-secondary" onAction="#onTestConnection"/>
-                <Label fx:id="statusLabel" styleClass="muted"/>
                 <Button fx:id="themeToggleButton" styleClass="button-icon" onAction="#onToggleTheme"/>
             </HBox>
         </VBox>
     </top>
 
-    <left>
-        <HBox>
-            <!-- Riel real de íconos (Conexiones/Historial/Favoritos/Preferencias) — contra
-                 faro-java-prototipo.html con "Mapa JavaFX" activado, no la aproximación de
-                 pestañas con texto que había acá antes (esa sí se veía distinta del diseño
-                 real, encontrado comparando capturas). ToggleGroup para que highlighted
-                 sea siempre uno solo; el panel visible se controla aparte, ver StackPane. -->
-            <VBox styleClass="icon-rail" alignment="TOP_CENTER" spacing="4">
-                <padding><Insets top="12" right="0" bottom="12" left="0"/></padding>
-                <ToggleButton fx:id="connectionsRailButton" styleClass="rail-button" selected="true" onAction="#onShowConnectionsPanel">
-                    <toggleGroup><ToggleGroup fx:id="railToggleGroup"/></toggleGroup>
-                </ToggleButton>
-                <ToggleButton fx:id="historyRailButton" styleClass="rail-button" toggleGroup="$railToggleGroup" onAction="#onShowHistoryPanel"/>
-                <ToggleButton fx:id="favoritesRailButton" styleClass="rail-button" toggleGroup="$railToggleGroup" onAction="#onShowFavoritesPanel"/>
-                <Region VBox.vgrow="ALWAYS"/>
-                <Button fx:id="settingsRailButton" styleClass="rail-button" onAction="#onOpenPreferences"/>
-            </VBox>
-            <VBox styleClass="panel-left" prefWidth="280">
-                <StackPane VBox.vgrow="ALWAYS">
-                    <VBox fx:id="connectionsPanel">
-                        <HBox alignment="CENTER_LEFT">
-                            <padding><Insets top="10" right="8" bottom="6" left="12"/></padding>
-                            <Label text="Conexiones" styleClass="section-label" maxWidth="Infinity" HBox.hgrow="ALWAYS"/>
-                            <Button fx:id="addDatabaseButton" styleClass="button-icon" onAction="#onAddDatabase"/>
-                        </HBox>
-                        <TreeView fx:id="connectionTree" styleClass="connection-tree" VBox.vgrow="ALWAYS" showRoot="false" fixedCellSize="28"/>
-                    </VBox>
-                    <VBox fx:id="historyPanel" visible="false" managed="false" spacing="4">
-                        <padding><Insets top="10" right="8" bottom="8" left="8"/></padding>
-                        <Label text="Historial" styleClass="section-label"/>
-                        <Label text="Doble clic para abrir en una pestaña nueva. No se guarda entre sesiones." styleClass="muted" wrapText="true"/>
-                        <ListView fx:id="historyListView" VBox.vgrow="ALWAYS"/>
-                    </VBox>
-                    <VBox fx:id="favoritesPanel" visible="false" managed="false" spacing="6">
-                        <padding><Insets top="10" right="8" bottom="8" left="8"/></padding>
-                        <Label text="Favoritos" styleClass="section-label"/>
-                        <ListView fx:id="favoritesListView" VBox.vgrow="ALWAYS"/>
-                        <HBox spacing="6">
-                            <Button text="Abrir" styleClass="button-secondary" onAction="#onOpenFavorite" HBox.hgrow="ALWAYS" maxWidth="Infinity"/>
-                            <Button text="Eliminar" styleClass="button-secondary" onAction="#onDeleteFavorite" HBox.hgrow="ALWAYS" maxWidth="Infinity"/>
-                        </HBox>
-                    </VBox>
-                </StackPane>
-            </VBox>
-        </HBox>
-    </left>
-
     <center>
-        <SplitPane styleClass="panel-center" orientation="VERTICAL" dividerPositions="0.62">
+        <!-- SplitPane horizontal nuevo, envolviendo lo que antes era
+             <left> (riel + panel de conexiones) y el <center> de siempre —
+             hallazgo real del usuario: el panel de conexiones no se podía
+             agrandar de ningún modo, así que con la etiqueta "SIN
+             RESTRICCIONES" nueva (más ancha que el candado que reemplazó)
+             el lápiz/bote de basura de cada fila quedaban cortados sin
+             forma de verlos. `resizableWithParent="false"` en el panel
+             izquierdo para que se comporte como en cualquier IDE — se
+             queda del ancho que el usuario le dejó al arrastrar, en vez de
+             estirarse/encogerse proporcional cada vez que cambia el
+             tamaño de toda la ventana (eso sí le pasa al panel central). -->
+        <SplitPane orientation="HORIZONTAL" dividerPositions="0.34">
+            <HBox SplitPane.resizableWithParent="false" minWidth="220">
+                <!-- Riel real de íconos (Conexiones/Historial/Favoritos/Preferencias) — contra
+                     faro-java-prototipo.html con "Mapa JavaFX" activado, no la aproximación de
+                     pestañas con texto que había acá antes (esa sí se veía distinta del diseño
+                     real, encontrado comparando capturas). ToggleGroup para que highlighted
+                     sea siempre uno solo; el panel visible se controla aparte, ver StackPane. -->
+                <VBox styleClass="icon-rail" alignment="TOP_CENTER" spacing="4">
+                    <padding><Insets top="12" right="0" bottom="12" left="0"/></padding>
+                    <ToggleButton fx:id="connectionsRailButton" styleClass="rail-button" selected="true" onAction="#onShowConnectionsPanel">
+                        <toggleGroup><ToggleGroup fx:id="railToggleGroup"/></toggleGroup>
+                    </ToggleButton>
+                    <ToggleButton fx:id="historyRailButton" styleClass="rail-button" toggleGroup="$railToggleGroup" onAction="#onShowHistoryPanel"/>
+                    <ToggleButton fx:id="favoritesRailButton" styleClass="rail-button" toggleGroup="$railToggleGroup" onAction="#onShowFavoritesPanel"/>
+                    <Region VBox.vgrow="ALWAYS"/>
+                    <ToggleButton fx:id="settingsRailButton" styleClass="rail-button" onAction="#onOpenPreferences"/>
+                </VBox>
+                <VBox styleClass="panel-left" HBox.hgrow="ALWAYS">
+                    <StackPane VBox.vgrow="ALWAYS">
+                        <VBox fx:id="connectionsPanel">
+                            <HBox alignment="CENTER_LEFT" spacing="6">
+                                <padding><Insets top="10" right="8" bottom="6" left="12"/></padding>
+                                <Region HBox.hgrow="ALWAYS"/>
+                                <Button fx:id="selectAllDatabasesButton" text="Todas" styleClass="button-secondary" onAction="#onSelectAllDatabases"/>
+                                <Button fx:id="addDatabaseButton" styleClass="button-icon" onAction="#onAddDatabase"/>
+                            </HBox>
+                            <TextField fx:id="connectionFilterField" styleClass="text-field" promptText="Buscar base…">
+                                <VBox.margin><Insets top="0" right="8" bottom="8" left="12"/></VBox.margin>
+                            </TextField>
+                            <TreeView fx:id="connectionTree" styleClass="connection-tree" VBox.vgrow="ALWAYS" showRoot="false" fixedCellSize="28"/>
+                        </VBox>
+                        <VBox fx:id="historyPanel" visible="false" managed="false" spacing="4">
+                            <padding><Insets top="10" right="8" bottom="8" left="8"/></padding>
+                            <Label text="Historial" styleClass="section-label"/>
+                            <Label text="Doble clic para abrir en una pestaña nueva. No se guarda entre sesiones." styleClass="muted" wrapText="true"/>
+                            <ListView fx:id="historyListView" VBox.vgrow="ALWAYS"/>
+                        </VBox>
+                        <VBox fx:id="favoritesPanel" visible="false" managed="false" spacing="6">
+                            <padding><Insets top="10" right="8" bottom="8" left="8"/></padding>
+                            <Label text="Favoritos" styleClass="section-label"/>
+                            <ListView fx:id="favoritesListView" VBox.vgrow="ALWAYS"/>
+                            <HBox spacing="6">
+                                <Button text="Abrir" styleClass="button-secondary" onAction="#onOpenFavorite" HBox.hgrow="ALWAYS" maxWidth="Infinity"/>
+                                <Button text="Eliminar" styleClass="button-secondary" onAction="#onDeleteFavorite" HBox.hgrow="ALWAYS" maxWidth="Infinity"/>
+                            </HBox>
+                        </VBox>
+                    </StackPane>
+                </VBox>
+            </HBox>
+        <SplitPane styleClass="panel-center" orientation="VERTICAL" dividerPositions="0.25">
             <VBox spacing="6">
                 <padding><Insets top="12" right="12" bottom="8" left="12"/></padding>
-                <HBox alignment="CENTER_LEFT" spacing="8">
-                    <Label text="Editor SQL" styleClass="section-label" maxWidth="Infinity" HBox.hgrow="ALWAYS"/>
-                    <Button fx:id="newQueryTabButton" styleClass="button-icon" onAction="#onNewQueryTab"/>
-                </HBox>
                 <HBox fx:id="findBar" styleClass="find-bar" spacing="6" alignment="CENTER_LEFT" visible="false" managed="false">
                     <TextField fx:id="findField" styleClass="text-field" promptText="Buscar en el script…" HBox.hgrow="ALWAYS" onAction="#onFindNext"/>
                     <Button text="Anterior" styleClass="button-secondary" onAction="#onFindPrevious"/>
@@ -169,24 +184,89 @@
                 </HBox>
                 <TabPane fx:id="queryTabPane" styleClass="query-tabs" VBox.vgrow="ALWAYS" tabClosingPolicy="ALL_TABS"/>
             </VBox>
-            <TabPane styleClass="results-tabs" tabClosingPolicy="UNAVAILABLE">
-                <Tab text="Resultados">
-                    <StackPane fx:id="resultsContainer"/>
-                </Tab>
-                <Tab text="Ejecución">
-                    <StackPane fx:id="executionContainer"/>
-                </Tab>
-                <Tab text="Diagnóstico">
-                    <StackPane fx:id="diagnosticContainer"/>
-                </Tab>
-            </TabPane>
+            <!-- Resultados/Ejecución/Diagnóstico como 3 pestañas separadas,
+                 igual que faro-java-prototipo.html (btResultados/btEjecucion/
+                 btMensajes). En una entrada anterior de esta sesión se
+                 habían fusionado Ejecución+Diagnóstico a pedido del usuario
+                 ("juntar todos esos datos en una sola pestaña") — pero al
+                 pedir después que TODO el diseño volviera a igualar el
+                 prototipo (2026-08-22), incluyendo esto explícitamente, se
+                 revierte a las 3 pestañas originales del diseño real. -->
+            <StackPane>
+                <TabPane styleClass="results-tabs" tabClosingPolicy="UNAVAILABLE">
+                    <Tab fx:id="resultsTab" text="Resultados">
+                        <StackPane fx:id="resultsContainer"/>
+                    </Tab>
+                    <Tab fx:id="executionTab" text="Ejecución">
+                        <StackPane fx:id="executionContainer"/>
+                    </Tab>
+                    <Tab fx:id="diagnosticTab" text="Diagnóstico">
+                        <StackPane fx:id="diagnosticContainer"/>
+                    </Tab>
+                </TabPane>
+                <!-- "Exportar CSV" superpuesto a la derecha de la fila de
+                     pestañas — un TabPane de JavaFX no tiene ningún slot
+                     para meter controles propios ahí (a diferencia del
+                     prototipo, un div normal donde el botón es un hermano
+                     más en el mismo flex row). pickOnBounds="false" en el
+                     HBox para que el área vacía a su alrededor (fuera del
+                     botón mismo) deje pasar los clics hacia las pestañas
+                     de abajo — mismo truco ya usado en cualquier overlay
+                     de este tipo en JavaFX.
+
+                     maxHeight/maxWidth="-Infinity" (= Region.USE_PREF_SIZE)
+                     son el arreglo real de un bug encontrado en vivo: sin
+                     esto, StackPane estira a CUALQUIER hijo redimensionable
+                     para llenar TODO su alto por defecto — el botón
+                     terminaba centrado verticalmente en medio de toda la
+                     grilla de resultados, no arriba en la fila de pestañas
+                     como se veía en el editor. Con el alto/ancho fijados a
+                     su tamaño real de contenido, StackPane ya no tiene nada
+                     que estirar y "TOP_RIGHT" sí lo deja pegado arriba. -->
+                <HBox StackPane.alignment="TOP_RIGHT" pickOnBounds="false" alignment="CENTER_RIGHT"
+                      maxHeight="-Infinity" maxWidth="-Infinity">
+                    <padding><Insets top="4" right="10" bottom="0" left="0"/></padding>
+                    <Button fx:id="exportCsvButton" text="Exportar CSV" styleClass="button-secondary" onAction="#onExportResultsCsv"/>
+                </HBox>
+            </StackPane>
+        </SplitPane>
         </SplitPane>
     </center>
 
     <bottom>
+        <!-- Barra de estado real, igual que faro-java-prototipo.html —
+             antes solo tenía "Faro" y (desde una entrada anterior de esta
+             sesión) statusLabel; ahora también trae pool de conexiones
+             real, timeout/fetch, memoria, y motor/JDK reales — ver
+             MainController#refreshStatusBar. -->
         <HBox styleClass="status-bar" spacing="14" alignment="CENTER_LEFT">
             <padding><Insets top="4" right="12" bottom="4" left="12"/></padding>
-            <Label text="Faro Java — esqueleto v0" styleClass="muted"/>
+            <HBox spacing="6" alignment="CENTER_LEFT">
+                <Circle fx:id="poolStatusDot" radius="3.5"/>
+                <Label fx:id="poolStatusLabel" styleClass="muted"/>
+            </HBox>
+            <!-- Único lugar donde vive statusLabel — antes estaba en la barra
+                 superior, junto al botón de tema, y el usuario lo rechazó de
+                 forma explícita y repetida a lo largo de más de 5 sesiones
+                 ("no quería ningún mensaje ahí"). Vive acá, en la barra de
+                 estado real de abajo (patrón convencional de escritorio):
+                 sigue siendo información real (confirmaciones de guardar/
+                 exportar/importar, errores puntuales) que no vive en ningún
+                 otro lado, solo estaba en el sitio equivocado. -->
+            <Label fx:id="statusLabel" styleClass="muted"/>
+            <Label fx:id="timeoutFetchLabel" styleClass="muted"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <!-- Animación de "Exportando…" — mismo patrón que el prototipo
+                 (un círculo con un lado transparente, girando sin parar) en
+                 vez de solo texto plano; antes el usuario tenía que fijarse
+                 en el texto solo, sin ninguna señal de que algo seguía en
+                 curso. -->
+            <HBox fx:id="exportSpinnerBox" spacing="7" alignment="CENTER_LEFT" managed="false" visible="false">
+                <Region fx:id="exportSpinner" styleClass="export-spinner"/>
+                <Label fx:id="exportSpinnerLabel" styleClass="export-spinner-label"/>
+            </HBox>
+            <Label fx:id="memoryLabel" styleClass="muted"/>
+            <Label fx:id="engineJdkLabel" styleClass="muted"/>
         </HBox>
     </bottom>
 

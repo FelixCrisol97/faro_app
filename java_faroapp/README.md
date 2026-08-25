@@ -22,12 +22,62 @@ el archivo.
 **Nada de `java_faroapp/` está comiteado todavía** salvo el commit de
 reestructuración original (`9de47fe`, cuando la carpeta solo tenía el
 esqueleto de 4 zonas) — todo lo que sigue (árbol, editor, ejecución,
-diálogos) vive sin comitear. Recordatorio del bloqueo ya conocido:
-`MainController.java` tiene una contraseña real hardcodeada
-(`user = "postgres"; password = "crisol";` en `onTestConnection`) puesta
-por el usuario a propósito para probar en vivo — **no comitear esta
-carpeta mientras siga ahí**, revertir a las variables de entorno primero
-si algún día se comitea.
+diálogos) vive sin comitear.
+
+**Bloqueo de commit resuelto (2026-08-21):** el botón "Probar conexión de
+prueba" de la barra de herramientas y su contraseña hardcodeada
+(`user = "postgres"; password = "crisol";`, en `MainController#onTestConnection`)
+se quitaron por completo a pedido del usuario ("ya mandalo a la verga") —
+ver "Limpieza de la barra de herramientas y Preferencias" más abajo. Ya
+no hay ninguna credencial real en el código, así que este ya no es un
+bloqueo de commit. "Probar todas las conexiones" (menú Conexiones) sigue
+siendo el camino real para probar conexiones — usa las credenciales
+guardadas de cada base vía `CredentialStore`, nunca una hardcodeada.
+
+**Regla permanente, pedida explícitamente por el usuario (2026-08-21)
+tras encontrar el mismo bug de estilos seis veces seguidas — verificar
+SIEMPRE antes de dar por terminado cualquier trabajo con controles de
+JavaFX nuevos o modificados:** varios controles de JavaFX/Modena (y de
+RichTextFX) traen nodos internos con SU PROPIO fondo/color por defecto
+que un override del contenedor visible más obvio no cubre — se pintan
+encima sin importar el tema, y el resultado se ve roto/gris/blanco
+"pegado" en medio de una ventana por lo demás bien temada. Antes de
+dar por terminada cualquier tarea que toque un control nuevo (o un
+control existente de forma nueva), preguntarse: **¿tiene este control
+paneles/popups/celdas/nodos internos que RichTextFX/Modena estilizan
+por su cuenta, y ya se cubrieron todos?** Casos reales ya encontrados
+esta sesión, para no repetir la investigación desde cero — ver "Tema
+claro/oscuro" más abajo para el detalle completo de cada uno:
+`ToggleButton`/`Button` con distinto estilo base (el engrane del riel),
+`.column-header` individual dentro de `.column-header-background`, el
+`.filler` de una `TableView`, `.tab-header-background` (hijo de
+`.tab-header-area`, NO el mismo nodo) en cualquier `TabPane`, el
+`.caret`/`.selection`/texto plano de `CodeArea` (RichTextFX no les pone
+color por defecto, a propósito), el popup de la lista de un
+`ComboBox` (`.combo-box-popup .list-view`, aparte del cuadro cerrado),
+`Tooltip`, `Alert`/`TextInputDialog` (arman su propia `Scene` que no
+hereda el stylesheet de la ventana dueña — hay que agregárselo a mano), y
+el texto del valor SELECCIONADO de un `ComboBox` cerrado (`.combo-box >
+.list-cell`, verificado contra `modena.css` real del jar de
+javafx-controls — hereda `-fx-text-base-color` de Modena si no se
+tokeniza a mano, distinto de `.combo-box-popup .list-cell` que solo pinta
+las opciones del popup abierto; encontrado en Preferencias, ver "Limpieza
+de la barra de herramientas y Preferencias" más abajo).
+También quedan sin estilizar a propósito (documentado, no un olvido):
+los botones internos de `Alert`/`TextInputDialog` (heredan el tema pero
+todos se ven "primarios", sin jerarquía visual entre Guardar/Cancelar —
+ver detalle en "Tema claro/oscuro").
+
+**Actualización (2026-08-21):** el sistema de temas se reescribió a
+variables reales de JavaFX (`Theme.java`/`app.css`/`theme-light.css`/
+`theme-dark.css`, ver la primera sección bajo "Tema claro/oscuro" más
+abajo) — eso elimina de raíz la variante "se corrigió en un archivo y se
+olvidó en el otro" de este bug (ya no hay dos archivos completos que
+mantener sincronizados a mano). La otra variante, la de arriba (un nodo
+interno de JavaFX/Modena con fondo propio que un override del
+contenedor no cubre), sigue siendo un riesgo real sin importar la
+arquitectura de CSS — esa lista de "dónde buscar primero" sigue
+vigente.
 
 ### Ya funciona de verdad (no simulado, no maqueta)
 
@@ -207,7 +257,17 @@ las acciones que un usuario dispara a propósito.
 **Exportar resultados a CSV** (`MainController#onExportResultsCsv`) —
 exporta la tabla de Resultados actual (columnas + filas reales) a un
 archivo, con el mismo criterio de escape de comillas/comas que
-`CsvParser` usa para leer.
+`CsvParser` usa para leer. **Resuelto (2026-08-21) — ya corre como se
+decidió en el diseño original.** Una auditoría (2026-08-21, ver
+`CONTEXTO_SESIONES.md` para el registro oficial) encontró que la
+primera versión era síncrona en el hilo de la UI (`StringBuilder`
+completo en memoria + `Files.writeString`), contra lo que pedía
+explícitamente la decisión de diseño del 2026-08-19. Reescrito: los
+datos se copian a colecciones planas en el hilo de la UI (`TableView`
+no es seguro de leer desde otro hilo), y la escritura real corre en un
+`Task<Void>` con `BufferedWriter` línea por línea (mismo patrón que
+`onExplainPlan`/`onRunQuery`), con progreso real en la barra de estado
+cada 500 filas.
 
 **Abrir/Guardar archivo .sql** (`MainController#onOpenFile`/`onSaveFile`/
 `onSaveFileAs`) — lectura/escritura real de texto plano al editor, con
@@ -279,10 +339,15 @@ documentada** (ver salvedad en esa sección).
    persiste ahora, cifrada con DPAPI (2026-08-20)** — ver la sección
    dedicada "Persistencia de credenciales — DPAPI" más abajo para el
    detalle completo (`CredentialVaultStore`, `~/.faro/credentials.dat`).
-   Sigue sin haber guardado incremental (autosave por cada cambio) para
-   ninguno de los dos archivos — solo al cerrar la ventana, así que un
-   cierre anormal (proceso matado, no por la ventana) pierde los cambios
-   de esa sesión.
+   **Autoguardado agregado (2026-08-21)** — `MainController#startAutosave`
+   arranca un `Timer` demonio en `initialize()` que reintenta guardar
+   ambos archivos cada 2 minutos (`AUTOSAVE_INTERVAL_MILLIS`), sin
+   importar si algo cambió de verdad desde el último guardado (más
+   simple y seguro que rastrear un flag "sucio" en cada uno de los
+   varios puntos que mutan `registry`/`favorites`/`credentials`/
+   `preferences` — el costo de reescribir un JSON chico de más no
+   importa). Reduce la ventana de pérdida de un cierre anormal a como
+   mucho 2 minutos, en vez de toda la sesión.
 9. ~~Pestañas de múltiples consultas~~ — **resuelto (2026-08-20)**:
    `TabPane` real (`queryTabPane`), "Nueva consulta" (Ctrl+T) ya
    conectada — ver detalle en "Editor SQL" arriba. El aviso de
@@ -313,15 +378,51 @@ documentada** (ver salvedad en esa sección).
     el pool de esa base está saturado (ej. `poolSize=1`), el respaldo
     puede no conseguir una conexión nueva a tiempo para mandar el
     comando — recomendado `poolSize >= 2` si se depende de él.
+14. **Verificar el sistema de temas nuevo (variables reales) en una
+    ventana real** — ver "Sistema de temas — reescritura a variables
+    reales" más abajo. Se rescribieron `styles.css`/`styles-dark.css`
+    (~700 líneas cada uno) a `app.css` + `theme-light.css`/
+    `theme-dark.css` (variables `-token-*`, "looked-up colors" de
+    JavaFX) para que ya no haga falta mantener dos archivos completos
+    sincronizados a mano. Verificado todo lo que se puede verificar sin
+    abrir una ventana (135 selectores completos, cada variable usada
+    está definida en los dos temas, ningún color hex se quedó sin
+    tokenizar, el JAR empaquetado incluye los 3 archivos nuevos) — lo
+    único que falta es confirmar que JavaFX resuelve las variables como
+    se espera en las 6 ventanas reales, algo que ningún compilador
+    revisa. Si algo sale mal, `Theme.legacyStylesheetResourcePath` deja
+    un camino de vuelta instantáneo al sistema viejo (que sigue intacto,
+    sin borrar) — ver el runbook de reversión paso a paso en esa misma
+    sección.
+15. **Verificar en una ventana real la limpieza de barra de
+    herramientas/Preferencias (2026-08-21)** — ver "Limpieza de la barra
+    de herramientas y Preferencias" más abajo. Botón "+"/label "Editor
+    SQL"/botón "Probar conexión de prueba" quitados, texto de
+    `TextField`/`ComboBox` en Preferencias tokenizado. `mvn compile`/
+    `mvn test` en verde y cross-check `fx:id`/`onAction` completo, pero
+    nadie confirmó todavía visualmente que el texto ya se lea bien y que
+    no falte nada donde estaban esos controles.
+16. ~~Exportar CSV no quedó como tarea en segundo plano~~ —
+    **resuelto (2026-08-21)**, ver "Exportar resultados a CSV" arriba
+    y `CONTEXTO_SESIONES.md` para el registro oficial del hallazgo y el
+    arreglo.
+17. **Instalador `jpackage` (2026-08-21)** — `mvn -Ppackage clean
+    package` + `jpackage --type app-image` ya se corrieron de verdad
+    (antes solo estaban documentados) y produjeron `Faro.exe` real en
+    `target/dist/Faro/` (139 MB con el runtime embebido). Falta que el
+    usuario lo abra y confirme que la ventana funciona igual que con
+    `mvn javafx:run`. Para un instalador con asistente (`.exe`/`.msi`,
+    no solo la carpeta portable) hace falta instalar WiX Toolset v3
+    primero — no está instalado en esta máquina.
 
 ### Hallazgos de revisión de código (2026-08-20)
 
 Corrida con el skill `/code-review` sobre todo `java_faroapp/src` (todo el
 árbol, nunca comiteado, así que "el diff" fue el árbol completo). 13
-hallazgos reales — **11 ya arreglados el mismo día**, quedan 2 (uno ya
-documentado desde antes como bloqueo de commit, uno de deuda técnica
-menor sin urgencia). Cada arreglo se releyó completo contra el archivo
-real después de escribirlo (doble validación) antes de marcarlo acá.
+hallazgos reales — **los 13 ya arreglados** (11 el mismo día, los 2
+restantes el 2026-08-21 al quitar el botón de prueba con credenciales
+hardcodeadas). Cada arreglo se releyó completo contra el archivo real
+después de escribirlo (doble validación) antes de marcarlo acá.
 
 **Seguridad — los dos que más importaban, ambos resueltos (2026-08-20):**
 1. ~~Inyección SQL en Importar CSV~~ — **resuelto.**
@@ -405,18 +506,19 @@ sesión, todos resueltos (2026-08-20):**
     celda va a quedar vacía o no, en vez de solo en la rama donde se
     rebindea.
 
-**Quedan 2, sin resolver a propósito:**
-12. **Credenciales hardcodeadas anulan las variables de entorno** — ya
-    documentado como bloqueo de commit al principio de este archivo
-    (`MainController.java`, `onTestConnection`) — el usuario pidió
-    explícitamente dejarlo así por ahora para probar en vivo, así que no
-    se toca hasta que lo pida.
-13. **Lógica de "probar conexión" duplicada** — el mismo patrón
-    "conectar, mostrar versión, atrapar `SQLException`" está casi
-    calcado entre `MainController#onTestConnection` y
-    `AddDatabaseDialogController#onTestConnection` en vez de compartir
-    un helper; no es un bug, es deuda de mantenimiento de baja prioridad
-    frente al resto — sin resolver, no urgente.
+**Los 2 que quedaban, resueltos el 2026-08-21:**
+12. ~~Credenciales hardcodeadas anulan las variables de entorno~~ —
+    **resuelto.** El usuario pidió quitar el botón entero ("ya mandalo a
+    la verga") en vez de solo la credencial — `MainController#onTestConnection`,
+    `TEST_JDBC_URL` y el botón de la barra de herramientas ya no existen.
+    Ver "Limpieza de la barra de herramientas y Preferencias" más abajo.
+13. ~~Lógica de "probar conexión" duplicada~~ — **resuelto (por
+    eliminación, no por extraer un helper).** Al desaparecer
+    `MainController#onTestConnection` ya no queda duplicación con
+    `AddDatabaseDialogController#onTestConnection` (que sigue existiendo
+    — es una función distinta y legítima: prueba la conexión con las
+    credenciales que el usuario acaba de escribir al agregar una base
+    nueva, no una hardcodeada).
 
 ## Diseño — ya definido, ver `Migración_Flutter_Java/entrega/`
 
@@ -737,10 +839,8 @@ seguridad. Ahora sí persisten, cifradas, en un archivo aparte.
   distinto — sigue con `CredentialStore` vacío en vez de tronar el
   arranque) y se guarda al cerrar la ventana.
 
-**Límite conocido:** sin guardado incremental — igual que
-`connections.json`, solo se guarda al cerrar la ventana, así que un
-cierre anormal (proceso matado) pierde las credenciales nuevas/editadas
-de esa sesión.
+**Resuelto (2026-08-21):** mismo autoguardado cada 2 minutos que
+`connections.json` — ver el punto 8 de "Pendiente" arriba.
 
 ### Edición rápida — buscar, formatear, aviso de cambios sin guardar (2026-08-20)
 
@@ -842,11 +942,110 @@ se muestra un popup, se engancha un listener de una sola vez a
 `codeArea.caretPositionProperty()` que lo cierra en cuanto el cursor se
 mueve por cualquier motivo; además, pedir un autocompletado nuevo
 mientras uno anterior sigue sin resolver (`activeMenu`) cierra el viejo
-primero, para que nunca queden dos superpuestos. **Sigue sin
-reconfirmar tras este arreglo específico** — el bug original sí se vio
-y se reprodujo en vivo (screenshot real del usuario: "SELT * FRO" con
-el popup de "FROM" abierto), pero el fix en sí todavía no se probó de
-nuevo corriendo la app.
+primero, para que nunca queden dos superpuestos.
+
+**Fix reconfirmado en vivo (2026-08-21):** el usuario volvió a probarlo
+corriendo la app — "ya no está el bug de que si doy clic o me regreso a
+escribir pues no se quitaba, eso ya funciona ok". El bug original queda
+cerrado del todo (visto, arreglado y reconfirmado). Sigue vigente el
+límite ya documentado arriba: solo palabras clave SQL, no nombres de
+tabla/columna — el usuario lo notó también ("obviamente faltan muchas
+palabras reservadas") pero lo lee como limitación conocida, no como bug
+nuevo.
+
+### Nueva consulta asociada a una base (clic derecho en el árbol) (2026-08-21)
+
+El usuario marcó que el botón "+" de Nueva consulta no era intuitivo —
+abre una pestaña sin ninguna base marcada, así que hay que ir a buscarla
+en el árbol después. Pidió dos alternativas: una etiqueta más clara, o
+clic derecho en una base del árbol para abrir una consulta ya asociada a
+ella. Se hicieron las dos:
+
+- **Tooltip en el botón "+"** (`newQueryTabButton`, `MainController#initialize`)
+  — ahora explica que abre una pestaña sin base asociada, y menciona la
+  alternativa del clic derecho.
+- **Clic derecho en una fila de base → "Nueva consulta para esta base"**
+  (`ConnectionTreeCell`, menú contextual nuevo — `databaseContextMenu`,
+  construido una sola vez en el constructor, conectado/desconectado en
+  `updateItem()` según si la fila es una `DatabaseEntry` o no, mismo
+  patrón que el resto de la celda). `ConnectionTreeCell` ahora recibe un
+  segundo `Consumer<DatabaseEntry>` en el constructor
+  (`onNewQueryRequested`) — `MainController#onNewQueryForDatabase`
+  desmarca cualquier otra casilla ya marcada, marca SOLO la de la base
+  elegida, y abre una pestaña nueva — así "Ejecutar" ya apunta a esa base
+  sin tener que ir a buscarla en el árbol.
+- **Sin verificar en una ventana real todavía** — mismo criterio de
+  honestidad que el resto de los cambios de hoy.
+
+**Superado en parte más tarde el mismo día:** el botón "+" (`newQueryTabButton`)
+que llevaba el tooltip descrito arriba **se quitó por completo** — ver
+"Limpieza de la barra de herramientas y Preferencias" más abajo. El clic
+derecho ("Nueva consulta para esta base") sigue intacto y es ahora la
+única forma de abrir una consulta ya asociada a una base sin usar el
+árbol; Ctrl+T (menú Archivo → Nueva consulta) sigue abriendo una pestaña
+sin base asociada.
+
+### Limpieza de la barra de herramientas y Preferencias (2026-08-21)
+
+Cuatro pedidos puntuales del usuario tras probar la app en vivo (4
+capturas: área de pestañas de consulta, Preferencias → Rendimiento,
+Preferencias → Apariencia, botón de prueba). Los cuatro, resueltos:
+
+1. **Botón "+" de nueva pestaña, quitado** — redundante con Ctrl+T (menú
+   Archivo → Nueva consulta) y con el clic derecho en el árbol descrito
+   arriba. Se quitó el `<Button fx:id="newQueryTabButton">` de
+   `main-view.fxml`, el campo `@FXML` correspondiente en
+   `MainController.java` y el código de `initialize()` que le ponía
+   ícono/tooltip. `onNewQueryTab()` (el método, no el botón) sigue
+   existiendo — sigue conectado al ítem de menú y al atajo Ctrl+T.
+2. **Label "Editor SQL", quitado** — el usuario lo marcó como obvio/
+   redundante. Se quitó junto con el `HBox` que lo contenía en
+   `main-view.fxml` (el mismo `HBox` que traía el botón "+" del punto
+   anterior); `findBar` y `queryTabPane` quedan como hijos directos del
+   `VBox` de la zona de edición, sin ese encabezado.
+3. **Botón "Probar conexión de prueba", quitado por completo** —
+   incluía la contraseña hardcodeada documentada como bloqueo de commit
+   ("ya mandalo a la verga", instrucción explícita del usuario). Se
+   quitó `onTestConnection()` y `TEST_JDBC_URL` de `MainController.java`,
+   y el `<Button fx:id="testConnectionButton">` de `main-view.fxml`. Ver
+   "Bloqueo de commit resuelto" al principio de este archivo y los
+   hallazgos #12/#13 de la revisión de código, ambos ya marcados
+   resueltos.
+4. **Texto opaco en Preferencias (`TextField`/`ComboBox`), arreglado** —
+   mismo patrón de siempre (nodo interno de Modena con su propio color
+   de texto por defecto, no cubierto por el override del contenedor):
+   - `.text-field` (`app.css`) nunca tuvo `-fx-text-fill` propio — los
+     valores numéricos (pool size, timeout, etc.) caían en el color de
+     texto por defecto de Modena, opaco/ilegible en modo oscuro.
+     Arreglado agregando `-fx-text-fill: -token-text;`.
+   - El valor SELECCIONADO del `ComboBox` de Apariencia ("Oscuro") con
+     el cuadro CERRADO nunca tuvo color propio tampoco — verificado
+     contra `modena.css` real (`javafx-controls-21.0.8-win.jar`, no
+     adivinado) que el selector correcto es `.combo-box > .list-cell`
+     (hijo directo), **distinto** de `.combo-box-popup .list-cell` que
+     ya existía y solo pinta las opciones del popup ABIERTO. Sin la
+     regla nueva, hereda `-fx-text-base-color` de Modena (oscuro fijo),
+     ilegible sobre fondo oscuro. Agregado como regla nueva en `app.css`.
+   - Ambos casos se agregaron a la lista de "dónde buscar primero" en la
+     Regla permanente al principio de este archivo, para no perder la
+     investigación si vuelve a pasar con otro control.
+
+Validación hecha antes de marcar esto como terminado: `mvn clean compile`
+y `mvn test` limpios después de todos los cambios; cross-check
+`fx:id`↔`@FXML` y `onAction`↔método completo entre `main-view.fxml` y
+`MainController.java` (todos los `fx:id` tienen su campo, salvo `root` y
+`railToggleGroup`, que nunca necesitaron inyección — preexistente, no
+relacionado con este cambio); grep de `testConnectionButton`/
+`newQueryTabButton`/`onTestConnection`/`TEST_JDBC_URL` en todo
+`src/main`/`src/test` sin más resultados que
+`AddDatabaseDialogController#onTestConnection` (función distinta y
+legítima, sin tocar) y un comentario en el `styles.css` legacy (archivo
+congelado a propósito como snapshot de rollback, no se edita).
+
+**Sin verificar en una ventana real todavía** — mismo criterio de
+honestidad que el resto de los cambios de estos días: compilación y
+tests en verde, revisión estática del CSS/FXML/Java, pero nadie corrió
+la app todavía para confirmar visualmente los 4 puntos.
 
 ### Favoritos, historial y el panel Ver (2026-08-20)
 
@@ -884,9 +1083,41 @@ oscuro" más abajo) — clic en un ícono del riel, o Ver → Alt+1/2/3, dan
 el mismo resultado y sincronizan cuál ícono queda resaltado
 (`MainController#showLeftPanel`).
 
+**Segundo bug encontrado en el riel, ya arreglado (2026-08-20) —
+`settingsRailButton` (el engrane de Preferencias) se veía con un
+cuadro sólido de acento sin corresponder a ningún estado real (no está
+en el `ToggleGroup`, nunca debería mostrar el look de "seleccionado").**
+Dos intentos hasta encontrar la causa real:
+1. Primer intento (`-fx-focus-color`/`-fx-faint-focus-color: transparent`
+   + reglas `:armed`/`:pressed` explícitas en `.rail-button`) — **no
+   funcionó**, el usuario probó de nuevo y seguía igual.
+2. **Causa real, encontrada por una pregunta del usuario** ("¿por qué los
+   íconos de Historial/Favoritos si los puedes dejar bien pero el del
+   engrane no?"): los otros tres íconos del riel son `ToggleButton`;
+   `settingsRailButton` era un `Button` normal. `Button` trae en Modena
+   (la hoja base de JavaFX) más capas de relieve/foco por defecto que
+   `ToggleButton` — ninguna cantidad de reglas `:focused`/`:armed` en mi
+   propio CSS alcanzaba a cubrir todas esas capas. **Arreglo real**:
+   `settingsRailButton` pasó a ser `ToggleButton` también (mismo tipo que
+   sus tres hermanos, mismo estilo base de Modena) — no entra al
+   `ToggleGroup` (así que nunca compite por el "seleccionado" con los
+   otros tres), y `MainController#onOpenPreferences` lo destilda a mano
+   apenas el diálogo de Preferencias cierra (`PreferencesDialog.show()`
+   bloquea con `showAndWait()`, así que es seguro hacerlo justo después)
+   — sin este destildado, al ser ahora un `ToggleButton` sin grupo se
+   hubiera quedado marcado "activo" para siempre después del primer
+   clic, un bug nuevo que el cambio de tipo de control por sí solo
+   hubiera introducido. Las reglas del intento 1 se dejaron puestas como
+   refuerzo (no hacen daño) pero el comentario del CSS ya no las presenta
+   como la causa real. **Confirmar de nuevo en vivo** — el patrón de los
+   dos intentos anteriores en este mismo hilo de trabajo (parpadeo del
+   árbol) fue "cambio razonado pero sin confirmar hasta que se corrió la
+   app", así que este tampoco cuenta como cerrado hasta que se pruebe.
+
 - **Conexiones** — el mismo árbol de siempre (`connectionTree`), ahora
-  dentro de la primera pestaña en vez de ser el único contenido del
-  panel. Nada de su comportamiento cambió, solo dónde vive.
+  dentro del panel de contenido del riel en vez de ser el único
+  contenido del panel izquierdo. Nada de su comportamiento cambió, solo
+  dónde vive.
 - **Historial** — lista en memoria (`queryHistory`, `ObservableList<String>`,
   tope de `MAX_HISTORY = 50`, sin duplicados consecutivos) que se llena
   cada vez que "Ejecutar" corre una consulta de verdad
@@ -903,9 +1134,9 @@ el mismo resultado y sincronizan cuál ícono queda resaltado
   (paquete `com.faro.app.data`, nuevos). "Consulta → Guardar como
   favorito" (también el botón "Favorito" de la barra de herramientas,
   ambos van a `MainController#onSaveFavorite`) piden un nombre
-  (`TextInputDialog`) y guardan el SQL de la pestaña activa tal cual
-  está en ese momento. La pestaña Favoritos del panel izquierdo lista
-  los guardados con dos botones: "Abrir" (nueva pestaña con ese SQL) y
+  (`TextInputDialog`) y guardan el SQL de la pestaña de consulta activa
+  tal cual está en ese momento. El panel Favoritos del riel izquierdo
+  lista los guardados con dos botones: "Abrir" (nueva pestaña con ese SQL) y
   "Eliminar". **Sí persiste entre sesiones** — a diferencia del
   historial, `FavoritesStore` se guarda/carga junto con
   `ConnectionRegistry`/`AppPreferences` en el mismo
@@ -961,6 +1192,67 @@ archivo aparte y cifrado que ningún camino de import/export toca; llevar
 esta configuración a otra máquina significa volver a cargar usuario/
 contraseña de cada base ahí, a propósito.
 
+### Logging (2026-08-24)
+
+SLF4J + Logback (`pom.xml`: `slf4j-api` 2.0.13, `logback-classic` 1.5.6) —
+antes de esto la única traza era el log visual de la pestaña Diagnóstico
+(en memoria, se pierde al cerrar la app) más algún `System.err.println`
+suelto. Pedido explícito del usuario: "agreguemos muchísimos logs, que se
+genere un archivo .log en su respectiva carpeta aquí en el proyecto para
+que podamos ver la trazabilidad completa de la app".
+
+- **Dónde queda el archivo**: `logs/faro-app.log`, relativo al directorio
+  desde donde arrancó la app — `java_faroapp/logs/` con `mvn javafx:run`;
+  la carpeta del `.exe`/jar con jpackage. Rotación diaria + por tamaño
+  (`SizeAndTimeBasedRollingPolicy`, `logback.xml`): 20MB por archivo, 14
+  días o 500MB en total (lo que se llene primero). No versionado —
+  `logs/` está en `.gitignore` (más `*.log` ya en el `.gitignore` raíz).
+- **Dos niveles distintos a propósito**: el archivo recibe `DEBUG` de
+  todo `com.faro.app` (trazabilidad completa); la consola (solo visible
+  con `mvn javafx:run`) se queda en `INFO` para no inundar la terminal
+  mientras se desarrolla. Librerías de terceros (HikariCP, drivers JDBC,
+  RichTextFX) se quedan en el nivel raíz (`INFO`), no hace falta su
+  detalle interno.
+- **`MainController#log(LogLevel, String)` (el método que ya alimentaba
+  la pestaña Diagnóstico) ahora también reenvía cada entrada a SLF4J** —
+  los ~25 puntos de la app que ya llamaban a `log(...)`/`log(LogLevel, ...)`
+  (agregar/editar/eliminar base, descubrir, importar CSV, exportar/
+  importar configuración, favoritos, probar conexiones, etc.) quedan en
+  el archivo sin haber tocado cada uno por separado. Los mensajes que el
+  usuario pidió explícitamente NO ver en Diagnóstico (ej. "Ejecutando
+  consulta en N bases", se sentía duplicado con las filas de Ejecución,
+  ver más abajo) van directo a `logger` (SLF4J), sin pasar por ese
+  método — el archivo los tiene, la pestaña visual no.
+- **Qué queda instrumentado**: arranque/cierre de la app y manejador
+  global de excepciones no capturadas (`Main.java` — crítico para una
+  app de escritorio que el usuario corre solo, sin nadie mirando una
+  terminal); ciclo de vida completo de una consulta
+  (`QueryExecutionService#execute`/`runOne` — inicio, sentencias
+  partidas, éxito/fila/tiempo por base, cancelación, error con mensaje
+  aclarado); el respaldo real de cancelación (`attachKillFallback`/
+  `killBackend` — cuándo se dispara `KILL`/`pg_cancel_backend` y si
+  llegó a buen puerto); pools de conexión (`ConnectionPoolManager` — cuándo
+  se crea/descarta/cierra cada pool, con su `jdbcUrl` real pero NUNCA la
+  contraseña); persistencia (`ConnectionRegistryStore`/
+  `CredentialVaultStore` — cuántas entradas se guardan/cargan, nunca el
+  contenido de usuario/contraseña); los diálogos reales (Agregar/editar
+  base, Descubrir, Importar CSV, Preferencias); exportar CSV (inicio con
+  conteo de filas, éxito, error con stack completo); guardar/abrir
+  archivos `.sql`.
+- **Qué se dejó fuera a propósito**: nunca se loguea una contraseña ni el
+  contenido de `credentials.dat` — solo conteos/eventos. El texto
+  completo de cada sentencia SQL sí se loguea (`DEBUG`, por sentencia,
+  dentro de `runOne`) pero recortado a 500 caracteres
+  (`truncateForLog`) — un `INSERT` con miles de literales no debe volar
+  el archivo.
+- **Verificado de verdad, no solo "compila"**: una clase Java suelta
+  (fuera del árbol del proyecto, borrada después) que usa los mismos
+  jars de slf4j-api/logback-classic + el `logback.xml` real, corrida
+  desde `java_faroapp/` — confirmó que la consola muestra solo INFO+,
+  que `logs/faro-app.log` se crea solo, que el archivo sí tiene las
+  líneas DEBUG que la consola filtró, y que un `ERROR` con excepción
+  incluye el stack trace completo.
+
 ### Tests automatizados (2026-08-20)
 
 18 tests JUnit 5 reales (antes: cero, `junit-jupiter` declarado en
@@ -997,14 +1289,24 @@ ningún tipo antes de hoy.
 Perfil Maven nuevo `package` (`pom.xml`) — **no corre en el build
 normal a propósito**, `mvn compile`/`mvn test`/`mvn javafx:run` quedan
 exactamente igual de rápidos que siempre. Se activa explícitamente:
-`mvn -Ppackage clean package` — verificado, produce `target/faro-app.jar`
-(~17 MB, confirmado con `unzip -l`: contiene todas las clases de la app,
-los 2 drivers JDBC, HikariCP, RichTextFX, Gson, jna-platform, las 6
-hojas FXML, `styles.css`/`styles-dark.css`, las 3 fuentes, y las
-librerías nativas de JavaFX/JNA para Windows — `glass.dll`,
+`mvn -Ppackage clean package` — verificado en su momento (2026-08-20,
+antes de la reescritura del sistema de temas del 2026-08-21), produce
+`target/faro-app.jar` (~17 MB, confirmado con `unzip -l`: contiene todas
+las clases de la app, los 2 drivers JDBC, HikariCP, RichTextFX, Gson,
+jna-platform, las 6 hojas FXML, `styles.css`/`styles-dark.css`, las 3
+fuentes, y las librerías nativas de JavaFX/JNA para Windows — `glass.dll`,
 `prism_*.dll`, `javafx_font.dll`, `javafx_iio.dll`,
 `com/sun/jna/win32-x86-64/jnidispatch.dll`, etc.), con
 `Main-Class: com.faro.app.Main` ya puesto en el manifest.
+
+**Re-verificado tras la reescritura del sistema de temas (2026-08-21)** —
+se volvió a correr `mvn -Ppackage clean package` después de agregar los
+3 archivos nuevos y se confirmó con `unzip -l` que los 5 archivos CSS
+(`app.css`/`theme-light.css`/`theme-dark.css` nuevos +
+`styles.css`/`styles-dark.css` viejos, sin usarse pero tampoco
+borrados) quedan empaquetados en el JAR — Maven los trata como
+cualquier otro recurso bajo `src/main/resources/`, sin necesitar ningún
+cambio de configuración.
 
 **Por qué NO se usó `jlink`** (el goal `javafx:jlink` que ya trae el
 plugin `javafx-maven-plugin` declarado en `pom.xml`) — jlink necesita un
@@ -1040,8 +1342,11 @@ mkdir target\dist-input
 copy target\faro-app.jar target\dist-input\
 jpackage --type app-image --input target\dist-input --dest target\dist ^
   --name Faro --main-jar faro-app.jar --main-class com.faro.app.Main ^
-  --app-version 0.1.0 --icon ..\flutter_faroapp\windows\runner\resources\app_icon.ico
+  --app-version 0.1.0 --icon ..\flutter_faroapp\windows\runner\resources\app_icon.ico ^
+  --java-options "-Xmx4g"
 ```
+
+`--java-options "-Xmx4g"` (2026-08-22) — mismo margen de heap explícito que ya tiene `mvn javafx:run` en el `pom.xml` (ver el comentario ahí para el porqué: un `OutOfMemoryError` real exportando 3 millones de filas combinadas). Sin esto, el `.exe` empaquetado correría con el límite de heap por defecto de la JVM, sin relación con lo que se decidió para desarrollo.
 
 `--type app-image` produce una carpeta (`target\dist\Faro\`) con
 `Faro.exe` + un runtime Java completo embebido — se puede copiar a
@@ -1151,7 +1456,125 @@ el texto (`MainController#runButtonGraphic`, `.run-button-shortcut` en
 `styles.css`) — antes solo aparecía en el ítem del menú, no en el botón,
 a diferencia del prototipo.
 
-### Tema claro/oscuro (2026-08-20)
+### Sistema de temas — reescritura a variables reales (2026-08-21)
+
+**Esto reemplaza la arquitectura descrita más abajo en esta misma
+sección — leer esto primero, el resto queda como historial de cómo se
+llegó hasta acá.** Después de encontrar la misma clase de bug de estilos
+DOCE veces seguidas en una sola sesión (ver la lista completa más abajo)
+casi siempre por "se corrigió en un archivo y se olvidó en el otro", el
+usuario preguntó directamente si JavaFX tenía alguna forma de definir
+colores una sola vez. La respuesta es sí, y hay que corregir algo que
+este mismo README decía mal: **JavaFX sí tiene variables CSS reales
+("looked-up colors"), y existen desde siempre — no desde JDK 24.** Lo
+que sí es nuevo en versiones recientes de JavaFX es la sintaxis moderna
+`--variable`/`var()` (la que sigue el spec de CSS Custom Properties);
+pero el mecanismo viejo (`-nombre-cualquiera: valor;` en un nodo,
+referenciado como `-fx-propiedad: -nombre-cualquiera;` en cualquier
+regla de cualquier hoja cargada en esa ventana, resuelto buscando hacia
+arriba en el árbol de nodos) es parte de JavaFX desde sus primeras
+versiones y ya funciona en JavaFX 21, la que usa este proyecto.
+
+**Arquitectura nueva — 3 archivos en vez de 2:**
+- **`theme-light.css`/`theme-dark.css`** — solo definen variables
+  `-token-*` (background/surface/text/border/accent/success/error/warn,
+  con sus variantes hover/active/soft, más 2 grises inferidos) sobre
+  `.root` — la clase que JavaFX le pone automáticamente al nodo raíz de
+  CADA `Scene` sin pedirlo, así que basta definir ahí para que se vean
+  desde las 6 ventanas. Valores idénticos a los ya verificados contra
+  `demo_html/styles.css` (releído completo esta vez — las 736 líneas,
+  no solo fragmentos — para la reescritura, ver "lo más real a la demo"
+  pedido explícitamente por el usuario).
+- **`app.css`** — TODAS las reglas reales de la app (135 selectores,
+  copiados uno por uno del `styles.css` original), la MISMA hoja sin
+  importar el tema — cada color usa `-fx-propiedad: -token-nombre;` en
+  vez de hex literal. Fuentes/radios/tamaños que no cambian por tema
+  quedan literales (no tiene sentido tokenizarlos). El `.tooltip` y la
+  sombra de menús (`rgba(15,23,42,0.15)`) también quedan literales a
+  propósito — son fijos en los dos temas por diseño real, no un
+  descuido.
+- **`Theme.java`** — `stylesheetResourcePaths(boolean darkTheme)`
+  devuelve las DOS rutas que hay que cargar juntas (paleta + `app.css`);
+  `applyTo(Scene, boolean darkTheme)` hace el trabajo de agregarlas,
+  usado en los 8 lugares que antes repetían el mismo bloque de 3 líneas
+  (`Main.java`, `MainController` dos veces, los 5 diálogos).
+
+**Tabla de referencia — cada variable, los dos valores.** Para no tener
+que abrir los 2 archivos de paleta cada vez que se necesite saber qué
+significa una variable en `app.css`:
+
+| Variable | Claro (`theme-light.css`) | Oscuro (`theme-dark.css`) | Origen |
+|---|---|---|---|
+| `-token-background` | `#F8FAFC` | `#0F172A` | `app_colors.dart` |
+| `-token-surface` | `#FFFFFF` | `#1E293B` | `app_colors.dart` |
+| `-token-surface-alt` | `#F1F5F9` | `#334155` | `app_colors.dart` |
+| `-token-text` | `#0F172A` | `#F1F5F9` | `app_colors.dart` |
+| `-token-text-muted` | `#475569` | `#AEBACB` | `app_colors.dart` |
+| `-token-border` | `#E2E8F0` | `#334155` | `app_colors.dart` |
+| `-token-success-base` | `#059669` | `#34D399` | `app_colors.dart` |
+| `-token-error-base` | `#DC2626` | `#F87171` | `app_colors.dart` |
+| `-token-warn-base` | `#B45309` | `#B45309` (igual) | `app_colors.dart` |
+| `-token-accent-base` | `#6366F1` | `#818CF8` | `app_accent.dart` (indigo) |
+| `-token-accent-hover` | `#4F46E5` | `#A5B4FC` | `app_accent.dart` (indigo) |
+| `-token-accent-active` | `#4338CA` | `#6366F1` | `app_accent.dart` (indigo) |
+| `-token-accent-soft` | `#EEF2FF` | `rgba(129,140,248,.18)` | `app_accent.dart` (indigo) |
+| `-token-accent-soft-text` | `#4338CA` | `#C7D2FE` | `app_accent.dart` (indigo) |
+| `-token-gray-icon` | `#94A3B8` | `#64748B` | inferido, sin fuente real |
+| `-token-gray-border` | `#CBD5E1` | `#64748B` | inferido, sin fuente real |
+
+Cada fila de esta tabla se verificó de nuevo, una por una, contra el
+contenido real de `theme-light.css`/`theme-dark.css` al escribir esta
+documentación (doble validación) — no se transcribió de memoria de lo
+que se acababa de escribir unos minutos antes.
+
+**Red de seguridad — nada del sistema viejo se borró.** `styles.css`/
+`styles-dark.css` (los dos archivos completos de antes) siguen ahí,
+intactos, sin que ningún código los referencie ya —
+`Theme.legacyStylesheetResourcePath(boolean)` sigue existiendo apuntando
+a ellos, documentado en su javadoc como el camino de vuelta instantáneo
+si el sistema nuevo resultara tener un problema real. Esto importa
+particularmente acá porque **nada de `java_faroapp/` está comiteado
+todavía** (ver el bloqueo de la contraseña hardcodeada al principio de
+este README) — sin git de por medio, no hay otra red de seguridad más
+que dejar los archivos viejos como están.
+
+**Cómo revertir al sistema viejo, paso a paso, si hiciera falta** (ningún
+paso requiere reescribir CSS, solo cambiar qué método llama cada uno de
+los 8 lugares que aplican el tema):
+1. En `Theme.java`, dentro de `applyTo(Scene, boolean)`, cambiar el
+   cuerpo para que use `legacyStylesheetResourcePath(darkTheme)` (una
+   sola ruta) en vez de recorrer `stylesheetResourcePaths(darkTheme)`
+   (la lista de dos) — es el ÚNICO lugar que hay que tocar, ya que los 8
+   call sites (`Main.java`, `MainController` ×2, los 5 diálogos) todos
+   pasan por `Theme.applyTo(...)`, ninguno construye la ruta a mano.
+2. En `MainController#applyCurrentTheme`, la línea
+   `scene.getStylesheets().clear()` seguiría funcionando igual (el
+   método sigue agregando una sola hoja, solo que la vieja).
+3. Recompilar (`mvn -q compile`) y correr — sin tocar ningún archivo CSS,
+   los 3 archivos nuevos (`app.css`/`theme-light.css`/`theme-dark.css`)
+   simplemente quedan sin usarse, igual que `styles.css`/
+   `styles-dark.css` quedan sin usarse ahora mismo.
+
+**Verificación real hecha, y su límite honesto:**
+- Los 135 selectores de `styles.css` están todos presentes en `app.css`
+  (mismo conteo, verificado con `grep`) — ninguna regla se perdió en la
+  transcripción.
+- Cada variable `-token-*` usada en `app.css` está definida en LOS DOS
+  archivos de paleta, sin excepción — verificado cruzando las listas
+  completas, no a ojo.
+- Ningún color hex quedó sin tokenizar por accidente en `app.css` —
+  verificado con `grep` buscando cualquier `#RRGGBB` suelto; solo
+  aparecen los 2 del `.tooltip`, que son literales a propósito.
+- **Lo que NO se pudo verificar: que JavaFX realmente resuelva estas
+  variables como se espera en una ventana real.** CSS no es código Java
+  — `mvn compile` no revisa sintaxis CSS ni resuelve `-token-*` en
+  absoluto, eso solo pasa en tiempo de ejecución dentro del motor de
+  render de JavaFX. Esta es la reescritura de mayor riesgo de toda la
+  sesión (toca las 6 ventanas a la vez, no una pieza aislada) y la
+  primera vez que se hace algo así sin poder probarlo en vivo antes de
+  entregarlo — pruébala con más cuidado que de costumbre.
+
+### Tema claro/oscuro — arquitectura anterior e historial de bugs (2026-08-20, superada por lo de arriba)
 
 Sistema de theming real, no un mockup — `Theme.java` (paquete
 `com.faro.app.ui`) es la única fuente de verdad de qué hoja de estilos
@@ -1216,7 +1639,127 @@ temas (así lo define `app_accent.dart` también, no es un recorte del
 lado Java). No hay selector de acento (rojo/verde/etc.) ni en Flutter ni
 acá.
 
-## Referencias que ya existen en el repo (no las repitas de memoria)
+**Tercer y cuarto bug encontrados con capturas nuevas del usuario
+(2026-08-21) — ambos con la misma causa raíz: un elemento hijo con su
+propio fondo por defecto de Modena pintándose encima del fondo que sí se
+había definido en el contenedor padre. Mismo patrón exacto que el bug
+del engrane del riel, solo que en dos lugares distintos:**
+
+1. **Encabezado de la tabla de Resultados/Ejecución gris "horrible" en
+   los dos temas** (`.results-table .column-header-background` sí tenía
+   el color correcto puesto, pero cada `.column-header` INDIVIDUAL —uno
+   por columna— trae su propio fondo gris de Modena por defecto, fijo,
+   que no cambia con el tema; eso es lo que se pintaba encima). Arreglado
+   agregando `-fx-background-color` explícito también a
+   `.results-table .column-header` (antes solo tenía borde) — mismo
+   color que `.column-header-background`, en los dos stylesheets. Por
+   qué se veía "igual de horrible" en claro y en oscuro: el gris de
+   Modena es el mismo hex sin importar el tema, así que nunca iba a
+   coincidir con ninguno de los dos.
+2. **El editor SQL "no se ve nada bien" en modo oscuro** — no era la
+   sintaxis (esa ya estaba verificada correcta), era que **RichTextFX
+   deja el color del cursor de texto sin definir a propósito** en su
+   propia hoja de estilos (`styled-text-area.css` dentro del jar: la
+   regla `.caret` solo fija velocidad de parpadeo y grosor, nunca
+   color) — sin ponerlo, usa el negro por defecto de JavaFX, invisible
+   contra el fondo `#334155` del editor oscuro (en claro no se notaba,
+   negro sobre blanco es normal). Arreglado con
+   `.sql-editor .caret { -fx-stroke: ... }` (`--text` de cada tema,
+   verificado leyendo el CSS real dentro del jar de RichTextFX, no de
+   memoria). De paso, mismo hallazgo aplicado preventivamente a la
+   selección de texto (`.sql-editor .selection`, tampoco tenía color
+   definido en ningún lado) — usa `--accent-soft`, el mismo valor real
+   que `demo_html/styles.css` define para `::selection` en el navegador.
+
+Los dos verificados por lectura de CSS/JAR (`javap`/`unzip -p` contra el
+jar real de RichTextFX para confirmar el nombre exacto de la clase
+`.caret`/`.selection`, no adivinado) pero **sin confirmar corriendo la
+app todavía** — mismo criterio de honestidad que el resto de esta
+sesión: el razonamiento es sólido, la confirmación visual falta.
+
+**Quinto bug, mismo patrón otra vez — RESUELTO Y CONFIRMADO por el
+usuario en vivo (2026-08-21)** — la tira completa de pestañas
+(`Resultados`/`Ejecución`/`Diagnóstico` Y `Consulta 1`/`Tienda
+Polanco` del editor, más las pestañas de Preferencias, que reusa la
+misma clase) se veía gris claro/blanco encima de todo lo demás oscuro,
+confirmado con captura real del usuario. `.tab-header-background` es
+un nodo HIJO de `.tab-header-area` — **no el mismo nodo** — con su
+propio fondo gris de Modena por defecto, y solo se había estilizado
+`.tab-header-area` en los dos stylesheets, nunca `.tab-header-background`.
+Arreglado agregando esa regla a `.query-tabs`/`.results-tabs` en los dos
+temas (4 reglas nuevas). El usuario confirmó corriendo la app: "se ve
+mucho mejor".
+
+**Sexto bug, mismo patrón, encontrado en la misma captura de
+confirmación (2026-08-21)** — quedaba una franja blanca/gris a la
+derecha de la última columna de la tabla de Resultados, cuando las
+columnas reales no llenan todo el ancho del panel (caso normal con
+pocas columnas angostas en un panel ancho). Era `.filler` — otro nodo
+hijo de `.column-header-background`, específico para esa franja de
+relleno, con su propio fondo de Modena nunca anulado. Arreglado en los
+dos temas. **Sin confirmar todavía.**
+
+**Séptimo bug — texto plano del editor SQL opaco en oscuro (2026-08-21,
+reportado por el usuario, sin confirmar el fix todavía).** No era la
+sintaxis (`.keyword`/`.string`/`.number`/`.comment` ya estaban
+correctos) — era el texto SIN resaltar (identificadores, puntuación):
+RichTextFX envuelve cada tramo en un `Text` con la clase base `"text"`
+(la que trae `javafx.scene.text.Text` por defecto), y nunca se le puso
+color — caía en el negro por defecto de JavaFX, opaco contra el fondo
+oscuro del editor (en claro no se notaba, negro sobre claro es normal).
+Arreglado con `.sql-editor .text { -fx-fill: ...; }` en los dos temas —
+misma especificidad que `.keyword`/`.string`/etc., pero esas ganan por
+venir después en el archivo (mismo token trae las dos clases: la base
+`"text"` y la semántica encima).
+
+**Barrido completo del resto de la app, pedido explícitamente por el
+usuario ("revisa todo el aplicativo donde esté el error") tras
+encontrar el mismo bug seis veces seguidas — cuatro casos más
+encontrados de forma proactiva, ninguno reportado todavía por el
+usuario, sin confirmar en vivo:**
+8. **Barras de desplazamiento — nunca tuvieron estilo en NINGÚN tema**,
+   en ningún control (árbol, tabla, listas, editor) — usaban la barra
+   gris ancha nativa de Modena en toda la app. Arreglado con reglas
+   `.scroll-bar` GLOBALES (sin escopar a una clase, ya que TreeView/
+   TableView/ListView/CodeArea comparten el mismo control) en los dos
+   temas, contra el diseño real de `demo_html/styles.css` (líneas
+   139-143: delgada, pista transparente, thumb redondeado con
+   `--border`, `--text-muted` al pasar el mouse, sin flechas — el truco
+   `-fx-shape: " "` las oculta).
+9. **Popup de la lista de un `ComboBox`** (`.combo-box-popup .list-view`)
+   — el cuadro cerrado sí tenía estilo, pero la lista que se despliega
+   al abrirlo es un popup APARTE (mismo patrón que `.context-menu`) que
+   nunca se tocó — usaba una `ListView` blanca/negra de Modena. Afecta
+   los 3 `ComboBox` reales de la app (motor/modo en Agregar base, base
+   destino en Importar CSV, tema en Preferencias).
+10. **`Tooltip`** — otro popup nunca estilizado (los del árbol —
+    `statusDot`/`modeIcon` — y el nuevo de `newQueryTabButton`). Se
+    decidió un tratamiento oscuro fijo en los dos temas a propósito (no
+    invertido por tema) — convención común de tooltip, y no hay una
+    fuente real de diseño que verificar acá (los tooltips de
+    `demo_html` son del navegador, sin CSS propio que copiar).
+11. **`Alert`/`TextInputDialog` no heredaban el tema de la ventana
+    principal en absoluto** — a diferencia de los 5 diálogos propios de
+    la app (que ya aplicaban `Theme.stylesheetResourcePath(...)` desde
+    que se armó el sistema de temas), `Alert`/`TextInputDialog` arman su
+    propia `Scene` interna que JavaFX NO conecta automáticamente a las
+    hojas de estilo de la ventana dueña. Afecta 3 usos reales
+    (`MainController#confirmSaveOrDiscard`, `#onAbout`,
+    `#onSaveFavorite`) — nuevo método `applyThemeToAlert(Dialog<?>)`
+    agrega la hoja correcta a cada uno. **Limitación conocida, no
+    arreglada:** los botones de estos diálogos (`ButtonType` genéricos)
+    heredan el tema pero no una clase `.button`/`.button-secondary`
+    específica, así que todos se ven con el mismo peso visual entre sí
+    (ej. "Guardar"/"Descartar"/"Cancelar" no tienen jerarquía como
+    primario/secundario) — mejora cosmética menor, no se hizo en este
+    barrido.
+
+**Van once veces con esta misma clase de bug (o una variante muy
+cercana — Scene sin heredar hoja de estilos cuenta como el mismo tipo
+de error de raíz: algo que debía tener el tema y no lo tenía) en esta
+sesión.** Regla permanente agregada al principio de este README (sección
+"Estado actual") para no tener que redescubrir esto cada vez — ver ahí
+para la lista corta de "dónde buscar primero" en trabajo futuro.
 
 - `design_system/` (raíz del repo) — tokens de diseño originales de la
   primera versión (colores, tipografías, espaciados, radios); el prototipo

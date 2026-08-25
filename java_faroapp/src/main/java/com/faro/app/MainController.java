@@ -1,23 +1,34 @@
 package com.faro.app;
 
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Optional;
+import java.util.Set;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.fxmisc.flowless.VirtualizedScrollPane;
 import org.fxmisc.richtext.CodeArea;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.faro.app.data.AppPreferences;
 import com.faro.app.data.ConnectionRegistry;
@@ -27,7 +38,9 @@ import com.faro.app.data.CredentialVaultStore;
 import com.faro.app.data.Favorite;
 import com.faro.app.data.FavoritesStore;
 import com.faro.app.model.DatabaseEntry;
+import com.faro.app.model.DbEngine;
 import com.faro.app.query.ConnectionPoolManager;
+import com.faro.app.query.CsvFileNamer;
 import com.faro.app.query.ExecutionStatus;
 import com.faro.app.query.QueryExecutionService;
 import com.faro.app.query.QueryResult;
@@ -46,6 +59,9 @@ import com.faro.app.ui.SqlAutocomplete;
 import com.faro.app.ui.SqlEditorFactory;
 import com.faro.app.ui.Theme;
 
+import javafx.animation.Animation;
+import javafx.animation.Interpolator;
+import javafx.animation.RotateTransition;
 import javafx.application.Platform;
 import javafx.beans.Observable;
 import javafx.beans.binding.Bindings;
@@ -55,11 +71,13 @@ import javafx.concurrent.Task;
 import javafx.fxml.FXML;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBoxTreeItem;
+import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
@@ -75,9 +93,13 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.Circle;
 import javafx.stage.FileChooser;
+import javafx.util.Duration;
 
 /**
  * Controlador de la ventana principal. Árbol de conexiones, editor SQL
@@ -92,26 +114,47 @@ import javafx.stage.FileChooser;
  * favoritos, plan de ejecución, panel Ver acoplable, importar/exportar
  * configuración).
  *
- * Las credenciales del botón de prueba NUNCA deberían ir hardcodeadas en un
- * archivo que se comitea — se leen de variables de entorno por diseño.
- * (Nota 2026-08-19: quedaron hardcodeadas abajo temporalmente para probar
- * en vivo, a pedido explícito del usuario — revertir antes de comitear este
- * archivo.) Uso normal:
- *
- *   FARO_TEST_DB_USER=tu_usuario FARO_TEST_DB_PASSWORD=tu_password \
- *     mvn javafx:run
+ * (Nota 2026-08-21: el botón "Probar conexión de prueba" y su contraseña
+ * hardcodeada, que vivían acá para probar en vivo durante el desarrollo,
+ * se quitaron a pedido del usuario — ver README, ya no es un bloqueo de
+ * commit. "Probar todas las conexiones", en el menú Conexiones, es el
+ * camino real para probar conexiones — usa las credenciales guardadas de
+ * cada base, no una hardcodeada.)
  */
 public class MainController {
-
-    private static final String TEST_JDBC_URL = "jdbc:postgresql://localhost:5432/crisol";
-    private static final String DEMO_SQL =
-            "SELECT id, nombre, total\nFROM ventas\nWHERE fecha >= '2026-01-01'\nORDER BY total DESC;";
 
     @FXML
     private Label statusLabel;
 
     @FXML
+    private Circle poolStatusDot;
+
+    @FXML
+    private Label poolStatusLabel;
+
+    @FXML
+    private Label timeoutFetchLabel;
+
+    @FXML
+    private HBox exportSpinnerBox;
+
+    @FXML
+    private Region exportSpinner;
+
+    @FXML
+    private Label exportSpinnerLabel;
+
+    @FXML
+    private Label memoryLabel;
+
+    @FXML
+    private Label engineJdkLabel;
+
+    @FXML
     private TreeView<Object> connectionTree;
+
+    @FXML
+    private TextField connectionFilterField;
 
     @FXML
     private ToggleButton connectionsRailButton;
@@ -122,8 +165,14 @@ public class MainController {
     @FXML
     private ToggleButton favoritesRailButton;
 
+    // ToggleButton, no Button — ver nota en styles.css: mismo tipo de
+    // control que sus tres hermanos del riel para que comparta el mismo
+    // estilo base de Modena (Button trae más capas de relieve/foco por
+    // defecto que ToggleButton, eso causaba el cuadro sólido que no
+    // correspondía a ningún estado). No entra a railToggleGroup, así que
+    // su "selected" nunca se lee — solo importa su onAction.
     @FXML
-    private Button settingsRailButton;
+    private ToggleButton settingsRailButton;
 
     @FXML
     private VBox connectionsPanel;
@@ -142,9 +191,6 @@ public class MainController {
 
     @FXML
     private TabPane queryTabPane;
-
-    @FXML
-    private Button newQueryTabButton;
 
     @FXML
     private HBox findBar;
@@ -168,10 +214,25 @@ public class MainController {
     private StackPane diagnosticContainer;
 
     @FXML
+    private Tab resultsTab;
+
+    @FXML
+    private Tab executionTab;
+
+    @FXML
+    private Tab diagnosticTab;
+
+    @FXML
+    private Button exportCsvButton;
+
+    @FXML
     private Label selectedCountLabel;
 
     @FXML
     private Button runButton;
+
+    @FXML
+    private Button newQueryButton;
 
     @FXML
     private Button openButton;
@@ -189,32 +250,67 @@ public class MainController {
     private Button addDatabaseButton;
 
     @FXML
+    private Button selectAllDatabasesButton;
+
+    @FXML
     private Button themeToggleButton;
+
+    /** Distinto nombre que el método {@link #log(String)} de abajo (el log visual de la pestaña Diagnóstico) a propósito, para no confundir al leer — este es el logger real de archivo (SLF4J/Logback, ver logback.xml), {@link #log(LogLevel, String)} le reenvía cada entrada. */
+    private static final Logger logger = LoggerFactory.getLogger(MainController.class);
 
     private static final int MAX_HISTORY = 50;
 
+    /** Nivel de una entrada del log de Diagnóstico — mismo vocabulario visual que `faro-java-prototipo.html` (INFO/WARN/ERROR/DEBUG, coloreados). */
+    private enum LogLevel { INFO, WARN, ERROR, DEBUG }
+
+    private record DiagnosticEntry(LocalTime time, LogLevel level, String message) {
+    }
+
     private final CredentialStore credentials = new CredentialStore();
     private final ConnectionPoolManager pool = new ConnectionPoolManager();
+    /** Versión real de cada motor, cacheada la primera vez que una conexión de ese tipo tiene éxito (ver {@code QueryExecutionService#runOne}) — para la barra de estado de abajo ("PostgreSQL 15.4 · SQL Server 2019"). */
+    private final Map<DbEngine, String> engineVersions = new ConcurrentHashMap<>();
     private final AppPreferences preferences = new AppPreferences();
     private final FavoritesStore favorites = new FavoritesStore();
-    private final ObservableList<String> diagnosticLog = FXCollections.observableArrayList();
+    private final ObservableList<DiagnosticEntry> diagnosticLog = FXCollections.observableArrayList();
     private final ObservableList<String> queryHistory = FXCollections.observableArrayList();
     private ConnectionRegistry registry;
     private TableView<ObservableList<Object>> resultsTable;
-    private TableView<ExecutionStatus> executionTable;
+    private ListView<ExecutionStatus> executionTable;
+    private RotateTransition exportSpinAnimation;
+    private Label executionSummaryLabel;
     private List<ExecutionStatus> currentExecutionRows = List.of();
+    /** {@code true} mientras el {@code Task} de {@link #onRunQuery()} está corriendo — decide si el botón "Ejecutar"/"Cancelar" (mismo botón, ver {@link #onRunButtonClicked()}) dispara una cosa u otra. */
+    private boolean queryRunning = false;
+    /** Alias de la base (o "N-bases" si la última corrida tocó varias) y texto SQL que produjeron el resultado que hay ahora mismo en {@link #resultsTable} — insumos para el nombre sugerido de {@link #onExportResultsCsv()}, ver {@link CsvFileNamer}. */
+    private String lastResultDatabaseLabel = "";
+    private String lastResultSql = "";
+    /** Texto actual del buscador de bases del árbol de conexiones — ver {@link #refreshTree()}/{@link ConnectionTreeBuilder#buildRoot(ConnectionRegistry, String)}. */
+    private String connectionFilterText = "";
+    /** Hora en que arrancó la última corrida — se perdió al quitar los `log(...)` duplicados de {@link #onRunQuery()}, el usuario lo notó, se movió al encabezado de Ejecución en vez de repetirlo en el log. */
+    private String lastExecutionStartTime = "";
     private int queryTabCounter;
+    private Timer autosaveTimer;
+
+    private static final long AUTOSAVE_INTERVAL_MILLIS = 120_000;
 
     @FXML
     private void initialize() {
+        logger.info("MainController.initialize() — arrancando.");
         registry = loadOrCreateRegistry();
         loadCredentials();
-        connectionTree.setCellFactory(tree -> new ConnectionTreeCell(this::openEditDialog));
+        connectionTree.setCellFactory(tree ->
+                new ConnectionTreeCell(this::openEditDialog, this::onNewQueryForDatabase, this::confirmAndDeleteDatabase,
+                        this::onDiscoverForDatabase));
         connectionTree.setOnMouseClicked(this::onTreeClicked);
+        connectionFilterField.textProperty().addListener((obs, oldText, newText) -> {
+            connectionFilterText = newText;
+            refreshTree();
+        });
         refreshTree();
+        startAutosave();
 
-        addQueryTab(DEMO_SQL, null);
-        newQueryTabButton.setGraphic(Icons.strokeIcon(Icons.PLUS));
+        addQueryTab("", null);
         findField.setOnKeyPressed(event -> {
             if (event.getCode() == KeyCode.ESCAPE) {
                 onCloseFindBar();
@@ -228,13 +324,66 @@ public class MainController {
 
         resultsTable = ResultsTableFactory.create();
         resultsContainer.getChildren().add(resultsTable);
+        exportCsvButton.setDisable(true);
+
+        exportSpinAnimation = new RotateTransition(Duration.seconds(0.8), exportSpinner);
+        exportSpinAnimation.setByAngle(360);
+        exportSpinAnimation.setCycleCount(Animation.INDEFINITE);
+        exportSpinAnimation.setInterpolator(Interpolator.LINEAR);
+        refreshStatusBar();
 
         executionTable = ExecutionTableFactory.create();
-        executionContainer.getChildren().add(executionTable);
+        VBox.setVgrow(executionTable, Priority.ALWAYS);
+        executionSummaryLabel = new Label();
+        executionSummaryLabel.getStyleClass().add("exec-summary");
+        HBox executionHeader = new HBox(executionSummaryLabel);
+        executionHeader.getStyleClass().add("exec-header");
+        VBox executionWrapper = new VBox(executionHeader, executionTable);
+        executionContainer.getChildren().add(executionWrapper);
+        updateExecutionSummary();
 
-        ListView<String> diagnosticListView = new ListView<>(diagnosticLog);
-        diagnosticListView.getStyleClass().add("diagnostic-log");
+        ListView<DiagnosticEntry> diagnosticListView = new ListView<>(diagnosticLog);
+        // Clase propia, NO "diagnostic-log" (esa la comparten history-
+        // ListView/favoritesListView, que sí son listas de verdad con filas
+        // clicables — el log de Diagnóstico es texto corrido sin bordes ni
+        // resaltado por fila, contra faro-java-prototipo.html; reusar la
+        // misma clase le había puesto bordes por línea que no van ahí,
+        // hallazgo real del usuario).
+        diagnosticListView.getStyleClass().add("diagnostic-panel");
+        diagnosticListView.setCellFactory(list -> new ListCell<>() {
+            @Override
+            protected void updateItem(DiagnosticEntry entry, boolean empty) {
+                super.updateItem(entry, empty);
+                if (empty || entry == null) {
+                    setGraphic(null);
+                    return;
+                }
+                Label time = new Label(entry.time().format(DateTimeFormatter.ofPattern("HH:mm:ss")));
+                time.getStyleClass().add("log-timestamp");
+                Label level = new Label(entry.level().name());
+                level.getStyleClass().add("log-level-" + entry.level().name().toLowerCase());
+                Label message = new Label(entry.message());
+                message.getStyleClass().add("log-message");
+                HBox row = new HBox(8, time, level, message);
+                row.setAlignment(Pos.CENTER_LEFT);
+                setGraphic(row);
+            }
+        });
+        // Diagnóstico vuelve a ser su propia pestaña (ver el comentario del
+        // FXML) — ya no hace falta la cabecera "Registro" que llevaba
+        // cuando vivía anidada dentro de Ejecución; el nombre de la pestaña
+        // ya cumple ese papel, igual que faro-java-prototipo.html (el log
+        // llena toda la pestaña directo, sin cabecera propia adentro).
         diagnosticContainer.getChildren().add(diagnosticListView);
+
+        // Contadores directo en cada pestaña ("Resultados 1,240" etc.),
+        // contra faro-java-prototipo.html — el usuario se quejó de tener
+        // que mirar la barra de arriba (lejos de los resultados) para ver
+        // cuántas filas salieron; el diseño real pone el número justo en
+        // la pestaña, donde ya está mirando.
+        setTabBadge(resultsTab, "Resultados", 0);
+        setTabBadge(executionTab, "Ejecución", 0);
+        setTabBadge(diagnosticTab, "Diagnóstico", 0);
 
         historyListView.setItems(queryHistory);
         historyListView.getStyleClass().add("diagnostic-log");
@@ -265,12 +414,16 @@ public class MainController {
         refreshFavorites();
 
         runButton.setGraphic(runButtonGraphic());
+        runButton.setOnAction(e -> onRunButtonClicked());
+        newQueryButton.setGraphic(Icons.strokeIcon(Icons.PLUS));
         openButton.setGraphic(Icons.strokeIcon(Icons.FOLDER));
         saveButton.setGraphic(Icons.strokeIcon(Icons.SAVE));
         formatButton.setGraphic(Icons.strokeIcon(Icons.ALIGN_LEFT));
         favoriteButton.setGraphic(Icons.strokeIcon(Icons.STAR));
         addDatabaseButton.setGraphic(Icons.strokeIcon(Icons.PLUS));
         updateThemeToggleIcon();
+        logger.info("MainController.initialize() completo — {} servidor(es), {} base(s) sin agrupar registradas.",
+                registry.servers().size(), registry.ungroupedDatabases().size());
     }
 
     /**
@@ -303,8 +456,9 @@ public class MainController {
      * principal — ver el callback pasado a {@code PreferencesDialog.show}.
      */
     private void applyCurrentTheme() {
-        connectionTree.getScene().getStylesheets().setAll(MainController.class
-                .getResource(Theme.stylesheetResourcePath(preferences.isDarkTheme())).toExternalForm());
+        Scene scene = connectionTree.getScene();
+        scene.getStylesheets().clear();
+        Theme.applyTo(scene, preferences.isDarkTheme());
         updateThemeToggleIcon();
     }
 
@@ -315,7 +469,18 @@ public class MainController {
 
     /** Agrega una línea con hora al log de la pestaña Diagnóstico — más reciente arriba. */
     private void log(String message) {
-        diagnosticLog.add(0, LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")) + "  " + message);
+        log(LogLevel.INFO, message);
+    }
+
+    private void log(LogLevel level, String message) {
+        diagnosticLog.add(0, new DiagnosticEntry(LocalTime.now(), level, message));
+        setTabBadge(diagnosticTab, "Diagnóstico", diagnosticLog.size());
+        switch (level) {
+            case ERROR -> logger.error(message);
+            case WARN -> logger.warn(message);
+            case DEBUG -> logger.debug(message);
+            case INFO -> logger.info(message);
+        }
     }
 
     /** Ícono + "Ejecutar" + "F5" atenuado — el prototipo muestra el atajo junto al botón, no solo en el menú. */
@@ -327,6 +492,42 @@ public class MainController {
         HBox box = new HBox(7, Icons.fillIcon(Icons.PLAY), label, shortcut);
         box.setAlignment(Pos.CENTER_LEFT);
         return box;
+    }
+
+    /** Ícono de detener + "Cancelar" — reemplaza a {@link #runButtonGraphic()} mientras {@link #queryRunning} es verdadero. */
+    private Node cancelButtonGraphic() {
+        Label label = new Label("Cancelar");
+        label.getStyleClass().add("cancel-button-label");
+        HBox box = new HBox(7, Icons.strokeIcon(Icons.STOP), label);
+        box.setAlignment(Pos.CENTER_LEFT);
+        return box;
+    }
+
+    /**
+     * Único punto de clic del botón que antes solo decía "Ejecutar"
+     * (`fx:id="runButton"`) — hallazgo real del usuario probando con 3
+     * millones de filas: "no veo la opción de cancelar... que sea dentro
+     * del mismo botón de correr". Mismo botón que el prototipo alterna
+     * entre {@code idle}/{@code busy}: si no hay una consulta corriendo,
+     * dispara {@link #onRunQuery()} como siempre; si ya hay una en curso,
+     * dispara {@link #onCancelQuery()} en su lugar — el aspecto visual
+     * (ícono/texto/color) lo cambian {@code task.setOnRunning}/
+     * {@code setOnSucceeded}/{@code setOnFailed} dentro de
+     * {@link #onRunQuery()}.
+     */
+    private void onRunButtonClicked() {
+        if (queryRunning) {
+            onCancelQuery();
+        } else {
+            onRunQuery();
+        }
+    }
+
+    /** Vuelve el botón a su estado "Ejecutar" normal — llamado cuando el `Task` de {@link #onRunQuery()} termina, sin importar si fue con éxito, error, o cancelación (las tres pasan por `setOnSucceeded`/`setOnFailed`, ver ahí). */
+    private void resetRunButton() {
+        queryRunning = false;
+        runButton.getStyleClass().setAll("button");
+        runButton.setGraphic(runButtonGraphic());
     }
 
     // ---- Pestañas de consulta ----
@@ -363,7 +564,7 @@ public class MainController {
         tab.setUserData(state);
 
         // Agregado DESPUÉS de replaceText() de arriba — si no, cargar el
-        // texto inicial (demo o archivo abierto) marcaría la pestaña como
+        // texto inicial (ej. un archivo abierto) marcaría la pestaña como
         // "con cambios sin guardar" apenas se crea, lo cual sería falso.
         codeArea.textProperty().addListener((obs, oldText, newText) -> {
             if (!state.dirty) {
@@ -399,11 +600,12 @@ public class MainController {
         alert.setTitle("Cambios sin guardar");
         alert.setHeaderText("La pestaña \"" + tab.getText().replace("● ", "") + "\" tiene cambios sin guardar.");
         alert.setContentText("¿Qué quieres hacer antes de cerrarla?");
-        ButtonType saveType = new ButtonType("Guardar");
+        ButtonType saveType = new ButtonType("Guardar", ButtonBar.ButtonData.OK_DONE);
         ButtonType discardType = new ButtonType("Descartar cambios");
         ButtonType cancelType = new ButtonType("Cancelar", ButtonBar.ButtonData.CANCEL_CLOSE);
         alert.getButtonTypes().setAll(saveType, discardType, cancelType);
         alert.initOwner(connectionTree.getScene().getWindow());
+        applyThemeToAlert(alert);
 
         Optional<ButtonType> choice = alert.showAndWait();
         if (choice.isEmpty() || choice.get() == cancelType) {
@@ -544,14 +746,26 @@ public class MainController {
         log("SQL formateado.");
     }
 
-    /** Editar → Autocompletado (Ctrl+Espacio) — ver el javadoc de {@link SqlAutocomplete}. */
+    /**
+     * Editar → Autocompletado (Ctrl+Espacio) — ver el javadoc de
+     * {@link SqlAutocomplete}. La base "activa" para sugerir tabla/columnas
+     * reales es la primera marcada en el árbol (mismo criterio que
+     * "Explicar plan") — si no hay ninguna marcada, sigue funcionando
+     * igual que antes, solo con palabras clave.
+     */
     @FXML
     private void onAutocomplete() {
         QueryTabState state = currentTabState();
         if (state == null) {
             return;
         }
-        SqlAutocomplete.show(state.codeArea);
+        List<DatabaseEntry> selected = ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot())
+            .stream()
+            .filter(CheckBoxTreeItem::isSelected)
+            .map(item -> (DatabaseEntry) item.getValue())
+            .toList();
+        DatabaseEntry activeDb = selected.isEmpty() ? null : selected.get(0);
+        SqlAutocomplete.show(state.codeArea, activeDb, credentials, pool);
     }
 
     // ---- Diálogos ----
@@ -564,6 +778,25 @@ public class MainController {
                 refreshTree();
                 log("Base agregada: " + entry.alias());
             });
+    }
+
+    /**
+     * "Todas" del panel de Conexiones — marca (o desmarca, si ya estaban
+     * todas marcadas) todas las bases del árbol de un solo clic, sin
+     * importar si están agrupadas bajo un servidor o sueltas. El contador
+     * "N bases seleccionadas" de la barra de herramientas ya está atado
+     * (`Bindings`) a {@code selectedProperty()} de cada una — se actualiza
+     * solo, no hace falta tocarlo acá.
+     */
+    @FXML
+    private void onSelectAllDatabases() {
+        List<CheckBoxTreeItem<Object>> items = ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot());
+        boolean allSelected = !items.isEmpty() && items.stream().allMatch(CheckBoxTreeItem::isSelected);
+        logger.debug("onSelectAllDatabases: {} ítem(s), {} → {}", items.size(),
+                allSelected ? "todas marcadas" : "no todas marcadas", allSelected ? "desmarcar todas" : "marcar todas");
+        for (CheckBoxTreeItem<Object> item : items) {
+            item.setSelected(!allSelected);
+        }
     }
 
     @FXML
@@ -586,6 +819,18 @@ public class MainController {
         }
     }
 
+    /** "Descubrir bases en esta IP…" del menú contextual de una fila (ver {@link ConnectionTreeCell}) — mismo diálogo que {@link #onDiscoverDatabases()}, precargado con el host de esa base para no tener que retiparlo. */
+    private void onDiscoverForDatabase(DatabaseEntry db) {
+        List<DatabaseEntry> found =
+                DiscoverDialog.show(connectionTree.getScene().getWindow(), credentials, preferences, db.host());
+        if (!found.isEmpty()) {
+            registry.ungroupedDatabases().addAll(found);
+            refreshTree();
+            statusLabel.setText(found.size() + " base(s) agregada(s) desde el escaneo.");
+            log(found.size() + " base(s) agregada(s) desde el escaneo de " + db.host() + ".");
+        }
+    }
+
     @FXML
     private void onImportCsv() {
         CsvImportDialog.show(connectionTree.getScene().getWindow(), registry.allDatabases(), credentials, pool,
@@ -594,7 +839,13 @@ public class MainController {
 
     @FXML
     private void onOpenPreferences() {
+        // .show() bloquea (showAndWait) hasta que el diálogo cierra, así que
+        // acá abajo ya es seguro destildar el engrane — sin esto, al ser
+        // ToggleButton (ver por qué en styles.css) se hubiera quedado
+        // marcado como "activo" para siempre después del primer clic, nadie
+        // más lo destilda.
         PreferencesDialog.show(connectionTree.getScene().getWindow(), preferences, this::applyCurrentTheme);
+        settingsRailButton.setSelected(false);
     }
 
     @FXML
@@ -611,7 +862,36 @@ public class MainController {
                 + "Consulta ligera y masiva contra muchas bodegas/sucursales a la vez.\n\n"
                 + "Java " + System.getProperty("java.version") + " · JavaFX");
         alert.initOwner(connectionTree.getScene().getWindow());
+        applyThemeToAlert(alert);
         alert.showAndWait();
+    }
+
+    /**
+     * {@code Alert}/{@code TextInputDialog} (los dos extienden
+     * {@code Dialog}) arman su propia {@code Scene} interna que NO hereda
+     * automáticamente las hojas de estilo de la ventana principal — sin
+     * esto, se mostraban con el diálogo nativo de Modena sin tema,
+     * desfasados del resto de la app (hallazgo real durante el barrido
+     * pedido por el usuario tras encontrar varios de estos casos).
+     *
+     * <p>De paso les da jerarquía visual real a los botones — antes todos
+     * se veían igual de "importantes" (límite conocido, documentado desde
+     * el barrido de estilos, nunca arreglado hasta ahora). {@link
+     * ButtonBar.ButtonData#isDefaultButton()} ya distingue cuál botón es
+     * la acción principal (`OK_DONE`, `YES`, etc. — `ButtonType.OK` lo trae
+     * así de fábrica) sin tener que adivinar comparando texto; ese botón
+     * se pinta como {@code .button} (el acento sólido que ya usa el resto
+     * de la app), el resto como {@code .button-secondary}.
+     */
+    private void applyThemeToAlert(Dialog<?> dialog) {
+        Theme.applyTo(dialog.getDialogPane().getScene(), preferences.isDarkTheme());
+        for (ButtonType buttonType : dialog.getDialogPane().getButtonTypes()) {
+            Node button = dialog.getDialogPane().lookupButton(buttonType);
+            if (button != null) {
+                button.getStyleClass().add(
+                        buttonType.getButtonData().isDefaultButton() ? "button" : "button-secondary");
+            }
+        }
     }
 
     @FXML
@@ -691,7 +971,9 @@ public class MainController {
             String content = Files.readString(file.toPath());
             addQueryTab(content, file);
             statusLabel.setText("Abierto: " + file.getName());
+            logger.info("onOpenFile: {} ({} caracteres)", file.getAbsolutePath(), content.length());
         } catch (IOException e) {
+            logger.warn("No se pudo abrir el archivo {}", file.getAbsolutePath(), e);
             statusLabel.setText("Error al abrir el archivo: " + e.getMessage());
         }
     }
@@ -740,6 +1022,7 @@ public class MainController {
             statusLabel.setText("Guardado: " + file.getName());
             log("Script guardado en " + file.getName());
         } catch (IOException e) {
+            logger.warn("No se pudo guardar el script en {}", file.getAbsolutePath(), e);
             statusLabel.setText("Error al guardar: " + e.getMessage());
         }
     }
@@ -753,28 +1036,101 @@ public class MainController {
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Exportar resultados a CSV");
         chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("CSV", "*.csv"));
+        // Nombre sugerido inteligente, a pedido del usuario ("que se
+        // autocomplete el nombre del csv por el nombre de la bd consultada,
+        // la fecha y hora, tabla, y filtros clave") — analiza el SQL que
+        // produjo el resultado actual (capturado en onRunQuery/onExplainPlan,
+        // no releído del editor, que para este punto pudo haber cambiado).
+        // Ver CsvFileNamer para los límites conocidos de esta heurística.
+        chooser.setInitialFileName(CsvFileNamer.suggest(lastResultDatabaseLabel, lastResultSql, LocalDateTime.now()) + ".csv");
         File file = chooser.showSaveDialog(connectionTree.getScene().getWindow());
         if (file == null) {
             return;
         }
-        try {
-            StringBuilder csv = new StringBuilder();
-            List<String> headers = resultsTable.getColumns().stream()
-                    .map(TableColumn::getText)
-                    .toList();
-            csv.append(String.join(",", headers)).append('\n');
-            for (ObservableList<Object> row : resultsTable.getItems()) {
-                List<String> cells = row.stream()
-                        .map(value -> csvEscape(value == null ? "" : value.toString()))
-                        .toList();
-                csv.append(String.join(",", cells)).append('\n');
+
+        // Encabezados en el hilo de la UI (barato, solo nombres de
+        // columna) — pero YA NO se copia todo el resultado a una lista
+        // aparte de strings escapados antes de arrancar el Task. Con un
+        // resultado grande de verdad (varias bodegas x 500,000 filas cada
+        // una) esa copia entera duplicaba en memoria TODO lo que
+        // resultsTable ya tenía guardado — el congelamiento de 5 segundos
+        // y el OutOfMemoryError que reportó el usuario pasaban AQUÍ,
+        // adentro de este método, antes siquiera de que el Task arrancara
+        // (por eso tampoco se veía el spinner de "Exportando…": solo se
+        // activa cuando el Task arranca, y esto tronaba antes de llegar
+        // ahí).
+        //
+        // Arreglo real: solo se guarda la REFERENCIA a la lista de filas
+        // actual, no una copia — segura de iterar desde otro hilo porque
+        // ResultsTableFactory#populate SIEMPRE reemplaza la lista completa
+        // (table.setItems(nueva)), nunca la muta en el lugar; si el
+        // usuario corre otra consulta mientras exporta, esta referencia
+        // vieja se queda intacta y sigue siendo válida, la tabla visible
+        // simplemente pasa a apuntar a una lista nueva y distinta. El
+        // escapado de cada valor se hace FILA POR FILA dentro del Task,
+        // escrito al archivo y descartado al vuelo — nunca vuelve a
+        // existir una segunda copia completa del resultado en memoria.
+        List<String> headers = resultsTable.getColumns().stream()
+                .map(TableColumn::getText)
+                .toList();
+        ObservableList<ObservableList<Object>> rows = resultsTable.getItems();
+        logger.info("onExportResultsCsv: exportando {} fila(s) a {}", rows.size(), file.getAbsolutePath());
+
+        Task<Void> task = new Task<>() {
+            @Override
+            protected Void call() throws IOException {
+                try (BufferedWriter writer = Files.newBufferedWriter(file.toPath())) {
+                    writer.write(String.join(",", headers));
+                    writer.newLine();
+                    int written = 0;
+                    int total = rows.size();
+                    StringBuilder line = new StringBuilder();
+                    for (List<Object> row : rows) {
+                        line.setLength(0);
+                        for (int i = 0; i < row.size(); i++) {
+                            if (i > 0) {
+                                line.append(',');
+                            }
+                            Object value = row.get(i);
+                            line.append(csvEscape(value == null ? "" : value.toString()));
+                        }
+                        writer.write(line.toString());
+                        writer.newLine();
+                        written++;
+                        if (written % 500 == 0) {
+                            updateMessage(written + " de " + total + " fila(s)…");
+                        }
+                    }
+                }
+                return null;
             }
-            Files.writeString(file.toPath(), csv.toString());
+        };
+        task.messageProperty().addListener((obs, oldMsg, newMsg) -> {
+            statusLabel.setText("Exportando: " + newMsg);
+            exportSpinnerLabel.setText(newMsg);
+        });
+        task.setOnRunning(e -> {
+            statusLabel.setText("Exportando a " + file.getName() + "…");
+            exportSpinnerLabel.setText("Exportando…");
+            showExportSpinner(true);
+        });
+        task.setOnSucceeded(e -> {
             statusLabel.setText("Exportado: " + file.getName());
-            log("Resultados exportados a " + file.getName() + " (" + resultsTable.getItems().size() + " fila(s)).");
-        } catch (IOException e) {
-            statusLabel.setText("Error al exportar: " + e.getMessage());
-        }
+            log("Resultados exportados a " + file.getName() + " (" + rows.size() + " fila(s)).");
+            showExportSpinner(false);
+            refreshStatusBar();
+        });
+        task.setOnFailed(e -> {
+            statusLabel.setText("Error al exportar: " + task.getException().getMessage());
+            logger.error("onExportResultsCsv: falló exportando a {}", file.getAbsolutePath(), task.getException());
+            log(LogLevel.ERROR, "Error al exportar a " + file.getName() + ": " + task.getException().getMessage());
+            showExportSpinner(false);
+            refreshStatusBar();
+        });
+
+        Thread thread = new Thread(task, "faro-export-csv");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private static String csvEscape(String value) {
@@ -784,19 +1140,93 @@ public class MainController {
         return value;
     }
 
+    /** Muestra/oculta el spinner de "Exportando…" de la barra de estado, igual que faro-java-prototipo.html — antes solo había texto plano, sin ninguna señal de que algo seguía en curso. */
+    private void showExportSpinner(boolean exporting) {
+        exportSpinnerBox.setVisible(exporting);
+        exportSpinnerBox.setManaged(exporting);
+        if (exporting) {
+            exportSpinAnimation.playFromStart();
+        } else {
+            exportSpinAnimation.stop();
+        }
+    }
+
     /**
-     * Corre el texto de la pestaña de consulta activa contra todas las
-     * bases marcadas en el árbol — ver {@link QueryExecutionService}.
-     * Conectado al botón "Ejecutar" de la barra de herramientas y al
-     * ítem de menú "Consulta → Ejecutar en las bases seleccionadas".
+     * Refresca la barra de estado de abajo con datos reales — pool de
+     * conexiones (HikariCP), timeout/fetch configurados, memoria usada por
+     * la JVM, y motor(es)/JDK reales. Igual que faro-java-prototipo.html,
+     * que muestra exactamente estos mismos datos (antes la barra solo
+     * tenía "Faro" y el mensaje de estado puntual). Se llama al arrancar y
+     * después de cada ejecución/exportación — no hay un timer periódico
+     * dedicado solo para esto, no vale la pena la máquina extra por un
+     * dato que igual se refresca seguido con el uso normal de la app.
+     */
+    private void refreshStatusBar() {
+        ConnectionPoolManager.PoolSummary poolSummary = pool.poolSummary();
+        String dotStyleClass = poolSummary.databaseCount() > 0 ? "pool-dot-connected" : "pool-dot-idle";
+        if (!poolStatusDot.getStyleClass().contains(dotStyleClass)) {
+            poolStatusDot.getStyleClass().removeIf(c -> c.startsWith("pool-dot-"));
+            poolStatusDot.getStyleClass().add(dotStyleClass);
+        }
+        poolStatusLabel.setText(
+                poolSummary.databaseCount() + (poolSummary.databaseCount() == 1 ? " conexión · pool " : " conexiones · pool ")
+                        + poolSummary.activeConnections() + "/" + poolSummary.totalConnections());
+
+        timeoutFetchLabel.setText("Timeout " + preferences.defaultQueryTimeoutSeconds() + " s · fetch " + preferences.fetchSize());
+
+        long usedMb = (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024 * 1024);
+        memoryLabel.setText("Memoria " + usedMb + " MB");
+
+        String engines = engineVersions.entrySet().stream()
+                .sorted(Comparator.comparing(e -> e.getKey().label()))
+                .map(e -> e.getKey().label() + " " + e.getValue())
+                .collect(Collectors.joining(" · "));
+        String jdk = "JDK " + Runtime.version().feature();
+        engineJdkLabel.setText(engines.isEmpty() ? jdk : engines + " · " + jdk);
+    }
+
+    /**
+     * SQL a correr para "Ejecutar"/"Explicar plan": si el usuario tiene
+     * texto seleccionado con el mouse en el editor, se corre SOLO eso — si
+     * no hay selección, el script completo, como antes. Hallazgo real del
+     * usuario (2026-08-22): "si yo selecciono un script parcial con el
+     * mouse no se corre eso específicamente, si no que toma igual todo el
+     * script" — antes {@code onRunQuery}/{@code onExplainPlan} leían
+     * {@code codeArea.getText()} directo, ignorando por completo cualquier
+     * selección. Mismo criterio que cualquier cliente SQL de escritorio
+     * (pgAdmin, SSMS, DataGrip): seleccionar una sentencia y correrla sola,
+     * sin tocar el resto del script, es un flujo de trabajo real, no un
+     * caso raro.
+     */
+    private static String sqlToRun(QueryTabState state) {
+        String selected = state.codeArea.getSelectedText();
+        return selected.isBlank() ? state.codeArea.getText() : selected;
+    }
+
+    /**
+     * Corre el texto de la pestaña de consulta activa (o solo la selección,
+     * ver {@link #sqlToRun}) contra todas las bases marcadas en el árbol —
+     * ver {@link QueryExecutionService}. Conectado al botón "Ejecutar" de
+     * la barra de herramientas y al ítem de menú "Consulta → Ejecutar en
+     * las bases seleccionadas".
      */
     @FXML
     private void onRunQuery() {
+        // El botón de la barra ya no puede disparar esto mientras corre
+        // (se vuelve "Cancelar", ver #onRunButtonClicked) — pero el
+        // acelerador F5 del menú sigue llamando a este método directo, sin
+        // pasar por ese dispatcher. Sin este guard, F5 a medio de una
+        // corrida larga (ej. 3 millones de filas) arrancaría una SEGUNDA
+        // ejecución encima de la primera, dos Task escribiendo a la vez
+        // sobre currentExecutionRows/executionTable.
+        if (queryRunning) {
+            return;
+        }
         QueryTabState state = currentTabState();
         if (state == null) {
             return;
         }
-        String sql = state.codeArea.getText();
+        String sql = sqlToRun(state);
         if (sql.isBlank()) {
             statusLabel.setText("Escribe una consulta primero.");
             return;
@@ -813,37 +1243,144 @@ public class MainController {
         }
 
         addToHistory(sql);
+        // Directo a SLF4J, sin pasar por log()/LogLevel — el usuario ya pidió explícitamente
+        // que "Ejecutando consulta..." NO aparezca en la pestaña Diagnóstico (se sentía
+        // duplicado con las filas de Ejecución), pero para el archivo de log sigue siendo el
+        // punto de partida de toda la trazabilidad de esta corrida.
+        logger.info("onRunQuery: {} base(s) seleccionadas — {}", selected.size(),
+                selected.stream().map(DatabaseEntry::alias).collect(Collectors.joining(", ")));
 
         Map<String, ExecutionStatus> statusByDatabaseId = new LinkedHashMap<>();
         for (DatabaseEntry db : selected) {
-            statusByDatabaseId.put(db.id(), new ExecutionStatus(db.alias()));
+            statusByDatabaseId.put(db.id(), new ExecutionStatus(db.alias(), db.host() + ":" + db.port()));
         }
         currentExecutionRows = List.copyOf(statusByDatabaseId.values());
+        lastExecutionStartTime = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
         executionTable.setItems(FXCollections.observableArrayList(currentExecutionRows));
+        for (ExecutionStatus status : currentExecutionRows) {
+            status.stateProperty().addListener((obs, oldState, newState) -> updateExecutionSummary());
+        }
+        updateExecutionSummary();
 
         Task<QueryResult> task = QueryExecutionService.execute(
                 new ArrayList<>(selected), credentials, pool, statusByDatabaseId, sql,
-                preferences.maxConcurrentDatabases());
-        task.setOnRunning(e -> statusLabel.setText("Ejecutando en " + selected.size() + " base(s)…"));
-        log("Ejecutando consulta en " + selected.size() + " base(s).");
+                preferences.maxConcurrentDatabases(), preferences.fetchSize(), engineVersions);
+        // Cambio de pestaña automático, a pedido del usuario: Ejecución
+        // apenas arranca (para que se vea la corrida en vivo, mismo criterio
+        // que "el usuario tiene que ver que se está cargando la
+        // información"), Resultados apenas termina con éxito. En un fallo
+        // catastrófico del task (setOnFailed, más abajo) se deja al usuario
+        // en Ejecución en vez de brincar a Resultados — ahí es donde se ve
+        // qué base falló, un Resultados vacío no ayudaría.
+        task.setOnRunning(e -> {
+            executionTab.getTabPane().getSelectionModel().select(executionTab);
+            queryRunning = true;
+            runButton.getStyleClass().setAll("button-danger");
+            runButton.setGraphic(cancelButtonGraphic());
+        });
+        // Nada de mensajes de "ejecutando"/"terminado"/"error" en la barra
+        // de estado de arriba (junto al botón de tema) — el usuario dejó
+        // explícito que no le sirve de nada ahí, viendo los resultados
+        // abajo. Tampoco en el log de Diagnóstico — con Ejecución y
+        // Diagnóstico ya fusionadas en la misma pestaña, "Ejecutando
+        // consulta en N base(s)"/"Consulta terminada: ..." quedaba
+        // duplicado con lo que cada fila de Ejecución ya muestra (estado,
+        // filas, tiempo, y el mensaje de error completo) — hallazgo real
+        // del usuario ("veo ahí cosas repetidas"). El único log que sigue
+        // teniendo sentido es el de más abajo (task.setOnFailed) — un
+        // fallo catastrófico del task completo no queda reflejado en
+        // ninguna fila individual.
+        // Insumos para el nombre sugerido de "Exportar CSV" (ver
+        // CsvFileNamer) — capturados aquí, no leídos de vuelta del editor al
+        // exportar, porque para entonces el usuario ya pudo haber cambiado
+        // de pestaña o editado el script.
+        String resultDatabaseLabel = selected.size() == 1 ? selected.get(0).alias() : selected.size() + "-bases";
         task.setOnSucceeded(e -> {
             QueryResult result = task.getValue();
-            if (!result.columns().isEmpty()) {
+            // "Resultados" sin columnas significa que NINGUNA base tuvo
+            // éxito (columnsRef solo se llena tras un executeQuery real, ver
+            // QueryExecutionService#runOne) — el Task en sí "tuvo éxito"
+            // igual (no lanzó excepción, cada base fallida se registra como
+            // error y se sigue con las demás), así que saltar a Resultados
+            // sin condición mandaba al usuario a una tabla vacía cada vez
+            // que TODAS las bases fallaban. Hallazgo real del usuario,
+            // probando con los contenedores Docker apagados (6/6 con
+            // error): "por qué verga voy a ver resultados si hay error".
+            boolean anySucceeded = !result.columns().isEmpty();
+            logger.info("onRunQuery: corrida terminada — {} fila(s), {} base(s) con error{}", result.rows().size(),
+                    result.errors().size(), result.errors().isEmpty() ? "" : ": " + result.errors());
+            if (anySucceeded) {
                 ResultsTableFactory.populate(resultsTable, result.columns(), result.rows());
             }
-            String errorSummary = result.errors().isEmpty() ? "" : " · " + result.errors().size() + " error(es): "
-                + String.join(" | ", result.errors());
-            statusLabel.setText(result.rows().size() + " fila(s)" + errorSummary);
-            log("Consulta terminada: " + result.rows().size() + " fila(s)" + errorSummary);
+            setTabBadge(resultsTab, "Resultados", result.rows().size());
+            updateResultsSummary(result.rows().size());
+            lastResultDatabaseLabel = resultDatabaseLabel;
+            lastResultSql = sql;
+            if (anySucceeded) {
+                resultsTab.getTabPane().getSelectionModel().select(resultsTab);
+            }
+            refreshStatusBar();
+            resetRunButton();
         });
         task.setOnFailed(e -> {
-            statusLabel.setText("Error al ejecutar: " + task.getException().getMessage());
-            log("Error al ejecutar: " + task.getException().getMessage());
+            resetRunButton();
+            // Traza completa (con stack) solo al archivo — el mensaje corto ya va al usuario
+            // vía log()/Diagnóstico, pero para depurar un fallo catastrófico real del Task
+            // (no un error normal de una base, que ya se ve por fila en Ejecución) hace falta
+            // el stack completo.
+            logger.error("onRunQuery: fallo catastrófico del Task", task.getException());
+            log(LogLevel.ERROR, "Error al ejecutar: " + task.getException().getMessage());
+            refreshStatusBar();
         });
 
         Thread thread = new Thread(task, "faro-query-exec");
         thread.setDaemon(true);
         thread.start();
+    }
+
+    /** Habilita/deshabilita "Exportar CSV" (sin filas no hay nada que exportar) — la cuenta de filas en sí vive en el badge de la pestaña Resultados, ver {@link #setTabBadge}. */
+    private void updateResultsSummary(int rowCount) {
+        exportCsvButton.setDisable(rowCount == 0);
+    }
+
+    /** Cabecera de la pestaña Ejecución — "N bases · M correctas · K con error(es)", contra faro-java-prototipo.html. */
+    private void updateExecutionSummary() {
+        if (currentExecutionRows.isEmpty()) {
+            executionSummaryLabel.setText("Sin ejecuciones todavía.");
+            return;
+        }
+        long succeeded = currentExecutionRows.stream()
+                .filter(s -> s.stateProperty().get() == ExecutionStatus.State.SUCCEEDED).count();
+        long failed = currentExecutionRows.stream()
+                .filter(s -> s.stateProperty().get() == ExecutionStatus.State.FAILED).count();
+        long cancelled = currentExecutionRows.stream()
+                .filter(s -> s.stateProperty().get() == ExecutionStatus.State.CANCELLED).count();
+        StringBuilder summary = new StringBuilder(lastExecutionStartTime + " · " + currentExecutionRows.size() + " base(s) · " + succeeded + " correcta(s)");
+        if (failed > 0) {
+            summary.append(" · ").append(failed).append(" con error(es)");
+        }
+        if (cancelled > 0) {
+            summary.append(" · ").append(cancelled).append(" cancelada(s)");
+        }
+        executionSummaryLabel.setText(summary.toString());
+        setTabBadge(executionTab, "Ejecución", currentExecutionRows.size());
+    }
+
+    /** Nombre + contador tipo pill directo en la pestaña — "Resultados 1,240", contra faro-java-prototipo.html. 0 no muestra pill (nada que contar todavía). */
+    private void setTabBadge(Tab tab, String name, int count) {
+        Label nameLabel = new Label(name);
+        nameLabel.getStyleClass().add("tab-name");
+        HBox graphic;
+        if (count > 0) {
+            Label badge = new Label(String.valueOf(count));
+            badge.getStyleClass().add("tab-badge");
+            graphic = new HBox(6, nameLabel, badge);
+        } else {
+            graphic = new HBox(nameLabel);
+        }
+        graphic.setAlignment(Pos.CENTER_LEFT);
+        tab.setText(null);
+        tab.setGraphic(graphic);
     }
 
     /**
@@ -854,15 +1391,14 @@ public class MainController {
      */
     @FXML
     private void onCancelQuery() {
-        long cancelling = currentExecutionRows.stream()
+        List<ExecutionStatus> running = currentExecutionRows.stream()
                 .filter(status -> status.stateProperty().get() == ExecutionStatus.State.RUNNING)
-                .peek(ExecutionStatus::cancelQuery)
-                .count();
-        statusLabel.setText(cancelling == 0
-                ? "No hay ninguna base ejecutándose."
-                : "Cancelando " + cancelling + " base(s)…");
-        if (cancelling > 0) {
-            log("Cancelando " + cancelling + " base(s).");
+                .toList();
+        logger.info("onCancelQuery: clic en 'Cancelar' — {} base(s) en RUNNING: {}", running.size(),
+                running.stream().map(status -> status.databaseAliasProperty().get()).collect(Collectors.joining(", ")));
+        running.forEach(ExecutionStatus::cancelQuery);
+        if (!running.isEmpty()) {
+            log("Cancelando " + running.size() + " base(s).");
         }
     }
 
@@ -899,6 +1435,7 @@ public class MainController {
         dialog.setHeaderText(null);
         dialog.setContentText("Nombre del favorito:");
         dialog.initOwner(connectionTree.getScene().getWindow());
+        applyThemeToAlert(dialog);
         Optional<String> name = dialog.showAndWait();
         if (name.isEmpty() || name.get().isBlank()) {
             return;
@@ -989,7 +1526,7 @@ public class MainController {
         if (state == null) {
             return;
         }
-        String sql = state.codeArea.getText();
+        String sql = sqlToRun(state);
         if (sql.isBlank()) {
             statusLabel.setText("Escribe una consulta primero.");
             return;
@@ -1010,16 +1547,18 @@ public class MainController {
         }
 
         Task<QueryResult> task = QueryExecutionService.explain(db, credentials, pool, sql);
-        task.setOnRunning(e -> statusLabel.setText("Pidiendo plan de ejecución a " + db.alias() + "…"));
         task.setOnSucceeded(e -> {
             QueryResult result = task.getValue();
             ResultsTableFactory.populate(resultsTable, result.columns(), result.rows());
-            statusLabel.setText("Plan de ejecución de " + db.alias() + " en la pestaña Resultados.");
+            setTabBadge(resultsTab, "Resultados", result.rows().size());
+            updateResultsSummary(result.rows().size());
+            lastResultDatabaseLabel = db.alias();
+            lastResultSql = sql;
             log("Plan de ejecución pedido para " + db.alias() + ".");
         });
         task.setOnFailed(e -> {
-            statusLabel.setText("Error al pedir el plan: " + task.getException().getMessage());
-            log("Error al pedir el plan de " + db.alias() + ": " + task.getException().getMessage());
+            logger.warn("onExplainPlan: falló para {}", db.alias(), task.getException());
+            log(LogLevel.ERROR, "Error al pedir el plan de " + db.alias() + ": " + task.getException().getMessage());
         });
 
         Thread thread = new Thread(task, "faro-explain");
@@ -1044,6 +1583,7 @@ public class MainController {
             statusLabel.setText("Configuración exportada: " + file.getName());
             log("Configuración exportada a " + file.getName() + " (sin credenciales, a propósito).");
         } catch (IOException e) {
+            logger.warn("No se pudo exportar la configuración a {}", file.getAbsolutePath(), e);
             statusLabel.setText("Error al exportar configuración: " + e.getMessage());
         }
     }
@@ -1064,6 +1604,7 @@ public class MainController {
             statusLabel.setText("Configuración importada: " + file.getName());
             log("Configuración importada de " + file.getName() + " — reemplazó conexiones y favoritos actuales.");
         } catch (IOException | RuntimeException e) {
+            logger.warn("No se pudo importar la configuración desde {}", file.getAbsolutePath(), e);
             statusLabel.setText("Error al importar configuración: " + e.getMessage());
         }
     }
@@ -1096,9 +1637,84 @@ public class MainController {
             });
     }
 
+    /**
+     * Bote de basura/"Eliminar esta base" (ver {@link ConnectionTreeCell}) —
+     * antes no existía ningún camino para quitar una base ya agregada.
+     * Confirmación primero porque es una acción difícil de deshacer (no hay
+     * papelera/undo en esta app) — mismo criterio que
+     * {@link #confirmSaveOrDiscard}, ninguno de los 2 botones queda como
+     * "default" (ni estilo primario ni Enter la dispara) para no arriesgar
+     * un borrado accidental de un Enter de más.
+     */
+    private void confirmAndDeleteDatabase(DatabaseEntry entry) {
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle("Eliminar base de datos");
+        alert.setHeaderText("¿Eliminar \"" + entry.alias() + "\"?");
+        alert.setContentText("Esta acción no se puede deshacer. Las credenciales guardadas para esta base también se van a borrar.");
+        ButtonType deleteType = new ButtonType("Eliminar");
+        ButtonType cancelType = new ButtonType("Cancelar", ButtonBar.ButtonData.CANCEL_CLOSE);
+        alert.getButtonTypes().setAll(deleteType, cancelType);
+        alert.initOwner(connectionTree.getScene().getWindow());
+        applyThemeToAlert(alert);
+
+        if (alert.showAndWait().orElse(cancelType) != deleteType) {
+            return;
+        }
+
+        registry.removeDatabase(entry);
+        credentials.remove(entry.id());
+        pool.evict(entry.id());
+        refreshTree();
+        log("Base eliminada: " + entry.alias());
+    }
+
+    /**
+     * Clic derecho → "Nueva consulta para esta base" (ver {@code ConnectionTreeCell}) —
+     * marca SOLO la casilla de {@code db} (desmarca cualquier otra ya
+     * marcada) y abre una pestaña de consulta nueva, para no tener que
+     * adivinar/buscar cuál base marcar antes de escribir el SQL. Pedido
+     * explícito del usuario, que encontró poco intuitivo el botón "+"
+     * genérico de Nueva consulta (sin ninguna base asociada de entrada).
+     */
+    private void onNewQueryForDatabase(DatabaseEntry db) {
+        for (CheckBoxTreeItem<Object> item : ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot())) {
+            item.setSelected(item.getValue() == db);
+        }
+        addQueryTab("", null);
+        statusLabel.setText("Nueva consulta para " + db.alias() + " — su casilla ya quedó marcada.");
+        log("Nueva consulta abierta para " + db.alias() + " (casilla marcada automáticamente).");
+    }
+
+    /**
+     * Reconstruye el árbol desde cero (siempre — no hay actualización
+     * incremental) aplicando el filtro de texto actual, si hay uno. Antes
+     * de tirar el árbol viejo, guarda qué bases estaban marcadas y las
+     * vuelve a marcar en el árbol nuevo — sin esto, cada tecleo en el
+     * buscador (que llama a este método) habría borrado la selección del
+     * usuario a medio armar una consulta masiva, un problema real que ya
+     * existía de forma más silenciosa en cualquier llamada a este método
+     * (ej. después de agregar una base), pero que con un buscador en vivo
+     * se hubiera notado en cada letra.
+     */
     private void refreshTree() {
-        connectionTree.setRoot(ConnectionTreeBuilder.buildRoot(registry));
+        Set<String> selectedIds = connectionTree.getRoot() == null
+                ? Set.of()
+                : Set.copyOf(ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot()).stream()
+                        .filter(CheckBoxTreeItem::isSelected)
+                        .map(item -> ((DatabaseEntry) item.getValue()).id())
+                        .toList());
+
+        connectionTree.setRoot(ConnectionTreeBuilder.buildRoot(registry, connectionFilterText));
         bindSelectedCount();
+        bindSelectAllButtonText();
+
+        if (!selectedIds.isEmpty()) {
+            for (CheckBoxTreeItem<Object> item : ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot())) {
+                if (selectedIds.contains(((DatabaseEntry) item.getValue()).id())) {
+                    item.setSelected(true);
+                }
+            }
+        }
     }
 
     private void bindSelectedCount() {
@@ -1115,22 +1731,43 @@ public class MainController {
     }
 
     /**
+     * Texto del botón "Todas" reactivo — antes se quedaba fijo en "Todas"
+     * sin importar el estado real (hallazgo real del usuario: "el texto no
+     * cambia entre todas y ninguna"). Mismo patrón de {@code Bindings} que
+     * {@link #bindSelectedCount()}, sobre los mismos {@code selectedProperty()}
+     * — reacciona tanto a un clic del botón como a marcar/desmarcar bases a
+     * mano una por una.
+     */
+    private void bindSelectAllButtonText() {
+        List<CheckBoxTreeItem<Object>> databaseItems =
+            ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot());
+        Observable[] selectedProperties = databaseItems.stream()
+            .map(CheckBoxTreeItem::selectedProperty)
+            .toArray(Observable[]::new);
+
+        selectAllDatabasesButton.textProperty().bind(Bindings.createStringBinding(() -> {
+            boolean allSelected = !databaseItems.isEmpty() && databaseItems.stream().allMatch(CheckBoxTreeItem::isSelected);
+            return allSelected ? "Ninguna" : "Todas";
+        }, selectedProperties));
+    }
+
+    /**
      * Intenta cargar conexiones/preferencias guardadas de una sesión
      * anterior (ver {@link ConnectionRegistryStore}); si el archivo no
      * existe (primera vez que se corre la app) o está corrupto/con un
      * formato que ya no reconoce, no truena el arranque — cae de vuelta a
-     * los datos de ejemplo, igual que antes de que existiera persistencia.
+     * un registro vacío (sin datos de ejemplo, se quitaron a pedido del
+     * usuario, ver el javadoc de {@link ConnectionRegistry}).
      */
     private ConnectionRegistry loadOrCreateRegistry() {
         if (Files.exists(ConnectionRegistryStore.DEFAULT_FILE)) {
             try {
                 return ConnectionRegistryStore.load(ConnectionRegistryStore.DEFAULT_FILE, preferences, favorites);
             } catch (IOException | RuntimeException e) {
-                System.err.println("No se pudo cargar " + ConnectionRegistryStore.DEFAULT_FILE
-                        + ", usando datos de ejemplo: " + e.getMessage());
+                logger.warn("No se pudo cargar {}, empezando con un registro vacío", ConnectionRegistryStore.DEFAULT_FILE, e);
             }
         }
-        return ConnectionRegistry.withDemoData();
+        return new ConnectionRegistry();
     }
 
     /**
@@ -1145,8 +1782,41 @@ public class MainController {
             try {
                 CredentialVaultStore.load(credentials, CredentialVaultStore.DEFAULT_FILE);
             } catch (IOException | RuntimeException e) {
-                System.err.println("No se pudieron cargar las credenciales guardadas: " + e.getMessage());
+                logger.warn("No se pudieron cargar las credenciales guardadas", e);
             }
+        }
+    }
+
+    /**
+     * Guardado incremental — antes solo se guardaba al cerrar la ventana
+     * ({@link #shutdown()}), así que un cierre anormal (proceso matado)
+     * perdía los cambios de toda la sesión. Reintenta cada
+     * {@link #AUTOSAVE_INTERVAL_MILLIS} sin importar si algo cambió de
+     * verdad desde el último guardado — más simple y seguro que rastrear
+     * un flag "sucio" en cada punto donde se muta {@code registry}/
+     * {@code favorites}/{@code credentials}/{@code preferences} (son
+     * varios: agregar/editar/eliminar base, Descubrir bases, Favoritos,
+     * Preferencias, Credenciales), y el costo de reescribir un JSON chico
+     * de más en más es insignificante.
+     */
+    private void startAutosave() {
+        autosaveTimer = new Timer("faro-autosave", true);
+        autosaveTimer.scheduleAtFixedRate(new TimerTask() {
+            @Override
+            public void run() {
+                Platform.runLater(MainController.this::autosave);
+            }
+        }, AUTOSAVE_INTERVAL_MILLIS, AUTOSAVE_INTERVAL_MILLIS);
+    }
+
+    private void autosave() {
+        try {
+            ConnectionRegistryStore.save(registry, preferences, favorites, ConnectionRegistryStore.DEFAULT_FILE);
+            CredentialVaultStore.save(credentials, CredentialVaultStore.DEFAULT_FILE);
+            logger.debug("Autoguardado completo.");
+        } catch (IOException | RuntimeException e) {
+            logger.error("Autoguardado falló", e);
+            log(LogLevel.ERROR, "Autoguardado falló: " + e.getMessage());
         }
     }
 
@@ -1157,39 +1827,20 @@ public class MainController {
      * {@link CredentialVaultStore}.
      */
     void shutdown() {
+        logger.info("MainController.shutdown() — guardando y cerrando pools.");
+        autosaveTimer.cancel();
         pool.closeAll();
         try {
             ConnectionRegistryStore.save(registry, preferences, favorites, ConnectionRegistryStore.DEFAULT_FILE);
         } catch (IOException e) {
-            System.err.println("No se pudieron guardar conexiones: " + e.getMessage());
+            logger.warn("No se pudieron guardar conexiones al cerrar", e);
         }
         try {
             CredentialVaultStore.save(credentials, CredentialVaultStore.DEFAULT_FILE);
         } catch (IOException | RuntimeException e) {
-            System.err.println("No se pudieron guardar las credenciales: " + e.getMessage());
+            logger.warn("No se pudieron guardar las credenciales al cerrar", e);
         }
+        logger.info("MainController.shutdown() completo.");
     }
 
-    @FXML
-    private void onTestConnection() {
-        String user = System.getenv("FARO_TEST_DB_USER");
-        String password = System.getenv("FARO_TEST_DB_PASSWORD");
-
-        user = "postgres";
-        password = "crisol";
-
-        if (user == null || password == null) {
-            statusLabel.setText(
-                "Faltan FARO_TEST_DB_USER / FARO_TEST_DB_PASSWORD en el entorno.");
-            return;
-        }
-
-        statusLabel.setText("Conectando…");
-        try (Connection conn = DriverManager.getConnection(TEST_JDBC_URL, user, password)) {
-            String version = conn.getMetaData().getDatabaseProductVersion();
-            statusLabel.setText("Conectado — " + version.lines().findFirst().orElse(version));
-        } catch (SQLException e) {
-            statusLabel.setText("Error de conexión: " + e.getMessage());
-        }
-    }
 }

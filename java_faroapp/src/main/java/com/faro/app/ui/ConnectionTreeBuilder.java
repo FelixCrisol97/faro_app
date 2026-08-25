@@ -2,6 +2,7 @@ package com.faro.app.ui;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import com.faro.app.data.ConnectionRegistry;
 import com.faro.app.model.DatabaseEntry;
@@ -25,28 +26,53 @@ public final class ConnectionTreeBuilder {
     }
 
     public static TreeItem<Object> buildRoot(ConnectionRegistry registry) {
+        return buildRoot(registry, "");
+    }
+
+    /**
+     * {@code filterText} vacío se comporta exactamente igual que
+     * {@link #buildRoot(ConnectionRegistry)} (retrocompatible con los ~15
+     * sitios que ya llaman a ese método sin filtro). Con texto, solo
+     * incluye bases cuyo alias lo contenga (sin distinguir mayúsculas) —
+     * un servidor/grupo sin ninguna base que calce no aparece en absoluto,
+     * en vez de mostrarse vacío. Buscador del árbol de conexiones,
+     * pedido 2026-08-22 ("puedo llegar a tener cientos de BDs").
+     */
+    public static TreeItem<Object> buildRoot(ConnectionRegistry registry, String filterText) {
+        String filter = filterText == null ? "" : filterText.trim().toLowerCase(Locale.ROOT);
+
         TreeItem<Object> root = new TreeItem<>("root");
         root.setExpanded(true);
 
         for (Server server : registry.servers()) {
+            List<DatabaseEntry> matching = server.databases().stream().filter(db -> matches(db, filter)).toList();
+            if (matching.isEmpty()) {
+                continue;
+            }
             TreeItem<Object> serverItem = new TreeItem<>(server);
             serverItem.setExpanded(true);
-            for (DatabaseEntry db : server.databases()) {
+            for (DatabaseEntry db : matching) {
                 serverItem.getChildren().add(databaseItem(db));
             }
             root.getChildren().add(serverItem);
         }
 
-        if (!registry.ungroupedDatabases().isEmpty()) {
+        List<DatabaseEntry> matchingUngrouped =
+                registry.ungroupedDatabases().stream().filter(db -> matches(db, filter)).toList();
+        if (!matchingUngrouped.isEmpty()) {
             TreeItem<Object> ungroupedHeader = new TreeItem<>("Sin grupo");
             ungroupedHeader.setExpanded(true);
-            for (DatabaseEntry db : registry.ungroupedDatabases()) {
+            for (DatabaseEntry db : matchingUngrouped) {
                 ungroupedHeader.getChildren().add(databaseItem(db));
             }
             root.getChildren().add(ungroupedHeader);
         }
 
         return root;
+    }
+
+    private static boolean matches(DatabaseEntry db, String filter) {
+        return filter.isEmpty() || db.alias().toLowerCase(Locale.ROOT).contains(filter);
     }
 
     private static TreeItem<Object> databaseItem(DatabaseEntry db) {

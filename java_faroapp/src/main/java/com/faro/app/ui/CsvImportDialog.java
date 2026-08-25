@@ -32,8 +32,7 @@ public final class CsvImportDialog {
             controller.configure(databases, credentials, pool);
 
             Scene scene = new Scene(root, 460, 400);
-            scene.getStylesheets().add(CsvImportDialog.class
-                    .getResource(Theme.stylesheetResourcePath(preferences.isDarkTheme())).toExternalForm());
+            Theme.applyTo(scene, preferences.isDarkTheme());
 
             Stage stage = new Stage();
             stage.setTitle("Importar CSV a una tabla");

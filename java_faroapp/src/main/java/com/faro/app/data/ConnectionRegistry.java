@@ -4,52 +4,23 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.faro.app.model.DatabaseEntry;
-import com.faro.app.model.DbEngine;
 import com.faro.app.model.Server;
-import com.faro.app.model.ServerMode;
 
 /**
  * Fuente de servidores/bases de datos para el árbol de conexiones.
  *
- * <p>{@link #withDemoData()} arma el mismo dataset ficticio que
- * {@code demo_html/data.js} (Bodegas Centro, Sucursales Muebles TX,
- * "crisol" sin grupo) — se usa como datos de arranque solo la primera vez
- * que corre la app (antes de que exista un archivo guardado). Guardar/
- * cargar de disco (el equivalente a {@code servers_repository.dart} en la
- * versión Flutter) ya existe, ver {@link ConnectionRegistryStore}.
+ * <p>Sin datos de ejemplo — a pedido explícito del usuario (2026-08-22, "me
+ * caga"), un primer arranque (sin archivo guardado todavía) empieza
+ * completamente vacío. Antes traía un dataset ficticio (Bodegas Centro,
+ * Sucursales Muebles TX, "crisol" sin grupo, el mismo de
+ * {@code demo_html/data.js}) que se quitó por completo. Guardar/cargar de
+ * disco (el equivalente a {@code servers_repository.dart} en la versión
+ * Flutter) sigue igual, ver {@link ConnectionRegistryStore}.
  */
 public class ConnectionRegistry {
 
     private final List<Server> servers = new ArrayList<>();
     private final List<DatabaseEntry> ungroupedDatabases = new ArrayList<>();
-
-    public static ConnectionRegistry withDemoData() {
-        ConnectionRegistry registry = new ConnectionRegistry();
-
-        Server bodegas = new Server("Bodegas Centro");
-        bodegas.databases().add(new DatabaseEntry(
-                "Bodega Norte", "192.168.1.10", 5432, "bodega",
-                DbEngine.POSTGRES, ServerMode.READ_ONLY));
-        bodegas.databases().add(new DatabaseEntry(
-                "Bodega Sur", "192.168.1.11", 5432, "bodega",
-                DbEngine.POSTGRES, ServerMode.READ_ONLY));
-        registry.servers.add(bodegas);
-
-        Server sucursales = new Server("Sucursales Muebles TX");
-        sucursales.databases().add(new DatabaseEntry(
-                "Tienda Reforma", "10.20.4.10", 1433, "tienda",
-                DbEngine.SQL_SERVER, ServerMode.READ_ONLY));
-        sucursales.databases().add(new DatabaseEntry(
-                "Tienda Polanco", "10.20.4.11", 1433, "tienda",
-                DbEngine.SQL_SERVER, ServerMode.UNRESTRICTED));
-        registry.servers.add(sucursales);
-
-        registry.ungroupedDatabases.add(new DatabaseEntry(
-                "crisol", "localhost", 5432, "crisol",
-                DbEngine.POSTGRES, ServerMode.READ_ONLY));
-
-        return registry;
-    }
 
     public List<Server> servers() {
         return servers;
@@ -66,5 +37,22 @@ public class ConnectionRegistry {
             all.addAll(server.databases());
         }
         return all;
+    }
+
+    /**
+     * Quita una base de donde esté — agrupada bajo un servidor, o suelta —
+     * sin que el llamador tenga que saber cuál de los dos casos es. Usado
+     * por "Eliminar" en el árbol de conexiones (antes no existía ninguna
+     * forma de borrar una base ya agregada, solo editarla — hallazgo real
+     * del usuario). {@code DatabaseEntry} no tiene {@code equals}/
+     * {@code hashCode} propios (identidad por referencia, a propósito, ver
+     * su javadoc), así que esto solo quita exactamente el objeto que se le
+     * pasó — nunca por coincidencia de datos. No falla si ya no está.
+     */
+    public void removeDatabase(DatabaseEntry entry) {
+        ungroupedDatabases.remove(entry);
+        for (Server server : servers) {
+            server.databases().remove(entry);
+        }
     }
 }

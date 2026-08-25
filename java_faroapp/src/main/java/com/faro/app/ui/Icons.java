@@ -15,15 +15,21 @@ public final class Icons {
     }
 
     public static final String PLAY = "M7 4.5v15l13-7.5Z";
+    /** Cuadrito de "detener" — igual que el prototipo (rect 14x14, esquinas ligeramente redondeadas), para el botón "Cancelar" que reemplaza a "Ejecutar" mientras una consulta está corriendo. */
+    public static final String STOP = "M6 6h12v12H6Z";
     public static final String FOLDER =
             "M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18Z";
     public static final String SAVE = "M5 3h11l4 4v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z M8 3v6h7V3 M8 21v-7h8v7";
     public static final String ALIGN_LEFT = "M4 5h16M4 10h10M4 15h16M4 20h10";
     public static final String STAR = "m12 2.5 3 6.4 6.9.8-5 4.9 1.2 7-6.1-3.4-6.1 3.4 1.2-7-5-4.9 6.9-.8Z";
     public static final String PENCIL = "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z M15 5l4 4";
+    /** Bote de basura — igual que Lucide `trash-2` (tapa, cuerpo con esquinas redondeadas vía arcos, 2 líneas internas). */
+    public static final String TRASH = "M4 7h16"
+            + "M6 7v13a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7"
+            + "M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"
+            + "M10 11v6"
+            + "M14 11v6";
     public static final String PLUS = "M12 5v14M5 12h14";
-    public static final String LOCK = "M4 11h16v10H4Z M8 11V7a4 4 0 0 1 8 0v4";
-    public static final String LOCK_OPEN = "M4 11h16v10H4Z M8 11V7a4 4 0 0 1 7.6-1.8";
     /** Círculo (r=4, centro 12,12) expresado como dos arcos, porque SVGPath no soporta &lt;circle&gt; — + los 8 rayos. */
     public static final String SUN = "M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0"
             + "M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4";

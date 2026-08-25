@@ -43,16 +43,25 @@ public final class AddDatabaseDialog {
             controller.attachPreferences(preferences);
             setup.accept(controller);
 
-            Scene scene = new Scene(root, 420, 600);
-            scene.getStylesheets().add(AddDatabaseDialog.class
-                    .getResource(Theme.stylesheetResourcePath(preferences.isDarkTheme())).toExternalForm());
+            // Alto real 420x600 con un ScrollPane interno hasta 2026-08-22 —
+            // el usuario lo rechazó ("no quiero un scroll, quiero que se vea
+            // bien"). Ahora 420x720 sin ScrollPane, y SÍ redimensionable
+            // (antes no lo era) como respaldo: 720px ya cubre con margen un
+            // mensaje de "Probar conexión" largo (2-3 líneas), pero si algún
+            // mensaje resulta más largo todavía, el usuario puede agrandar
+            // la ventana arrastrando el borde en vez de toparse con texto
+            // cortado otra vez.
+            Scene scene = new Scene(root, 420, 720);
+            Theme.applyTo(scene, preferences.isDarkTheme());
 
             Stage stage = new Stage();
             stage.setTitle(title);
             stage.initOwner(owner);
             stage.initModality(Modality.WINDOW_MODAL);
             stage.setScene(scene);
-            stage.setResizable(false);
+            stage.setResizable(true);
+            stage.setMinWidth(420);
+            stage.setMinHeight(560);
             controller.attachStage(stage);
 
             stage.showAndWait();

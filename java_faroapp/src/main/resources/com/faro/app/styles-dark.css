@@ -46,6 +46,34 @@
     -fx-font-size: 13px;
 }
 
+/* Ver nota completa en styles.css — global, sin escopar a una clase. */
+.scroll-bar {
+    -fx-background-color: transparent;
+}
+.scroll-bar .track,
+.scroll-bar .track-background {
+    -fx-background-color: transparent;
+    -fx-border-width: 0;
+}
+.scroll-bar .thumb {
+    -fx-background-color: #334155; /* --border */
+    -fx-background-radius: 6px;
+}
+.scroll-bar .thumb:hover,
+.scroll-bar .thumb:pressed {
+    -fx-background-color: #AEBACB; /* --text-muted */
+}
+.scroll-bar .increment-button,
+.scroll-bar .decrement-button {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+.scroll-bar .increment-arrow,
+.scroll-bar .decrement-arrow {
+    -fx-shape: " ";
+    -fx-padding: 0;
+}
+
 .app-menu-bar {
     -fx-background-color: #1E293B; /* --surface */
     -fx-padding: 0 4 0 4;
@@ -114,18 +142,29 @@
     -fx-min-width: 44;
     -fx-max-width: 44;
 }
+/* Ver nota completa en styles.css — la causa real era que settingsRailButton
+   era un Button normal (los otros tres del riel son ToggleButton) y Button
+   trae más capas de relieve/foco por defecto en Modena. Ya es ToggleButton
+   también acá; estas reglas quedan como refuerzo, no eran la causa real. */
 .rail-button {
     -fx-background-color: transparent;
+    -fx-background-insets: 0;
     -fx-background-radius: 9px;
     -fx-border-width: 0;
     -fx-padding: 9;
     -fx-cursor: hand;
+    -fx-focus-color: transparent;
+    -fx-faint-focus-color: transparent;
 }
 .rail-button .icon-stroke {
     -fx-stroke: #AEBACB; /* --text-muted */
 }
 .rail-button:hover {
     -fx-background-color: #334155; /* --surface-alt */
+}
+.rail-button:armed,
+.rail-button:pressed {
+    -fx-background-color: #334155; /* --border/--surface-alt (mismo valor en oscuro), distinto de selected */
 }
 .rail-button:selected {
     -fx-background-color: rgba(129,140,248,.18); /* --accent-soft, mismo valor real que .toolbar-pill */
@@ -305,6 +344,29 @@
     -fx-text-fill: #AEBACB; /* --text-muted */
     -fx-padding: 0 8 0 4;
 }
+/* Texto SIN resaltar (identificadores, puntuación, espacios) — RichTextFX
+   envuelve cada tramo en un Text con la clase base "text" (la que trae
+   javafx.scene.text.Text por defecto) y nunca se le puso color acá; caía
+   en el negro por defecto de JavaFX, opaco/difícil de leer contra el
+   fondo oscuro. Hallazgo real del usuario: "el texto de la query en modo
+   oscuro está algo opaco". Un token con resaltado (keyword/string/número/
+   comentario) trae la clase "text" MÁS su clase semántica encima — misma
+   especificidad que esta regla, pero las de abajo van más adelante en el
+   archivo, así que ganan por orden de cascada sin necesitar más
+   especificidad. */
+.sql-editor .text {
+    -fx-fill: #F1F5F9; /* --text */
+}
+/* Ver nota completa en styles.css — RichTextFX no fija color de cursor,
+   solo velocidad de parpadeo; sin esto queda negro (invisible en oscuro). */
+.sql-editor .caret {
+    -fx-stroke: #F1F5F9; /* --text */
+}
+/* Ver nota completa en styles.css — mismo valor real de demo_html/styles.css
+   (`::selection { background: var(--accent-soft); }`, indigo.dark). */
+.sql-editor .selection {
+    -fx-fill: rgba(129,140,248,.18); /* --accent-soft */
+}
 .sql-editor .keyword {
     -fx-fill: #818CF8; /* --accent-base, .tok-kw */
     -fx-font-weight: bold;
@@ -334,6 +396,14 @@
     -fx-border-color: transparent transparent #334155 transparent; /* --border */
     -fx-border-width: 0 0 1 0;
     -fx-padding: 0;
+}
+/* .tab-header-background es un nodo HIJO separado de .tab-header-area (no
+   el mismo) que trae su propio fondo gris claro de Modena por defecto, fijo
+   sin importar el tema — mismo patrón exacto que .column-header (ver nota
+   ahí) y que el engrane del riel. Sin esto, tapaba el fondo oscuro de
+   arriba por completo — hallazgo real del usuario con captura. */
+.results-tabs .tab-header-background {
+    -fx-background-color: #1E293B; /* --surface */
 }
 .results-tabs .tab {
     -fx-background-color: transparent;
@@ -368,6 +438,10 @@
     -fx-border-color: transparent transparent #334155 transparent; /* --border */
     -fx-border-width: 0 0 1 0;
     -fx-padding: 0;
+}
+/* Ver nota completa junto a .results-tabs .tab-header-background más arriba. */
+.query-tabs .tab-header-background {
+    -fx-background-color: #1E293B; /* --surface */
 }
 .query-tabs .tab {
     -fx-background-color: transparent;
@@ -422,7 +496,18 @@
 .results-table .column-header-background {
     -fx-background-color: #334155; /* --surface-alt */
 }
+/* .filler es OTRO nodo hijo más — la franja que la tabla pinta después de
+   la última columna real cuando sobra ancho (columnas angostas en un panel
+   ancho, como en la captura del usuario) — cuarta vez que aparece este
+   patrón exacto (fondo propio de Modena sin anular). */
+.results-table .filler {
+    -fx-background-color: #334155; /* --surface-alt */
+}
+/* Ver nota completa en styles.css — cada .column-header individual trae su
+   propio fondo gris de Modena por defecto (fijo, no cambia con el tema),
+   que se pinta encima del fondo de .column-header-background de arriba. */
 .results-table .column-header {
+    -fx-background-color: #334155; /* --surface-alt */
     -fx-border-color: transparent transparent #334155 transparent; /* --border */
 }
 .results-table .column-header .label {
@@ -443,6 +528,15 @@
 .results-table .table-cell {
     -fx-text-fill: #F1F5F9;
     -fx-padding: 8 14 8 14;
+}
+/* Placeholder ("Tabla sin contenido") — el Label que TableView muestra
+   solo cuando no hay filas (ExecutionTableFactory antes de correr una
+   consulta, por ejemplo) — nunca se le puso color, caía en el gris tenue
+   por defecto de Modena, casi invisible en oscuro. Duodécima vez con el
+   mismo patrón — ver la regla nueva en README. */
+.results-table .placeholder,
+.results-table .placeholder .label {
+    -fx-text-fill: #AEBACB; /* --text-muted */
 }
 
 /* ---- Log de la pestaña Diagnóstico — líneas con hora, más reciente arriba. */
@@ -599,4 +693,37 @@
 }
 .combo-box:focused {
     -fx-border-color: #818CF8;
+}
+/* Ver nota completa en styles.css — popup aparte del cuadro cerrado. */
+.combo-box-popup .list-view {
+    -fx-background-color: #1E293B; /* --surface */
+    -fx-border-color: #334155; /* --border */
+    -fx-border-width: 1;
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-effect: dropshadow(gaussian, rgba(15,23,42,0.15), 30, 0, 0, 10); /* --shadow-md */
+    -fx-padding: 4;
+}
+.combo-box-popup .list-cell {
+    -fx-background-color: transparent;
+    -fx-text-fill: #F1F5F9; /* --text */
+    -fx-padding: 6 10 6 10;
+    -fx-background-radius: 6;
+}
+.combo-box-popup .list-cell:filled:hover,
+.combo-box-popup .list-cell:filled:selected {
+    -fx-background-color: #334155; /* --surface-alt */
+}
+
+/* Tooltip — mismo tratamiento oscuro en los dos temas a propósito (caja
+   oscura, texto claro), no invertido por tema — convención común de
+   tooltip (VSCode, macOS, navegadores) y no hay una fuente real de diseño
+   que verificar acá (los tooltips de demo_html son del navegador, sin CSS
+   propio). Ver nota completa en styles.css. */
+.tooltip {
+    -fx-background-color: #0F172A;
+    -fx-text-fill: #F8FAFC;
+    -fx-background-radius: 6;
+    -fx-padding: 5 9 5 9;
+    -fx-font-size: 11.5px;
 }

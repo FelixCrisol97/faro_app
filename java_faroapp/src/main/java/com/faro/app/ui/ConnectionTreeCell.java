@@ -12,7 +12,9 @@ import javafx.geometry.Pos;
 import javafx.scene.Cursor;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.CheckBoxTreeItem;
+import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
+import javafx.scene.control.MenuItem;
 import javafx.scene.control.Tooltip;
 import javafx.scene.control.TreeCell;
 import javafx.scene.layout.HBox;
@@ -67,20 +69,28 @@ public class ConnectionTreeCell extends TreeCell<Object> {
     private final Circle statusDot = new Circle(3.5);
     private final Tooltip statusTooltip = new Tooltip();
     private final Label aliasLabel = new Label();
-    private final SVGPath modeIcon = new SVGPath();
-    private final Tooltip modeTooltip = new Tooltip();
+    private final Label unrestrictedBadge = new Label("SIN RESTRICCIONES");
     private final Label engineBadge = new Label();
     private final SVGPath editIcon = new SVGPath();
     private final StackPane editButton;
+    private final SVGPath deleteIcon = new SVGPath();
+    private final StackPane deleteButton;
     private final HBox databaseRow;
 
     // -- Encabezado de sección ("Sin grupo"): construido una sola vez --
     private final Label sectionHeaderLabel = new Label();
 
+    // -- Menú contextual (clic derecho) de una fila de base — construido una sola vez --
+    private final ContextMenu databaseContextMenu;
+
     private BooleanProperty boundCheckProperty;
     private DatabaseEntry editTarget;
 
-    public ConnectionTreeCell(Consumer<DatabaseEntry> onEditRequested) {
+    public ConnectionTreeCell(
+            Consumer<DatabaseEntry> onEditRequested,
+            Consumer<DatabaseEntry> onNewQueryRequested,
+            Consumer<DatabaseEntry> onDeleteRequested,
+            Consumer<DatabaseEntry> onDiscoverRequested) {
         serverNameLabel.getStyleClass().add("tree-server-name");
         HBox.setHgrow(serverNameLabel, Priority.ALWAYS);
         serverCountLabel.getStyleClass().add("tree-count");
@@ -104,9 +114,9 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         engineBadge.getStyleClass().add("tree-engine-badge");
 
         Tooltip.install(statusDot, statusTooltip);
-        modeIcon.setScaleX(0.5);
-        modeIcon.setScaleY(0.5);
-        Tooltip.install(modeIcon, modeTooltip);
+        unrestrictedBadge.getStyleClass().add("tree-unrestricted-badge");
+        unrestrictedBadge.setManaged(false);
+        unrestrictedBadge.setVisible(false);
 
         editIcon.setContent(Icons.PENCIL);
         editIcon.getStyleClass().add("tree-edit-icon");
@@ -121,10 +131,62 @@ public class ConnectionTreeCell extends TreeCell<Object> {
             }
         });
 
-        databaseRow = new HBox(6, checkBox, statusDot, aliasLabel, modeIcon, engineBadge, editButton);
+        // Bote de basura visible en la fila, junto al lápiz — antes no
+        // existía NINGUNA forma de quitar una base ya agregada, ni acá ni
+        // en el diálogo de editar (hallazgo real del usuario: "no veo la
+        // opción de borrar una BD"). Mismo criterio de "sin gestos
+        // escondidos" que ya rige el resto de esta celda — un ícono
+        // siempre visible, no solo el ítem del menú contextual de abajo
+        // (que se deja además, como atajo extra, igual que el doble clic
+        // ya es atajo extra del lápiz).
+        deleteIcon.setContent(Icons.TRASH);
+        deleteIcon.getStyleClass().add("tree-edit-icon");
+        deleteIcon.setScaleX(0.55);
+        deleteIcon.setScaleY(0.55);
+        deleteButton = new StackPane(deleteIcon);
+        deleteButton.getStyleClass().add("tree-edit-button");
+        deleteButton.setOnMouseClicked(event -> {
+            event.consume();
+            if (editTarget != null) {
+                onDeleteRequested.accept(editTarget);
+            }
+        });
+
+        databaseRow = new HBox(6, checkBox, statusDot, aliasLabel, unrestrictedBadge, engineBadge, editButton, deleteButton);
         databaseRow.setAlignment(Pos.CENTER_LEFT);
         databaseRow.setPadding(new Insets(1, 0, 1, 0));
         fixHeight(databaseRow);
+
+        // Clic derecho en una fila de base — mismo patrón para las 3
+        // acciones: "Nueva consulta para esta base" marca SOLO esa casilla
+        // (desmarca las demás) y abre una pestaña de consulta nueva, para
+        // no tener que adivinar cuál base marcar antes de escribir el SQL
+        // (pedido explícito del usuario tras encontrar poco intuitivo el
+        // botón "+" genérico). "Eliminar esta base" es un atajo extra al
+        // bote de basura de la fila, no el único camino — ver el
+        // comentario de deleteButton arriba. "Descubrir bases en esta
+        // IP…" reusa el mismo diálogo del menú Conexiones de arriba, pero
+        // precargado con el host de esta fila — antes solo existía la
+        // versión genérica de arriba, sin partir de una base ya conocida.
+        MenuItem newQueryItem = new MenuItem("Nueva consulta para esta base");
+        newQueryItem.setOnAction(event -> {
+            if (editTarget != null) {
+                onNewQueryRequested.accept(editTarget);
+            }
+        });
+        MenuItem discoverItem = new MenuItem("Descubrir bases en esta IP…");
+        discoverItem.setOnAction(event -> {
+            if (editTarget != null) {
+                onDiscoverRequested.accept(editTarget);
+            }
+        });
+        MenuItem deleteItem = new MenuItem("Eliminar esta base");
+        deleteItem.setOnAction(event -> {
+            if (editTarget != null) {
+                onDeleteRequested.accept(editTarget);
+            }
+        });
+        databaseContextMenu = new ContextMenu(newQueryItem, discoverItem, deleteItem);
 
         sectionHeaderLabel.getStyleClass().add("tree-section-label");
         fixHeight(sectionHeaderLabel);
@@ -144,6 +206,7 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         if (empty || item == null) {
             unbindCheckbox();
             editTarget = null;
+            setContextMenu(null);
             setText(null);
             setGraphic(null);
             return;
@@ -152,14 +215,17 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         if (item instanceof Server server) {
             unbindCheckbox();
             editTarget = null;
+            setContextMenu(null);
             updateServerRow(server);
             setGraphic(serverRow);
         } else if (item instanceof DatabaseEntry db) {
             updateDatabaseRow(db);
+            setContextMenu(databaseContextMenu);
             setGraphic(databaseRow);
         } else {
             unbindCheckbox();
             editTarget = null;
+            setContextMenu(null);
             sectionHeaderLabel.setText(String.valueOf(item).toUpperCase());
             setGraphic(sectionHeaderLabel);
         }
@@ -204,14 +270,14 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         aliasLabel.setText(db.alias());
         engineBadge.setText(db.engine().badge());
 
-        boolean readOnly = db.mode() == ServerMode.READ_ONLY;
-        modeIcon.setContent(readOnly ? Icons.LOCK : Icons.LOCK_OPEN);
-        String modeStyleClass = readOnly ? "tree-mode-icon-locked" : "tree-mode-icon-unlocked";
-        if (!modeIcon.getStyleClass().contains(modeStyleClass)) {
-            modeIcon.getStyleClass().removeIf(c -> c.startsWith("tree-mode-icon-"));
-            modeIcon.getStyleClass().add(modeStyleClass);
+        // Etiqueta "SIN RESTRICCIONES" — solo para bases que NO son de
+        // solo lectura (igual que faro-java-prototipo.html: una base de
+        // solo lectura no lleva ninguna marca extra, es el caso normal).
+        boolean unrestricted = db.mode() != ServerMode.READ_ONLY;
+        if (unrestricted != unrestrictedBadge.isVisible()) {
+            unrestrictedBadge.setVisible(unrestricted);
+            unrestrictedBadge.setManaged(unrestricted);
         }
-        modeTooltip.setText(readOnly ? "Solo lectura" : "Sin restricciones");
 
         editTarget = db;
     }

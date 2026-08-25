@@ -11,6 +11,9 @@ import com.faro.app.model.DatabaseEntry;
 import com.faro.app.model.DbEngine;
 import com.faro.app.model.ServerMode;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javafx.fxml.FXML;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
@@ -36,6 +39,8 @@ import javafx.util.StringConverter;
  * reemplazará.
  */
 public class AddDatabaseDialogController {
+
+    private static final Logger log = LoggerFactory.getLogger(AddDatabaseDialogController.class);
 
     @FXML private Label dialogTitleLabel;
     @FXML private TextField aliasField;
@@ -136,23 +141,42 @@ public class AddDatabaseDialogController {
     private void onTestConnection() {
         FormValues values = readForm();
         if (values == null) {
-            testStatusLabel.setText("Completa alias, host, puerto y base de datos primero.");
+            setTestStatus("Completa alias, host, puerto y base de datos primero.", null);
             return;
         }
         DatabaseEntry probe = new DatabaseEntry(values.alias, values.host, values.port,
                 values.databaseName, engineCombo.getValue(), modeCombo.getValue());
-        testStatusLabel.setText("Conectando…");
+        log.info("Probando conexión — {} ({}, usuario={})", probe.jdbcUrl(), probe.engine(), userField.getText());
+        setTestStatus("Conectando…", null);
         try (Connection conn = DriverManager.getConnection(
                 probe.jdbcUrl(), userField.getText(), passwordField.getText())) {
             String version = conn.getMetaData().getDatabaseProductVersion();
-            testStatusLabel.setText("Conectado — " + version.lines().findFirst().orElse(version));
+            log.info("Prueba de conexión OK — {}", version.lines().findFirst().orElse(version));
+            setTestStatus("Conectado — " + version.lines().findFirst().orElse(version), "status-success");
         } catch (SQLException e) {
-            testStatusLabel.setText("Error de conexión: " + e.getMessage());
+            log.warn("Prueba de conexión falló — {}: {}", probe.jdbcUrl(), e.getMessage());
+            setTestStatus("Error de conexión: " + e.getMessage(), "status-error");
+        }
+    }
+
+    /**
+     * {@code styleClass} null = estado neutral ("todavía no se sabe" /
+     * validación de formulario) — {@link #testStatusLabel} solo tiene
+     * "muted" puesto en el FXML. "status-success"/"status-error" marcan
+     * con color+negrita si la prueba de verdad conectó o falló, para que
+     * no se vea igual un error real que un texto informativo cualquiera.
+     */
+    private void setTestStatus(String text, String styleClass) {
+        testStatusLabel.setText(text);
+        testStatusLabel.getStyleClass().removeAll("status-success", "status-error");
+        if (styleClass != null) {
+            testStatusLabel.getStyleClass().add(styleClass);
         }
     }
 
     @FXML
     private void onCancel() {
+        log.debug("Diálogo agregar/editar base de datos cancelado (editing={}).", editing != null ? editing.alias() : "nueva");
         result = null;
         stage.close();
     }
@@ -161,6 +185,7 @@ public class AddDatabaseDialogController {
     private void onSave() {
         FormValues values = readForm();
         if (values == null) {
+            log.debug("Guardado de base de datos rechazado — formulario incompleto o inválido.");
             testStatusLabel.setText("Completa alias, host, puerto y base de datos.");
             return;
         }
@@ -186,6 +211,8 @@ public class AddDatabaseDialogController {
             credentials.put(entry.id(), userField.getText(), passwordField.getText());
         }
 
+        log.info("Base de datos {} — '{}' ({}:{}/{}, {}, {})", editing != null ? "editada" : "agregada",
+                entry.alias(), entry.host(), entry.port(), entry.databaseName(), entry.engine(), entry.mode());
         result = entry;
         stage.close();
     }
