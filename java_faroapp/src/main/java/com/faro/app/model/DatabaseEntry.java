@@ -120,8 +120,19 @@ public class DatabaseEntry {
         return poolSize;
     }
 
+    /**
+     * Piso duro de 2, no solo recomendado — con {@code poolSize=1}, el
+     * respaldo de cancelación ({@code KILL}/{@code pg_cancel_backend}, ver
+     * {@code QueryExecutionService#killBackend}) necesita abrir una
+     * conexión NUEVA mientras la única que hay está ocupada corriendo la
+     * consulta que se quiere matar — se queda esperando hasta el
+     * {@code connectionTimeout} de HikariCP (30s por defecto) o nunca la
+     * consigue, justo el escenario que ese respaldo debería resolver.
+     * Pedido explícito del usuario (2026-08-25): que la UI no deje bajar de
+     * ahí, no solo que quede documentado en un comentario.
+     */
     public void setPoolSize(int poolSize) {
-        this.poolSize = poolSize;
+        this.poolSize = Math.max(2, poolSize);
     }
 
     public int queryTimeoutSeconds() {

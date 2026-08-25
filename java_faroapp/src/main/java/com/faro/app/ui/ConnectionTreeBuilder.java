@@ -5,8 +5,11 @@ import java.util.List;
 import java.util.Locale;
 
 import com.faro.app.data.ConnectionRegistry;
+import com.faro.app.data.CredentialStore;
 import com.faro.app.model.DatabaseEntry;
 import com.faro.app.model.Server;
+import com.faro.app.query.ConnectionPoolManager;
+import com.faro.app.query.SchemaIntrospector;
 
 import javafx.scene.control.CheckBoxTreeItem;
 import javafx.scene.control.TreeItem;
@@ -25,20 +28,27 @@ public final class ConnectionTreeBuilder {
     private ConnectionTreeBuilder() {
     }
 
-    public static TreeItem<Object> buildRoot(ConnectionRegistry registry) {
-        return buildRoot(registry, "");
+    public static TreeItem<Object> buildRoot(ConnectionRegistry registry, CredentialStore credentials, ConnectionPoolManager pool) {
+        return buildRoot(registry, "", credentials, pool);
     }
 
     /**
      * {@code filterText} vacío se comporta exactamente igual que
-     * {@link #buildRoot(ConnectionRegistry)} (retrocompatible con los ~15
-     * sitios que ya llaman a ese método sin filtro). Con texto, solo
-     * incluye bases cuyo alias lo contenga (sin distinguir mayúsculas) —
-     * un servidor/grupo sin ninguna base que calce no aparece en absoluto,
-     * en vez de mostrarse vacío. Buscador del árbol de conexiones,
-     * pedido 2026-08-22 ("puedo llegar a tener cientos de BDs").
+     * {@link #buildRoot(ConnectionRegistry, CredentialStore, ConnectionPoolManager)}.
+     * Con texto, incluye una base si su alias lo contiene (sin distinguir
+     * mayúsculas, comportamiento de siempre desde 2026-08-22) **o** si su
+     * esquema YA CACHEADO (ver {@link SchemaIntrospector#cached}) tiene
+     * algún nombre de tabla/vista/función/procedimiento/trigger que
+     * calce — búsqueda dentro del esquema, agregada 2026-08-25 para la
+     * Etapa C. <b>Límite real, a propósito:</b> solo encuentra bases que
+     * ya se exploraron al menos una vez (con su esquema en caché) — no hay
+     * fetch eager de todas las bases al escribir en el buscador, sería
+     * costoso sin necesidad con muchas bases registradas (v0, mismo
+     * criterio "cubre el caso común" que ya usa {@link SchemaIntrospector}
+     * para el esquema por defecto de cada motor).
      */
-    public static TreeItem<Object> buildRoot(ConnectionRegistry registry, String filterText) {
+    public static TreeItem<Object> buildRoot(
+            ConnectionRegistry registry, String filterText, CredentialStore credentials, ConnectionPoolManager pool) {
         String filter = filterText == null ? "" : filterText.trim().toLowerCase(Locale.ROOT);
 
         TreeItem<Object> root = new TreeItem<>("root");
@@ -52,7 +62,7 @@ public final class ConnectionTreeBuilder {
             TreeItem<Object> serverItem = new TreeItem<>(server);
             serverItem.setExpanded(true);
             for (DatabaseEntry db : matching) {
-                serverItem.getChildren().add(databaseItem(db));
+                serverItem.getChildren().add(databaseItem(db, filter, credentials, pool));
             }
             root.getChildren().add(serverItem);
         }
@@ -63,7 +73,7 @@ public final class ConnectionTreeBuilder {
             TreeItem<Object> ungroupedHeader = new TreeItem<>("Sin grupo");
             ungroupedHeader.setExpanded(true);
             for (DatabaseEntry db : matchingUngrouped) {
-                ungroupedHeader.getChildren().add(databaseItem(db));
+                ungroupedHeader.getChildren().add(databaseItem(db, filter, credentials, pool));
             }
             root.getChildren().add(ungroupedHeader);
         }
@@ -72,16 +82,29 @@ public final class ConnectionTreeBuilder {
     }
 
     private static boolean matches(DatabaseEntry db, String filter) {
-        return filter.isEmpty() || db.alias().toLowerCase(Locale.ROOT).contains(filter);
+        if (filter.isEmpty() || db.alias().toLowerCase(Locale.ROOT).contains(filter)) {
+            return true;
+        }
+        return SchemaIntrospector.cached(db.id()).map(info -> SchemaTreeNode.matchesAnyName(info, filter)).orElse(false);
     }
 
-    private static TreeItem<Object> databaseItem(DatabaseEntry db) {
-        // No hace falta CheckBoxTreeItem#setIndependent(true) — el padre de
-        // cada uno (serverItem/ungroupedHeader) es un TreeItem<Object> plano,
-        // NO un CheckBoxTreeItem, así que no hay checkbox de servidor al que
-        // propagar el estado en primer lugar (ver ConnectionTreeCell: los
-        // servidores no llevan casilla).
-        return new CheckBoxTreeItem<>(db);
+    /**
+     * {@code filter} solo se usa para decidir si esta base entró a la lista
+     * por su esquema (no por su alias) — en ese caso su {@link DatabaseTreeItem}
+     * arma sus hijos ya filtrados y auto-expandidos, ver
+     * {@code DatabaseTreeItem#categoryItems}. Si el alias ya calzaba (o no
+     * hay filtro), se le pasa {@code ""} — comportamiento normal, expandir
+     * a mano para explorar el esquema completo. No hace falta
+     * {@code CheckBoxTreeItem#setIndependent(true)} — el padre de cada uno
+     * (serverItem/ungroupedHeader) es un {@code TreeItem<Object>} plano, NO
+     * un {@code CheckBoxTreeItem}, así que no hay casilla de servidor a la
+     * que propagar el estado en primer lugar.
+     */
+    private static TreeItem<Object> databaseItem(
+            DatabaseEntry db, String filter, CredentialStore credentials, ConnectionPoolManager pool) {
+        boolean aliasMatched = filter.isEmpty() || db.alias().toLowerCase(Locale.ROOT).contains(filter);
+        String schemaFilter = aliasMatched ? "" : filter;
+        return new DatabaseTreeItem(db, credentials, pool, schemaFilter);
     }
 
     /**

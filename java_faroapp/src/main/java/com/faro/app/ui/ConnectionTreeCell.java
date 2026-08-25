@@ -5,6 +5,7 @@ import java.util.function.Consumer;
 import com.faro.app.model.DatabaseEntry;
 import com.faro.app.model.Server;
 import com.faro.app.model.ServerMode;
+import com.faro.app.ui.SchemaTreeNode.Kind;
 
 import javafx.beans.property.BooleanProperty;
 import javafx.geometry.Insets;
@@ -17,6 +18,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.Tooltip;
 import javafx.scene.control.TreeCell;
+import javafx.scene.input.MouseButton;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -80,17 +82,33 @@ public class ConnectionTreeCell extends TreeCell<Object> {
     // -- Encabezado de sección ("Sin grupo"): construido una sola vez --
     private final Label sectionHeaderLabel = new Label();
 
+    // -- Fila de categoría de esquema ("Tablas", "Vistas", etc.): construida una sola vez --
+    private final Label schemaCategoryLabel = new Label();
+    private final Label schemaCategoryCountLabel = new Label();
+    private final HBox schemaCategoryRow;
+
+    // -- Fila de objeto de esquema (una tabla/vista/función/procedimiento/trigger): construida una sola vez --
+    private final SVGPath schemaItemIcon = new SVGPath();
+    private final Label schemaItemLabel = new Label();
+    private final HBox schemaItemRow;
+    private final ContextMenu schemaItemContextMenu;
+    private final MenuItem generateSelectItem = new MenuItem("Generar SELECT");
+
     // -- Menú contextual (clic derecho) de una fila de base — construido una sola vez --
     private final ContextMenu databaseContextMenu;
 
     private BooleanProperty boundCheckProperty;
     private DatabaseEntry editTarget;
+    /** Capturado junto con {@code editTarget} en cada {@code updateDatabaseRow} — solo lo usa "Recargar esquema", que necesita el {@code TreeItem} real (no solo el {@code DatabaseEntry}) para poder descartar y volver a pedir sus hijos. */
+    private DatabaseTreeItem editTreeItem;
+    private SchemaTreeNode.Item schemaItemTarget;
 
     public ConnectionTreeCell(
             Consumer<DatabaseEntry> onEditRequested,
             Consumer<DatabaseEntry> onNewQueryRequested,
             Consumer<DatabaseEntry> onDeleteRequested,
-            Consumer<DatabaseEntry> onDiscoverRequested) {
+            Consumer<DatabaseEntry> onDiscoverRequested,
+            Consumer<SchemaTreeNode.Item> onGenerateSelectRequested) {
         serverNameLabel.getStyleClass().add("tree-server-name");
         HBox.setHgrow(serverNameLabel, Priority.ALWAYS);
         serverCountLabel.getStyleClass().add("tree-count");
@@ -186,10 +204,65 @@ public class ConnectionTreeCell extends TreeCell<Object> {
                 onDeleteRequested.accept(editTarget);
             }
         });
-        databaseContextMenu = new ContextMenu(newQueryItem, discoverItem, deleteItem);
+        // "Recargar esquema" (2026-08-25, el usuario preguntó cómo recargar y no
+        // existía ninguna forma real — el caché de SchemaIntrospector no tenía
+        // invalidación, ni la app un control para pedirla) — descarta el caché de
+        // ESTA base y vuelve a pedir Tablas/Vistas/Funciones/Procedimientos/
+        // Triggers de verdad, sin importar si ya se habían cargado antes. No
+        // depende de onXxxRequested (un Consumer<DatabaseEntry> hacia
+        // MainController) porque necesita el TreeItem real, no solo el dato —
+        // se resuelve directo acá con el mismo patrón que ya usa editTarget.
+        MenuItem reloadSchemaItem = new MenuItem("Recargar esquema");
+        reloadSchemaItem.setOnAction(event -> {
+            if (editTreeItem != null) {
+                editTreeItem.reloadSchema();
+            }
+        });
+        databaseContextMenu = new ContextMenu(newQueryItem, discoverItem, reloadSchemaItem, deleteItem);
 
         sectionHeaderLabel.getStyleClass().add("tree-section-label");
         fixHeight(sectionHeaderLabel);
+
+        // -- Fila de categoría de esquema ("Tablas 4", etc.) --
+        schemaCategoryLabel.getStyleClass().add("tree-schema-category");
+        HBox.setHgrow(schemaCategoryLabel, Priority.ALWAYS);
+        schemaCategoryCountLabel.getStyleClass().add("tree-schema-count");
+        schemaCategoryRow = new HBox(6, schemaCategoryLabel, schemaCategoryCountLabel);
+        schemaCategoryRow.setAlignment(Pos.CENTER_LEFT);
+        fixHeight(schemaCategoryRow);
+
+        // -- Fila de objeto de esquema (tabla/vista/función/procedimiento/trigger) --
+        schemaItemIcon.getStyleClass().add("tree-edit-icon");
+        schemaItemIcon.setScaleX(0.55);
+        schemaItemIcon.setScaleY(0.55);
+        schemaItemLabel.getStyleClass().add("tree-schema-item");
+        schemaItemRow = new HBox(6, schemaItemIcon, schemaItemLabel);
+        schemaItemRow.setAlignment(Pos.CENTER_LEFT);
+        fixHeight(schemaItemRow);
+        // "Generar SELECT" — solo tiene sentido en Tablas/Vistas (columnas reales
+        // conocidas); en Funciones/Procedimientos/Triggers armar un SELECT/CALL
+        // correcto depende de la firma real (parámetros), fuera de alcance a
+        // propósito (ver DatabaseTreeItem/SchemaTreeNode). Doble clic dispara lo
+        // mismo — atajo extra, nunca el único camino (mismo criterio que el resto
+        // de esta celda), y el ítem del menú se deshabilita solo (no se oculta,
+        // para que quede claro que la opción existe pero no aplica acá) cuando la
+        // fila no es de Tabla/Vista.
+        generateSelectItem.setOnAction(event -> {
+            if (schemaItemTarget != null) {
+                onGenerateSelectRequested.accept(schemaItemTarget);
+            }
+        });
+        schemaItemContextMenu = new ContextMenu(generateSelectItem);
+        schemaItemRow.setOnMouseClicked(event -> {
+            if (event.getButton() == MouseButton.PRIMARY && event.getClickCount() == 2
+                    && schemaItemTarget != null && isQueryable(schemaItemTarget.kind())) {
+                onGenerateSelectRequested.accept(schemaItemTarget);
+            }
+        });
+    }
+
+    private static boolean isQueryable(Kind kind) {
+        return kind == Kind.TABLES || kind == Kind.VIEWS;
     }
 
     /** {@code prefHeight == minHeight == maxHeight == ROW_HEIGHT}, para que no pueda haber mismatch con {@code fixedCellSize}. */
@@ -206,6 +279,8 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         if (empty || item == null) {
             unbindCheckbox();
             editTarget = null;
+            editTreeItem = null;
+            schemaItemTarget = null;
             setContextMenu(null);
             setText(null);
             setGraphic(null);
@@ -215,16 +290,41 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         if (item instanceof Server server) {
             unbindCheckbox();
             editTarget = null;
+            editTreeItem = null;
+            schemaItemTarget = null;
             setContextMenu(null);
             updateServerRow(server);
             setGraphic(serverRow);
         } else if (item instanceof DatabaseEntry db) {
+            schemaItemTarget = null;
+            editTreeItem = getTreeItem() instanceof DatabaseTreeItem dbTreeItem ? dbTreeItem : null;
             updateDatabaseRow(db);
             setContextMenu(databaseContextMenu);
             setGraphic(databaseRow);
+        } else if (item instanceof SchemaTreeNode.Category category) {
+            unbindCheckbox();
+            editTarget = null;
+            editTreeItem = null;
+            schemaItemTarget = null;
+            setContextMenu(null);
+            schemaCategoryLabel.setText(category.kind().label());
+            schemaCategoryCountLabel.setText(String.valueOf(category.count()));
+            setGraphic(schemaCategoryRow);
+        } else if (item instanceof SchemaTreeNode.Item schemaItem) {
+            unbindCheckbox();
+            editTarget = null;
+            editTreeItem = null;
+            schemaItemTarget = schemaItem;
+            schemaItemIcon.setContent(isQueryable(schemaItem.kind()) ? Icons.TABLE : Icons.SETTINGS);
+            schemaItemLabel.setText(schemaItem.name());
+            generateSelectItem.setDisable(!isQueryable(schemaItem.kind()));
+            setContextMenu(schemaItemContextMenu);
+            setGraphic(schemaItemRow);
         } else {
             unbindCheckbox();
             editTarget = null;
+            editTreeItem = null;
+            schemaItemTarget = null;
             setContextMenu(null);
             sectionHeaderLabel.setText(String.valueOf(item).toUpperCase());
             setGraphic(sectionHeaderLabel);

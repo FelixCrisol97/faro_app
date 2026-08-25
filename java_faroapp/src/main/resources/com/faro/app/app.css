@@ -301,6 +301,31 @@
     -fx-padding: 1 4 1 4;
 }
 
+/* Explorador de esquema (Etapa C, 2026-08-25) — fila de categoría ("Tablas",
+   "Vistas", etc.) bajo una base expandida, calcado del prototipo real
+   (faro-java-prototipo.html, líneas 246-262): label + badge de conteo
+   monoespaciado, idéntico en tratamiento al badge de motor de arriba
+   (mismo -radius-chip/surface-alt), solo que semánticamente es un conteo,
+   no un motor — clase propia para no atarlos por casualidad. */
+.tree-schema-category {
+    -fx-font-size: 12px;
+    -fx-text-fill: -token-text;
+}
+.tree-schema-count {
+    -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace; /* --font-mono */
+    -fx-font-size: 9.5px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -token-text-muted;
+    -fx-background-color: -token-surface-alt;
+    -fx-background-radius: 6; /* --radius-chip */
+    -fx-padding: 1 5 1 5;
+}
+/* Fila de un objeto real (tabla/vista/función/procedimiento/trigger) dentro de una categoría. */
+.tree-schema-item {
+    -fx-font-size: 12px;
+    -fx-text-fill: -token-text;
+}
+
 /* Punto de estado de conexión — mismo lenguaje de color que success/warn/
    error en app_colors.dart. */
 .tree-status-dot-connected { -fx-fill: -token-success-base; }
@@ -936,6 +961,20 @@
 .field-label {
     -fx-font-size: 12px;
     -fx-text-fill: -token-text-muted;
+}
+/* Círculo de color de acento — Preferencias → Apariencia (2026-08-25). El
+   relleno real lo pone PreferencesDialogController (Circle.setFill), esta
+   clase solo da el tamaño clicable + el estado seleccionado (anillo, no
+   cambio de tamaño/relleno, para que los 6 sigan alineados en fila). */
+.pref-accent-swatch {
+    -fx-min-width: 26; -fx-min-height: 26; -fx-max-width: 26; -fx-max-height: 26;
+    -fx-background-radius: 999;
+    -fx-border-radius: 999;
+    -fx-border-color: transparent;
+    -fx-border-width: 2;
+}
+.pref-accent-swatch-selected {
+    -fx-border-color: -token-text;
 }
 /* Resultado de una acción con éxito/error real (ej. "Probar conexión") —
    .muted por sí sola no distingue "todavía no se sabe"/"funcionó"/"falló". */

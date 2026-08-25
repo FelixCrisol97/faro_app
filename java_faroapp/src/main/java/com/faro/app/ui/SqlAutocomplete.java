@@ -3,9 +3,7 @@ package com.faro.app.ui;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Optional;
 
 import org.fxmisc.richtext.CodeArea;
 
@@ -21,7 +19,6 @@ import org.slf4j.LoggerFactory;
 
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
-import javafx.concurrent.Task;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.MenuItem;
 
@@ -39,11 +36,21 @@ import javafx.scene.control.MenuItem;
  * si todavía no hay nada en caché para esa base, esta invocación muestra
  * solo palabras clave (como antes) y de paso dispara una carga en
  * segundo plano — las siguientes veces que el usuario pida autocompletado
- * para esa misma base, ya salen tabla/columnas también. Caché en memoria,
- * por id de base, vive mientras la app esté abierta (sin invalidación si
- * el esquema cambia en caliente del lado del servidor — límite conocido,
- * aceptable para v0; si hace falta refrescar, alcanza con reiniciar la
- * app o marcar/desmarcar la base).
+ * para esa misma base, ya salen tabla/columnas también.
+ *
+ * <p><b>Caché centralizado en {@link SchemaIntrospector} (2026-08-25)</b> —
+ * antes esta clase tenía su propio {@code Map}/{@code Set} de caché; ahora
+ * reusa {@link SchemaIntrospector#cached}/{@link SchemaIntrospector#loadInBackground},
+ * compartido con el explorador de esquema del árbol de conexiones — expandir
+ * una base ahí también deja su esquema listo para el autocompletado, y
+ * viceversa, un solo fetch por base sirve a los dos. Sin invalidación
+ * automática si el esquema cambia en caliente del lado del servidor — el
+ * usuario preguntó cómo recargar (2026-08-25) y antes de esa fecha no
+ * había forma real (marcar/desmarcar la base NO invalidaba nada, pese a
+ * lo que decía una versión anterior de este comentario, nunca verificado
+ * contra el código real). Ahora sí existe: "Recargar esquema" en el menú
+ * contextual de una fila de base (ver {@code ConnectionTreeCell}), que
+ * llama a {@link SchemaIntrospector#invalidate}.
  *
  * <p><b>Verificado en vivo (2026-08-20, reconfirmado 2026-08-21)</b> — el
  * usuario probó el popup y encontró un bug real: se quedaba "pegado" en
@@ -56,11 +63,6 @@ public final class SqlAutocomplete {
 
     /** El popup actual, si hay uno mostrándose — para poder cerrarlo si se pide otro antes de que el usuario elija algo. */
     private static ContextMenu activeMenu;
-
-    /** Esquema ya leído, por id de base — ver el javadoc de la clase. */
-    private static final Map<String, SchemaInfo> schemaCache = new ConcurrentHashMap<>();
-    /** Bases con una carga de esquema en curso — evita pedir el mismo esquema dos veces si el usuario aprieta Ctrl+Espacio varias veces seguidas antes de que la primera termine. */
-    private static final Set<String> schemaLoading = ConcurrentHashMap.newKeySet();
 
     private SqlAutocomplete() {
     }
@@ -88,20 +90,21 @@ public final class SqlAutocomplete {
                 .toList());
 
         if (activeDb != null) {
-            SchemaInfo schema = schemaCache.get(activeDb.id());
-            if (schema != null) {
-                for (String name : schema.tableNames()) {
+            Optional<SchemaInfo> schema = SchemaIntrospector.cached(activeDb.id());
+            if (schema.isPresent()) {
+                for (String name : schema.get().queryableNames()) {
                     if (name.toUpperCase(Locale.ROOT).startsWith(prefixUpper) && !matches.contains(name)) {
                         matches.add(name);
                     }
                 }
-                for (String name : schema.allColumnNames()) {
+                for (String name : schema.get().allColumnNames()) {
                     if (name.toUpperCase(Locale.ROOT).startsWith(prefixUpper) && !matches.contains(name)) {
                         matches.add(name);
                     }
                 }
             } else {
-                loadSchemaInBackground(activeDb, credentials, pool);
+                log.debug("[{}] Sin esquema en caché — disparando carga en segundo plano.", activeDb.alias());
+                SchemaIntrospector.loadInBackground(activeDb, credentials, pool, info -> { });
             }
         }
 
@@ -123,35 +126,6 @@ public final class SqlAutocomplete {
         activeMenu = menu;
         dismissOnCaretMove(codeArea, menu);
         codeArea.getCaretBounds().ifPresent(bounds -> menu.show(codeArea, bounds.getMaxX(), bounds.getMaxY()));
-    }
-
-    /**
-     * Dispara la lectura del esquema en un hilo aparte y la deja en
-     * {@link #schemaCache} para la próxima invocación — nunca actualiza un
-     * popup ya abierto (esta misma invocación ya se mostró solo con
-     * palabras clave). {@code schemaLoading} evita mandar la misma
-     * consulta dos veces si el usuario pide autocompletado repetidas veces
-     * mientras la primera carga sigue en curso.
-     */
-    private static void loadSchemaInBackground(DatabaseEntry db, CredentialStore credentials, ConnectionPoolManager pool) {
-        if (!schemaLoading.add(db.id())) {
-            return;
-        }
-        log.debug("[{}] Sin esquema en caché — disparando carga en segundo plano.", db.alias());
-        Task<SchemaInfo> task = SchemaIntrospector.fetch(db, credentials, pool);
-        task.setOnSucceeded(e -> {
-            schemaCache.put(db.id(), task.getValue());
-            schemaLoading.remove(db.id());
-        });
-        task.setOnFailed(e -> {
-            // Antes se descartaba en silencio — si el autocompletado nunca mostraba
-            // tabla/columnas reales para una base, no había ningún rastro de por qué.
-            log.warn("[{}] No se pudo cargar el esquema para autocompletado", db.alias(), task.getException());
-            schemaLoading.remove(db.id());
-        });
-        Thread thread = new Thread(task, "faro-schema-fetch");
-        thread.setDaemon(true);
-        thread.start();
     }
 
     /** Si hay un popup de una invocación anterior sin resolver (el usuario no eligió nada), lo cierra antes de mostrar uno nuevo. */

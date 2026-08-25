@@ -38,7 +38,7 @@ public final class DiscoverDialog {
             }
 
             Scene scene = new Scene(root, 460, 520);
-            Theme.applyTo(scene, preferences.isDarkTheme());
+            Theme.applyTo(scene, preferences.isDarkTheme(), preferences.accentName());
 
             Stage stage = new Stage();
             stage.setTitle("Descubrir bases de datos");

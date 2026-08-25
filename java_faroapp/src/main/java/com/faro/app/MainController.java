@@ -44,6 +44,7 @@ import com.faro.app.query.CsvFileNamer;
 import com.faro.app.query.ExecutionStatus;
 import com.faro.app.query.QueryExecutionService;
 import com.faro.app.query.QueryResult;
+import com.faro.app.query.SchemaIntrospector;
 import com.faro.app.query.SqlFormatter;
 import com.faro.app.ui.AddDatabaseDialog;
 import com.faro.app.ui.ConnectionTreeBuilder;
@@ -55,6 +56,7 @@ import com.faro.app.ui.ExecutionTableFactory;
 import com.faro.app.ui.Icons;
 import com.faro.app.ui.PreferencesDialog;
 import com.faro.app.ui.ResultsTableFactory;
+import com.faro.app.ui.SchemaTreeNode;
 import com.faro.app.ui.SqlAutocomplete;
 import com.faro.app.ui.SqlEditorFactory;
 import com.faro.app.ui.Theme;
@@ -90,6 +92,7 @@ import javafx.scene.control.TextInputDialog;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.control.TreeView;
 import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
@@ -291,8 +294,11 @@ public class MainController {
     private String lastExecutionStartTime = "";
     private int queryTabCounter;
     private Timer autosaveTimer;
+    private Timer statusBarTimer;
 
     private static final long AUTOSAVE_INTERVAL_MILLIS = 120_000;
+    /** Pool activo/total y memoria SÍ cambian en cualquier momento (no solo al terminar una ejecución/exportación, que es cuando refreshStatusBar() ya se llamaba) — hallazgo real del usuario probando en vivo: "lo veo todo estático no veo que cambie". 2.5s de por medio: suficiente para sentirse en vivo, demasiado espaciado como para que leer HikariCP/Runtime en cada tick importe de verdad. */
+    private static final long STATUS_BAR_REFRESH_INTERVAL_MILLIS = 2500;
 
     @FXML
     private void initialize() {
@@ -301,7 +307,7 @@ public class MainController {
         loadCredentials();
         connectionTree.setCellFactory(tree ->
                 new ConnectionTreeCell(this::openEditDialog, this::onNewQueryForDatabase, this::confirmAndDeleteDatabase,
-                        this::onDiscoverForDatabase));
+                        this::onDiscoverForDatabase, this::onGenerateSelect));
         connectionTree.setOnMouseClicked(this::onTreeClicked);
         connectionFilterField.textProperty().addListener((obs, oldText, newText) -> {
             connectionFilterText = newText;
@@ -309,6 +315,7 @@ public class MainController {
         });
         refreshTree();
         startAutosave();
+        startStatusBarRefresh();
 
         addQueryTab("", null);
         findField.setOnKeyPressed(event -> {
@@ -439,6 +446,10 @@ public class MainController {
         return preferences.isDarkTheme();
     }
 
+    String accentName() {
+        return preferences.accentName();
+    }
+
     /** Cambia entre tema claro/oscuro en caliente y lo deja guardado para la próxima vez que abra la app. */
     @FXML
     private void onToggleTheme() {
@@ -458,8 +469,9 @@ public class MainController {
     private void applyCurrentTheme() {
         Scene scene = connectionTree.getScene();
         scene.getStylesheets().clear();
-        Theme.applyTo(scene, preferences.isDarkTheme());
+        Theme.applyTo(scene, preferences.isDarkTheme(), preferences.accentName());
         updateThemeToggleIcon();
+        applyEditorFontSize();
     }
 
     /** Muestra el ícono de lo que el clic va a hacer — luna (pasar a oscuro) en tema claro, sol (pasar a claro) en oscuro. */
@@ -555,6 +567,32 @@ public class MainController {
         if (initialText != null && !initialText.isEmpty()) {
             codeArea.replaceText(initialText);
         }
+        codeArea.setStyle("-fx-font-size: " + preferences.editorFontSize() + "px;");
+        // Ctrl+Plus/Ctrl+Minus/Ctrl+0 — SOLO el tamaño de fuente de este editor (todas las
+        // pestañas comparten un único valor, ver applyEditorFontSize), a propósito distinto
+        // del "zoom global" que se probó 3 veces y se quitó por completo el 2026-08-22 (ese
+        // escalaba TODA la interfaz: menús, botones, árbol). Filtro puesto directo en el
+        // CodeArea (no un acelerador de menú global) para que solo dispare con el editor
+        // enfocado, igual que documenta demo_html (agrupado bajo "Editor SQL", no global).
+        codeArea.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (!event.isControlDown()) {
+                return;
+            }
+            KeyCode code = event.getCode();
+            if (code == KeyCode.PLUS || code == KeyCode.EQUALS || code == KeyCode.ADD) {
+                preferences.setEditorFontSize(preferences.editorFontSize() + 1);
+                applyEditorFontSize();
+                event.consume();
+            } else if (code == KeyCode.MINUS || code == KeyCode.SUBTRACT) {
+                preferences.setEditorFontSize(preferences.editorFontSize() - 1);
+                applyEditorFontSize();
+                event.consume();
+            } else if (code == KeyCode.DIGIT0 || code == KeyCode.NUMPAD0) {
+                preferences.setEditorFontSize(14);
+                applyEditorFontSize();
+                event.consume();
+            }
+        });
 
         QueryTabState state = new QueryTabState(codeArea);
         state.file = file;
@@ -586,6 +624,24 @@ public class MainController {
         queryTabPane.getTabs().add(tab);
         queryTabPane.getSelectionModel().select(tab);
         return tab;
+    }
+
+    /**
+     * Reaplica {@code preferences.editorFontSize()} a TODAS las pestañas de
+     * consulta abiertas (una sola preferencia compartida, no una por
+     * pestaña) — llamado al arrancar, cada vez que se abre una pestaña
+     * nueva (ver {@link #addQueryTab}, que ya lo pone en la suya al
+     * crearla, esto cubre las que YA estaban abiertas), desde
+     * Preferencias → Apariencia al guardar, y desde los atajos
+     * Ctrl+Plus/Ctrl+Minus/Ctrl+0 del editor mismo.
+     */
+    private void applyEditorFontSize() {
+        String style = "-fx-font-size: " + preferences.editorFontSize() + "px;";
+        for (Tab tab : queryTabPane.getTabs()) {
+            if (tab.getUserData() instanceof QueryTabState state) {
+                state.codeArea.setStyle(style);
+            }
+        }
     }
 
     /**
@@ -884,7 +940,7 @@ public class MainController {
      * de la app), el resto como {@code .button-secondary}.
      */
     private void applyThemeToAlert(Dialog<?> dialog) {
-        Theme.applyTo(dialog.getDialogPane().getScene(), preferences.isDarkTheme());
+        Theme.applyTo(dialog.getDialogPane().getScene(), preferences.isDarkTheme(), preferences.accentName());
         for (ButtonType buttonType : dialog.getDialogPane().getButtonTypes()) {
             Node button = dialog.getDialogPane().lookupButton(buttonType);
             if (button != null) {
@@ -1156,10 +1212,17 @@ public class MainController {
      * conexiones (HikariCP), timeout/fetch configurados, memoria usada por
      * la JVM, y motor(es)/JDK reales. Igual que faro-java-prototipo.html,
      * que muestra exactamente estos mismos datos (antes la barra solo
-     * tenía "Faro" y el mensaje de estado puntual). Se llama al arrancar y
-     * después de cada ejecución/exportación — no hay un timer periódico
-     * dedicado solo para esto, no vale la pena la máquina extra por un
-     * dato que igual se refresca seguido con el uso normal de la app.
+     * tenía "Faro" y el mensaje de estado puntual). Se llama al arrancar,
+     * después de cada ejecución/exportación (para que el resultado quede
+     * reflejado sin esperar el próximo tick), y además cada
+     * {@link #STATUS_BAR_REFRESH_INTERVAL_MILLIS} vía
+     * {@link #startStatusBarRefresh()} — pool activo/total y memoria
+     * cambian en cualquier momento, no solo cuando algo termina (hallazgo
+     * real del usuario probando en vivo, 2026-08-25: "lo veo todo
+     * estático"). Timeout/fetch y motor(es)/JDK sí son estáticos a
+     * propósito (preferencias/datos cacheados que no cambian en caliente),
+     * recalcularlos en cada tick es gratis igual, no vale la pena separar
+     * la función en dos solo por eso.
      */
     private void refreshStatusBar() {
         ConnectionPoolManager.PoolSummary poolSummary = pool.poolSummary();
@@ -1686,6 +1749,30 @@ public class MainController {
     }
 
     /**
+     * "Generar SELECT" del explorador de esquema (clic derecho o doble clic
+     * en una fila de Tabla/Vista, ver {@code ConnectionTreeCell}) — arma
+     * {@code SELECT col1, col2, ... FROM tabla} con las columnas reales ya
+     * conocidas (del mismo caché que ya llenó el árbol, sin viaje nuevo a la
+     * base) y abre una pestaña nueva, marcando SOLO la casilla de esa base
+     * — mismo patrón que {@link #onNewQueryForDatabase}.
+     */
+    private void onGenerateSelect(SchemaTreeNode.Item item) {
+        List<String> columns = SchemaIntrospector.cached(item.database().id())
+                .map(SchemaIntrospector.SchemaInfo::columnsByTable)
+                .map(byTable -> byTable.get(item.name()))
+                .orElse(null);
+        String columnList = (columns == null || columns.isEmpty()) ? "*" : String.join(", ", columns);
+        String sql = "SELECT " + columnList + " FROM " + item.name();
+
+        for (CheckBoxTreeItem<Object> treeItem : ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot())) {
+            treeItem.setSelected(treeItem.getValue() == item.database());
+        }
+        addQueryTab(sql, null);
+        statusLabel.setText("SELECT generado para " + item.name() + " — su casilla ya quedó marcada.");
+        logger.info("onGenerateSelect: [{}] {}", item.database().alias(), sql);
+    }
+
+    /**
      * Reconstruye el árbol desde cero (siempre — no hay actualización
      * incremental) aplicando el filtro de texto actual, si hay uno. Antes
      * de tirar el árbol viejo, guarda qué bases estaban marcadas y las
@@ -1704,7 +1791,7 @@ public class MainController {
                         .map(item -> ((DatabaseEntry) item.getValue()).id())
                         .toList());
 
-        connectionTree.setRoot(ConnectionTreeBuilder.buildRoot(registry, connectionFilterText));
+        connectionTree.setRoot(ConnectionTreeBuilder.buildRoot(registry, connectionFilterText, credentials, pool));
         bindSelectedCount();
         bindSelectAllButtonText();
 
@@ -1809,6 +1896,27 @@ public class MainController {
         }, AUTOSAVE_INTERVAL_MILLIS, AUTOSAVE_INTERVAL_MILLIS);
     }
 
+    /**
+     * Antes {@link #refreshStatusBar()} solo se llamaba al arrancar y al
+     * terminar una ejecución/exportación — "pool activo/total" y "Memoria"
+     * se quedaban congelados con ese último valor mientras tanto, aunque el
+     * pool/la memoria real siguieran cambiando de verdad (ej. mientras una
+     * consulta pesada seguía corriendo). Hallazgo real del usuario probando
+     * en vivo (2026-08-25): "lo veo todo estático no veo que cambie".
+     * Mismo patrón que {@link #startAutosave()} — {@code Timer} demonio,
+     * {@code Platform.runLater} porque el tick corre en el hilo del
+     * {@code Timer}, no en el de JavaFX.
+     */
+    private void startStatusBarRefresh() {
+        statusBarTimer = new Timer("faro-status-bar-refresh", true);
+        statusBarTimer.scheduleAtFixedRate(new TimerTask() {
+            @Override
+            public void run() {
+                Platform.runLater(MainController.this::refreshStatusBar);
+            }
+        }, STATUS_BAR_REFRESH_INTERVAL_MILLIS, STATUS_BAR_REFRESH_INTERVAL_MILLIS);
+    }
+
     private void autosave() {
         try {
             ConnectionRegistryStore.save(registry, preferences, favorites, ConnectionRegistryStore.DEFAULT_FILE);
@@ -1829,6 +1937,7 @@ public class MainController {
     void shutdown() {
         logger.info("MainController.shutdown() — guardando y cerrando pools.");
         autosaveTimer.cancel();
+        statusBarTimer.cancel();
         pool.closeAll();
         try {
             ConnectionRegistryStore.save(registry, preferences, favorites, ConnectionRegistryStore.DEFAULT_FILE);

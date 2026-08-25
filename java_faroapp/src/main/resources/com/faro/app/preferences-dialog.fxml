@@ -4,6 +4,7 @@
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Spinner?>
 <?import javafx.scene.control.Tab?>
 <?import javafx.scene.control.TabPane?>
 <?import javafx.scene.control.TextField?>
@@ -40,7 +41,12 @@
 
                     <Label text="Timeout de consulta por defecto (s)" styleClass="field-label" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
                     <TextField fx:id="queryTimeoutField" styleClass="text-field" GridPane.rowIndex="2" GridPane.columnIndex="1"/>
+
+                    <Label text="Fetch size (filas por bloque al leer resultados)" styleClass="field-label" GridPane.rowIndex="3" GridPane.columnIndex="0"/>
+                    <TextField fx:id="fetchSizeField" styleClass="text-field" GridPane.rowIndex="3" GridPane.columnIndex="1"/>
                 </GridPane>
+                <Label styleClass="muted" wrapText="true"
+                       text="Fetch size: hoy solo tiene efecto real en SQL Server. En PostgreSQL el driver lo ignora en silencio fuera de una transacción explícita (autocommit, el modo normal de la app) — sigue trayendo el resultado completo de un golpe sin importar este valor."/>
             </VBox>
         </Tab>
         <Tab text="Atajos">
@@ -77,7 +83,7 @@
             <VBox spacing="14">
                 <padding><Insets top="14" right="4" bottom="4" left="4"/></padding>
                 <Label styleClass="muted" wrapText="true"
-                       text="Tema claro/oscuro real — el acento de color (índigo) todavía es fijo, no hay selector para eso todavía."/>
+                       text="Tema claro/oscuro y color de acento reales. El tamaño de fuente solo afecta el editor SQL — no el resto de la interfaz."/>
                 <GridPane hgap="10" vgap="10">
                     <columnConstraints>
                         <ColumnConstraints minWidth="220"/>
@@ -85,6 +91,12 @@
                     </columnConstraints>
                     <Label text="Tema" styleClass="field-label" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
                     <ComboBox fx:id="themeCombo" maxWidth="Infinity" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
+
+                    <Label text="Color de acento" styleClass="field-label" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+                    <HBox fx:id="accentSwatchesBox" spacing="8" alignment="CENTER_LEFT" GridPane.rowIndex="1" GridPane.columnIndex="1"/>
+
+                    <Label text="Tamaño de fuente del editor SQL" styleClass="field-label" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+                    <Spinner fx:id="editorFontSizeSpinner" editable="true" GridPane.rowIndex="2" GridPane.columnIndex="1"/>
                 </GridPane>
             </VBox>
         </Tab>

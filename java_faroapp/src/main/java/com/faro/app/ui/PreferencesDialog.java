@@ -43,7 +43,7 @@ public final class PreferencesDialog {
             }
 
             Scene scene = new Scene(root, 460, 420);
-            Theme.applyTo(scene, preferences.isDarkTheme());
+            Theme.applyTo(scene, preferences.isDarkTheme(), preferences.accentName());
 
             Stage stage = new Stage();
             stage.setTitle("Preferencias");

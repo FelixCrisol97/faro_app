@@ -70,6 +70,8 @@ public final class ConnectionRegistryStore {
         prefs.addProperty("defaultQueryTimeoutSeconds", preferences.defaultQueryTimeoutSeconds());
         prefs.addProperty("darkTheme", preferences.isDarkTheme());
         prefs.addProperty("fetchSize", preferences.fetchSize());
+        prefs.addProperty("accentName", preferences.accentName());
+        prefs.addProperty("editorFontSize", preferences.editorFontSize());
         root.add("preferences", prefs);
 
         JsonArray favoritesJson = new JsonArray();
@@ -132,6 +134,12 @@ public final class ConnectionRegistryStore {
             }
             if (prefs.has("fetchSize")) {
                 preferences.setFetchSize(prefs.get("fetchSize").getAsInt());
+            }
+            if (prefs.has("accentName")) {
+                preferences.setAccentName(prefs.get("accentName").getAsString());
+            }
+            if (prefs.has("editorFontSize")) {
+                preferences.setEditorFontSize(prefs.get("editorFontSize").getAsInt());
             }
         }
 

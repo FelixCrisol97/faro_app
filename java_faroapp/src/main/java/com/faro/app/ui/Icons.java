@@ -30,6 +30,10 @@ public final class Icons {
             + "M10 11v6"
             + "M14 11v6";
     public static final String PLUS = "M12 5v14M5 12h14";
+    /** Grid de tabla — calcado del SVG real del explorador de esquema en faro-java-prototipo.html (rect redondeado + una línea horizontal y una vertical), usado para filas de Tabla/Vista en el árbol. */
+    public static final String TABLE = "M4 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1Z"
+            + "M4 11h16"
+            + "M11 4v16";
     /** Círculo (r=4, centro 12,12) expresado como dos arcos, porque SVGPath no soporta &lt;circle&gt; — + los 8 rayos. */
     public static final String SUN = "M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0"
             + "M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4";

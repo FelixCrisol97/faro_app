@@ -58,11 +58,34 @@ public final class Theme {
      * ("/com/faro/app/..."), así que no importa qué {@code Class} se use
      * para resolverlas — {@code Theme.class} sirve igual que cualquier
      * otra.
+     *
+     * <p><b>Acento real (2026-08-25)</b> — después de las 2 hojas de
+     * siempre, sobreescribe los 5 tokens {@code -token-accent-*} en el nodo
+     * raíz de la escena con un estilo inline (`Node#setStyle`), que en la
+     * cascada de JavaFX gana sobre la regla `.root { ... }` de
+     * `theme-light.css`/`theme-dark.css` — mismo mecanismo de "looked-up
+     * colors" que ya usan esas hojas, solo que el override vive en código,
+     * no en un archivo `.css` nuevo por combinación de acento/tema (serían
+     * 12). Sin esto, cualquier ventana se queda siempre en "indigo" sin
+     * importar {@code accentName}, porque las hojas de siempre son las
+     * únicas que definían esos 5 tokens hasta ahora.
      */
-    public static void applyTo(Scene scene, boolean darkTheme) {
+    public static void applyTo(Scene scene, boolean darkTheme, String accentName) {
         for (String path : stylesheetResourcePaths(darkTheme)) {
             scene.getStylesheets().add(Theme.class.getResource(path).toExternalForm());
         }
+        applyAccent(scene, darkTheme, accentName);
+    }
+
+    /** Reaplica solo el acento (sin tocar/recargar las hojas de tema) — usado cuando el acento cambia pero el tema claro/oscuro no, para no perder el trabajo de recargar 2 stylesheets completos por nada. */
+    public static void applyAccent(Scene scene, boolean darkTheme, String accentName) {
+        AccentPalette.Tokens t = AccentPalette.tokens(accentName, darkTheme);
+        scene.getRoot().setStyle(
+                "-token-accent-base: " + t.base() + ";"
+                + " -token-accent-hover: " + t.hover() + ";"
+                + " -token-accent-active: " + t.active() + ";"
+                + " -token-accent-soft: " + t.soft() + ";"
+                + " -token-accent-soft-text: " + t.softText() + ";");
     }
 
     /** Sistema viejo, sin usar — ver el javadoc de la clase para cuándo volver a esto. */

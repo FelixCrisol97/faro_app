@@ -1,6 +1,7 @@
 package com.faro.app.data;
 
 import com.faro.app.query.QueryExecutionService;
+import com.faro.app.ui.AccentPalette;
 import com.faro.app.ui.AddDatabaseDialogController;
 
 /**
@@ -22,6 +23,10 @@ public final class AppPreferences {
     private boolean darkTheme;
     /** Filas por bloque pedidas al driver JDBC ({@code Statement#setFetchSize}) — ver {@code QueryExecutionService#runOne}. Nota real: PgJDBC solo lo respeta con autocommit desactivado (no es el caso hoy) y lo ignora en silencio en autocommit — el driver de SQL Server sí lo respeta siempre. Se deja igual (no truena, solo no ayuda en Postgres todavía) para no meter cambios de semántica de transacciones solo por esto. */
     private int fetchSize = 500;
+    /** Uno de {@link AccentPalette#NAMES} — ver Preferencias → Apariencia. */
+    private String accentName = "indigo";
+    /** Tamaño de fuente del editor SQL, en px — SOLO el editor, nunca el resto de la interfaz (el zoom global de toda la app se probó y se quitó por completo el 2026-08-22, ver README/CONTEXTO_SESIONES.md). Mismo valor que estaba fijo en `.sql-editor` de app.css antes de esto. */
+    private int editorFontSize = 14;
 
     public int maxConcurrentDatabases() {
         return maxConcurrentDatabases;
@@ -35,8 +40,9 @@ public final class AppPreferences {
         return defaultPoolSize;
     }
 
+    /** Piso duro de 2, no 1 — ver {@code DatabaseEntry#setPoolSize} para el motivo real (el respaldo de cancelación necesita una segunda conexión libre). */
     public void setDefaultPoolSize(int value) {
-        defaultPoolSize = Math.max(1, value);
+        defaultPoolSize = Math.max(2, value);
     }
 
     public int defaultQueryTimeoutSeconds() {
@@ -61,5 +67,22 @@ public final class AppPreferences {
 
     public void setFetchSize(int value) {
         fetchSize = Math.max(1, value);
+    }
+
+    public String accentName() {
+        return accentName;
+    }
+
+    /** Nombre desconocido (ej. un JSON de preferencias viejo/corrupto con un valor que ya no existe) cae a "indigo" en vez de guardar basura — mismo criterio defensivo que {@link AccentPalette#tokens} ya aplica al leerlo. */
+    public void setAccentName(String value) {
+        accentName = value != null && AccentPalette.NAMES.contains(value) ? value : "indigo";
+    }
+
+    public int editorFontSize() {
+        return editorFontSize;
+    }
+
+    public void setEditorFontSize(int value) {
+        editorFontSize = Math.max(10, Math.min(24, value));
     }
 }

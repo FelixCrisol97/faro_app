@@ -77,13 +77,17 @@ public final class ConnectionPoolManager {
     }
 
     private static HikariDataSource buildDataSource(DatabaseEntry db, CredentialStore.Credentials credentials) {
+        // Math.max(2, ...) como red de seguridad, no la validación principal — DatabaseEntry#setPoolSize
+        // ya no deja guardar menos de 2 (el respaldo de cancelación necesita una segunda
+        // conexión libre); esto solo cubre un DatabaseEntry armado sin pasar por ese setter.
+        int poolSize = Math.max(2, db.poolSize());
         log.info("Creando pool para '{}' — {} (usuario={}, poolSize={})",
-                db.alias(), db.jdbcUrl(), credentials.user(), Math.max(1, db.poolSize()));
+                db.alias(), db.jdbcUrl(), credentials.user(), poolSize);
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl(db.jdbcUrl());
         config.setUsername(credentials.user());
         config.setPassword(credentials.password());
-        config.setMaximumPoolSize(Math.max(1, db.poolSize()));
+        config.setMaximumPoolSize(poolSize);
         config.setPoolName("faro-" + db.alias());
         return new HikariDataSource(config);
     }
