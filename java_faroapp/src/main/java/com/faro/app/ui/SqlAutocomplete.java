@@ -11,7 +11,7 @@ import com.faro.app.data.CredentialStore;
 import com.faro.app.model.DatabaseEntry;
 import com.faro.app.query.ConnectionPoolManager;
 import com.faro.app.query.SchemaIntrospector;
-import com.faro.app.query.SchemaIntrospector.SchemaInfo;
+import com.faro.app.query.SchemaIntrospector.SchemaStructure;
 import com.faro.app.query.SqlFormatter;
 
 import org.slf4j.Logger;
@@ -90,14 +90,20 @@ public final class SqlAutocomplete {
                 .toList());
 
         if (activeDb != null) {
-            Optional<SchemaInfo> schema = SchemaIntrospector.cached(activeDb.id());
+            Optional<SchemaStructure> schema = SchemaIntrospector.cached(activeDb.id());
             if (schema.isPresent()) {
                 for (String name : schema.get().queryableNames()) {
                     if (name.toUpperCase(Locale.ROOT).startsWith(prefixUpper) && !matches.contains(name)) {
                         matches.add(name);
                     }
                 }
-                for (String name : schema.get().allColumnNames()) {
+                // Esquema progresivo (2026-08-25) — a diferencia de tabla/vista (siempre
+                // completo apenas se expande la base una vez), las columnas ya no se traen
+                // todas de un jalón: esto solo trae nombres de tablas cuyas columnas ya se
+                // pidieron esta sesión (SELECT/INSERT/UPDATE/DELETE/CREATE TABLE reales, o
+                // autocompletado repetido sobre esa tabla) — se va llenando solo, no
+                // completo desde el primer uso. Ver SchemaIntrospector#cachedColumnNames.
+                for (String name : SchemaIntrospector.cachedColumnNames(activeDb.id())) {
                     if (name.toUpperCase(Locale.ROOT).startsWith(prefixUpper) && !matches.contains(name)) {
                         matches.add(name);
                     }

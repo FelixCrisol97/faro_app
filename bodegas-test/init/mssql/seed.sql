@@ -62,3 +62,74 @@ GO
 
 SELECT COUNT(*) AS total FROM dbo.productos;
 GO
+
+-- A partir de acá: un objeto de cada categoría del explorador de esquema
+-- (2026-08-26, mismo motivo que la versión Postgres de este script — poder
+-- probar en vivo las categorías Vistas/Funciones/Procedimientos/Triggers/
+-- Tipos, que hasta ahora nunca tuvieron ningún objeto real que mostrar).
+-- IF OBJECT_ID(...) IS NOT NULL DROP ... antes de cada CREATE, mismo
+-- criterio de idempotencia que ya usaba este script para dbo.productos —
+-- sirve igual si se vuelve a correr sobre una base que ya tenía estos
+-- objetos.
+
+-- Tipo personalizado — alias type (CREATE TYPE ... FROM ...), el caso más
+-- común en SQL Server (a diferencia de un tipo de tabla, para parámetros
+-- con valores de tabla, fuera de alcance acá).
+IF TYPE_ID('dbo.codigo_postal') IS NOT NULL
+    DROP TYPE dbo.codigo_postal;
+GO
+CREATE TYPE dbo.codigo_postal FROM VARCHAR(5) NOT NULL;
+GO
+
+-- Vista — mismo subconjunto real que la versión Postgres, sin inventar columnas nuevas.
+IF OBJECT_ID('dbo.vista_productos_caros', 'V') IS NOT NULL
+    DROP VIEW dbo.vista_productos_caros;
+GO
+CREATE VIEW dbo.vista_productos_caros AS
+SELECT id, nombre, categoria, precio, stock
+FROM dbo.productos
+WHERE precio > 400;
+GO
+
+-- Función escalar — cuenta real de la tabla, mismo criterio que la versión Postgres.
+IF OBJECT_ID('dbo.fn_total_productos', 'FN') IS NOT NULL
+    DROP FUNCTION dbo.fn_total_productos;
+GO
+CREATE FUNCTION dbo.fn_total_productos()
+RETURNS INT
+AS
+BEGIN
+    RETURN (SELECT COUNT(*) FROM dbo.productos);
+END;
+GO
+
+-- Procedimiento — mutación real (UPDATE), no solo lectura.
+IF OBJECT_ID('dbo.sp_actualizar_stock', 'P') IS NOT NULL
+    DROP PROCEDURE dbo.sp_actualizar_stock;
+GO
+CREATE PROCEDURE dbo.sp_actualizar_stock
+    @id INT,
+    @cantidad INT
+AS
+BEGIN
+    UPDATE dbo.productos SET stock = @cantidad WHERE id = @id;
+END;
+GO
+
+-- Trigger — actualiza fecha_actualizacion sola en cada UPDATE, igual que
+-- la versión Postgres (AFTER UPDATE, no INSTEAD OF — SQL Server no
+-- necesita el patrón NEW/plpgsql, usa la tabla virtual "inserted").
+IF OBJECT_ID('dbo.trg_actualizar_fecha', 'TR') IS NOT NULL
+    DROP TRIGGER dbo.trg_actualizar_fecha;
+GO
+CREATE TRIGGER dbo.trg_actualizar_fecha
+ON dbo.productos
+AFTER UPDATE
+AS
+BEGIN
+    UPDATE p
+    SET fecha_actualizacion = CAST(GETDATE() AS DATE)
+    FROM dbo.productos p
+    INNER JOIN inserted i ON p.id = i.id;
+END;
+GO

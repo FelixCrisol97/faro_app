@@ -72,6 +72,7 @@ public final class ConnectionRegistryStore {
         prefs.addProperty("fetchSize", preferences.fetchSize());
         prefs.addProperty("accentName", preferences.accentName());
         prefs.addProperty("editorFontSize", preferences.editorFontSize());
+        prefs.addProperty("fontScaleDelta", preferences.fontScaleDelta());
         root.add("preferences", prefs);
 
         JsonArray favoritesJson = new JsonArray();
@@ -140,6 +141,9 @@ public final class ConnectionRegistryStore {
             }
             if (prefs.has("editorFontSize")) {
                 preferences.setEditorFontSize(prefs.get("editorFontSize").getAsInt());
+            }
+            if (prefs.has("fontScaleDelta")) {
+                preferences.setFontScaleDelta(prefs.get("fontScaleDelta").getAsInt());
             }
         }
 

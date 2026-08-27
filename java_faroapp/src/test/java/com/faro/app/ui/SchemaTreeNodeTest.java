@@ -9,20 +9,18 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
-import com.faro.app.query.SchemaIntrospector.SchemaInfo;
 import com.faro.app.ui.SchemaTreeNode.Kind;
 
 class SchemaTreeNodeTest {
 
-    private static SchemaInfo sampleInfo() {
-        return new SchemaInfo(
-                List.of("productos", "existencias"),
-                List.of("vista_ventas"),
-                List.of("fn_total"),
-                List.of("sp_reindexar"),
-                List.of("trg_auditoria"),
-                Map.of("productos", List.of("id", "nombre"), "existencias", List.of("id", "cantidad"),
-                        "vista_ventas", List.of("total")));
+    private static Map<Kind, List<String>> sampleInfo() {
+        return Map.of(
+                Kind.TABLES, List.of("productos", "existencias"),
+                Kind.VIEWS, List.of("vista_ventas"),
+                Kind.FUNCTIONS, List.of("fn_total"),
+                Kind.PROCEDURES, List.of("sp_reindexar"),
+                Kind.TRIGGERS, List.of("trg_auditoria"),
+                Kind.TYPES, List.of("estado_pedido"));
     }
 
     @Test
@@ -34,6 +32,7 @@ class SchemaTreeNodeTest {
         assertEquals(List.of("fn_total"), result.get(Kind.FUNCTIONS));
         assertEquals(List.of("sp_reindexar"), result.get(Kind.PROCEDURES));
         assertEquals(List.of("trg_auditoria"), result.get(Kind.TRIGGERS));
+        assertEquals(List.of("estado_pedido"), result.get(Kind.TYPES));
     }
 
     @Test
@@ -45,6 +44,7 @@ class SchemaTreeNodeTest {
         assertTrue(result.get(Kind.FUNCTIONS).isEmpty());
         assertTrue(result.get(Kind.PROCEDURES).isEmpty());
         assertTrue(result.get(Kind.TRIGGERS).isEmpty());
+        assertTrue(result.get(Kind.TYPES).isEmpty());
     }
 
     @Test
@@ -66,6 +66,7 @@ class SchemaTreeNodeTest {
     @Test
     void matchesAnyNameTrueWhenAtLeastOneCategoryHasAMatch() {
         assertTrue(SchemaTreeNode.matchesAnyName(sampleInfo(), "sp_reindexar"));
+        assertTrue(SchemaTreeNode.matchesAnyName(sampleInfo(), "estado_pedido"));
         assertFalse(SchemaTreeNode.matchesAnyName(sampleInfo(), "zzz_no_existe"));
     }
 }

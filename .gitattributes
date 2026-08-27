@@ -1,0 +1,7 @@
+# Los scripts .sh corren dentro de contenedores Linux (bodegas-test/) — con
+# core.autocrlf=true (común en Windows) git los convierte a CRLF al hacer
+# checkout, y bash dentro del contenedor no los puede parsear (syntax error,
+# el contenedor entra en loop de crash-reinicio). Forzar LF sin importar la
+# config local de quien clona el repo. Ver CONTEXTO_SESIONES.md, entrada de
+# esta fecha, para el diagnóstico completo.
+*.sh text eol=lf

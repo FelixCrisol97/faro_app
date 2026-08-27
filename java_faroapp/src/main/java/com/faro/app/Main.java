@@ -52,7 +52,7 @@ public class Main extends Application {
         Scene scene = new Scene(root, 1280, 800);
         // El tema (claro/oscuro) ya está cargado en las preferencias del controlador para
         // cuando llegamos acá — initialize() corrió como parte de loader.load() arriba.
-        Theme.applyTo(scene, controller.isDarkTheme(), controller.accentName());
+        Theme.applyTo(scene, controller.isDarkTheme(), controller.accentName(), controller.fontScaleDelta());
 
         stage.setTitle("Faro");
         stage.setMinWidth(960);

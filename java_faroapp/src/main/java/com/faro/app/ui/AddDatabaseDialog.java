@@ -52,7 +52,7 @@ public final class AddDatabaseDialog {
             // la ventana arrastrando el borde en vez de toparse con texto
             // cortado otra vez.
             Scene scene = new Scene(root, 420, 720);
-            Theme.applyTo(scene, preferences.isDarkTheme(), preferences.accentName());
+            Theme.applyTo(scene, preferences.isDarkTheme(), preferences.accentName(), preferences.fontScaleDelta());
 
             Stage stage = new Stage();
             stage.setTitle(title);

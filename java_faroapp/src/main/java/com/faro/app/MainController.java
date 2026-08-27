@@ -22,6 +22,8 @@ import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import org.fxmisc.flowless.VirtualizedScrollPane;
@@ -37,6 +39,7 @@ import com.faro.app.data.CredentialStore;
 import com.faro.app.data.CredentialVaultStore;
 import com.faro.app.data.Favorite;
 import com.faro.app.data.FavoritesStore;
+import com.faro.app.model.ColumnMetadata;
 import com.faro.app.model.DatabaseEntry;
 import com.faro.app.model.DbEngine;
 import com.faro.app.query.ConnectionPoolManager;
@@ -46,6 +49,7 @@ import com.faro.app.query.QueryExecutionService;
 import com.faro.app.query.QueryResult;
 import com.faro.app.query.SchemaIntrospector;
 import com.faro.app.query.SqlFormatter;
+import com.faro.app.query.SqlScriptGenerator;
 import com.faro.app.ui.AddDatabaseDialog;
 import com.faro.app.ui.ConnectionTreeBuilder;
 import com.faro.app.ui.ConnectionTreeCell;
@@ -95,6 +99,7 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
+import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -273,6 +278,8 @@ public class MainController {
     private final ConnectionPoolManager pool = new ConnectionPoolManager();
     /** Versión real de cada motor, cacheada la primera vez que una conexión de ese tipo tiene éxito (ver {@code QueryExecutionService#runOne}) — para la barra de estado de abajo ("PostgreSQL 15.4 · SQL Server 2019"). */
     private final Map<DbEngine, String> engineVersions = new ConcurrentHashMap<>();
+    /** "db:label:objeto" en vuelo ahora mismo — evita mandar 2 fetches JDBC idénticos si el usuario repite el mismo "Generar…" antes de que el primero termine (hallazgo real de revisión de código, 2026-08-25: {@link #generateFromCacheOrFetch} no tenía ningún candado, a diferencia de {@code loading}/{@code categoryLoading} en {@code SchemaIntrospector}, mismo criterio ahora acá). */
+    private final Set<String> pendingGenerations = ConcurrentHashMap.newKeySet();
     private final AppPreferences preferences = new AppPreferences();
     private final FavoritesStore favorites = new FavoritesStore();
     private final ObservableList<DiagnosticEntry> diagnosticLog = FXCollections.observableArrayList();
@@ -307,7 +314,7 @@ public class MainController {
         loadCredentials();
         connectionTree.setCellFactory(tree ->
                 new ConnectionTreeCell(this::openEditDialog, this::onNewQueryForDatabase, this::confirmAndDeleteDatabase,
-                        this::onDiscoverForDatabase, this::onGenerateSelect));
+                        this::onDiscoverForDatabase, this::onGenerateScript));
         connectionTree.setOnMouseClicked(this::onTreeClicked);
         connectionFilterField.textProperty().addListener((obs, oldText, newText) -> {
             connectionFilterText = newText;
@@ -329,7 +336,7 @@ public class MainController {
         favoritesRailButton.setGraphic(Icons.strokeIcon(Icons.STAR));
         settingsRailButton.setGraphic(Icons.strokeIcon(Icons.SETTINGS));
 
-        resultsTable = ResultsTableFactory.create();
+        resultsTable = ResultsTableFactory.create(preferences.fontScaleDelta());
         resultsContainer.getChildren().add(resultsTable);
         exportCsvButton.setDisable(true);
 
@@ -450,6 +457,10 @@ public class MainController {
         return preferences.accentName();
     }
 
+    int fontScaleDelta() {
+        return preferences.fontScaleDelta();
+    }
+
     /** Cambia entre tema claro/oscuro en caliente y lo deja guardado para la próxima vez que abra la app. */
     @FXML
     private void onToggleTheme() {
@@ -469,9 +480,39 @@ public class MainController {
     private void applyCurrentTheme() {
         Scene scene = connectionTree.getScene();
         scene.getStylesheets().clear();
-        Theme.applyTo(scene, preferences.isDarkTheme(), preferences.accentName());
+        Theme.applyTo(scene, preferences.isDarkTheme(), preferences.accentName(), preferences.fontScaleDelta());
+        // Forzado explícito, sin poder verificarlo en una ventana real (reportado por el
+        // usuario, 2026-08-26: la barra de scroll del árbol de conexiones y la del grid
+        // de resultados se quedan con los colores del tema anterior al cambiar en vivo,
+        // aunque el resto de la ventana sí se repinta bien). El cambio a la lista de
+        // stylesheets ya debería marcar toda la escena para reaplicar CSS en el próximo
+        // pulso — este applyCss() lo adelanta de forma síncrona en vez de esperarlo, por
+        // si el nodo interno del scrollbar (creado por su Skin, no parte del FXML) no
+        // queda cubierto por ese pulso normal. Si el usuario confirma que el bug sigue
+        // igual con esto, hace falta diagnóstico en vivo (mismo criterio que el bug de
+        // visibilidad del scroll de esta misma fecha — log real contra el nodo real, no
+        // otro intento a ciegas).
+        scene.getRoot().applyCss();
         updateThemeToggleIcon();
         applyEditorFontSize();
+        // La altura de fila del grid de resultados es fija (fixedCellSize, ver
+        // ResultsTableFactory) — sin esto, mover el slider de tamaño de interfaz en
+        // Preferencias deja el texto de las filas creciendo dentro de una altura que ya
+        // no le alcanza (texto de filas contiguas superpuesto, reportado con captura
+        // 2026-08-26).
+        resultsTable.setFixedCellSize(ResultsTableFactory.rowHeight(preferences.fontScaleDelta()));
+        // `refresh()` solo (primer intento, no alcanzó — el usuario confirmó que
+        // agrandar el zoom quedó bien pero AL ACHICARLO el texto seguía cortándose,
+        // mismo bug otra vez) — su propio javadoc dice que es para cuando "the
+        // underlying data source has changed", no para un cambio de estilo/tamaño de
+        // fuente; no fuerza que las celdas YA RENDERIZADAS por el VirtualFlow vuelvan a
+        // medirse contra el `-fx-font-size` nuevo, solo repuebla valores. Vaciar y
+        // volver a poner los mismos items SÍ fuerza a TableView a descartar y
+        // reconstruir TODAS las celdas de cero — la única forma confiable encontrada de
+        // que ninguna quede con el tamaño de fuente de antes del cambio.
+        ObservableList<ObservableList<Object>> currentItems = resultsTable.getItems();
+        resultsTable.setItems(FXCollections.observableArrayList());
+        resultsTable.setItems(currentItems);
     }
 
     /** Muestra el ícono de lo que el clic va a hacer — luna (pasar a oscuro) en tema claro, sol (pasar a claro) en oscuro. */
@@ -592,6 +633,26 @@ public class MainController {
                 applyEditorFontSize();
                 event.consume();
             }
+        });
+        // Ctrl+rueda del mouse/trackpad — pedido explícito del usuario (2026-08-26). Antes
+        // se había dejado fuera a propósito ("riesgo real de interferir con el scroll propio
+        // de RichTextFX sin poder probarlo en una ventana real") — mismo riesgo real hoy, pero
+        // mitigado: sin Ctrl, el evento nunca se toca (return temprano, el scroll normal del
+        // editor sigue exactamente igual); con Ctrl, se consume SIEMPRE (incluso si el tamaño
+        // ya está en el límite de AppPreferences#setEditorFontSize, 10-24px) — sin esto, un
+        // Ctrl+scroll en el límite dejaría pasar el evento sin consumir, y RichTextFX movería
+        // el scroll vertical A LA VEZ que "no" hace zoom, justo el efecto doble que se quería
+        // evitar desde el principio. 1px por evento (mismo paso que Ctrl+Plus/Minus) — un
+        // acumulador para promediar gestos de trackpad (muchos eventos chicos por swipe) sería
+        // más suave, pero es complejidad real sin poder probarla en vivo; mejor esfuerzo, no
+        // bloqueante, mismo criterio que el resto de esta función.
+        codeArea.addEventFilter(ScrollEvent.SCROLL, event -> {
+            if (!event.isControlDown()) {
+                return;
+            }
+            preferences.setEditorFontSize(preferences.editorFontSize() + (event.getDeltaY() > 0 ? 1 : -1));
+            applyEditorFontSize();
+            event.consume();
         });
 
         QueryTabState state = new QueryTabState(codeArea);
@@ -940,7 +1001,7 @@ public class MainController {
      * de la app), el resto como {@code .button-secondary}.
      */
     private void applyThemeToAlert(Dialog<?> dialog) {
-        Theme.applyTo(dialog.getDialogPane().getScene(), preferences.isDarkTheme(), preferences.accentName());
+        Theme.applyTo(dialog.getDialogPane().getScene(), preferences.isDarkTheme(), preferences.accentName(), preferences.fontScaleDelta());
         for (ButtonType buttonType : dialog.getDialogPane().getButtonTypes()) {
             Node button = dialog.getDialogPane().lookupButton(buttonType);
             if (button != null) {
@@ -977,6 +1038,13 @@ public class MainController {
             return;
         }
 
+        // Hallazgo en vivo del usuario (2026-08-25, bases reales de cliente): "N/M
+        // exitosas" no dice CUÁLES fallaron ni por qué — para corregir un nombre de BD,
+        // usuario, red o permisos había que ir a buscar al log del archivo. failures se
+        // llena solo dentro de call() (un único hilo de fondo, sin concurrencia real) y
+        // se lee después en setOnSucceeded, que la máquina de estados de Task garantiza
+        // que corre después de que call() ya terminó del todo.
+        List<String> failures = new ArrayList<>();
         Task<Long> task = new Task<>() {
             @Override
             protected Long call() {
@@ -984,6 +1052,7 @@ public class MainController {
                 for (DatabaseEntry db : all) {
                     Optional<CredentialStore.Credentials> creds = credentials.resolve(db.id());
                     if (creds.isEmpty()) {
+                        failures.add(db.alias() + ": sin usuario/contraseña guardados");
                         continue;
                     }
                     Platform.runLater(() -> {
@@ -996,6 +1065,7 @@ public class MainController {
                         connected++;
                     } catch (SQLException e) {
                         db.setConnectionStatus(DatabaseEntry.ConnectionStatus.FAILED);
+                        failures.add(db.alias() + ": " + e.getMessage());
                     }
                     Platform.runLater(connectionTree::refresh);
                 }
@@ -1005,8 +1075,12 @@ public class MainController {
         task.setOnRunning(e -> statusLabel.setText("Probando " + all.size() + " conexión(es)…"));
         task.setOnSucceeded(e -> {
             long connected = task.getValue();
-            statusLabel.setText(connected + "/" + all.size() + " conexión(es) exitosa(s).");
+            statusLabel.setText(connected + "/" + all.size() + " conexión(es) exitosa(s)."
+                    + (failures.isEmpty() ? "" : " Ver Diagnóstico."));
             log("Probar todas las conexiones: " + connected + "/" + all.size() + " exitosas.");
+            for (String failure : failures) {
+                log(LogLevel.WARN, "Conexión falló — " + failure);
+            }
         });
 
         Thread thread = new Thread(task, "faro-test-all");
@@ -1740,36 +1814,177 @@ public class MainController {
      * genérico de Nueva consulta (sin ninguna base asociada de entrada).
      */
     private void onNewQueryForDatabase(DatabaseEntry db) {
-        for (CheckBoxTreeItem<Object> item : ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot())) {
-            item.setSelected(item.getValue() == db);
-        }
+        selectOnlyDatabase(db);
         addQueryTab("", null);
         statusLabel.setText("Nueva consulta para " + db.alias() + " — su casilla ya quedó marcada.");
         log("Nueva consulta abierta para " + db.alias() + " (casilla marcada automáticamente).");
     }
 
+    /** Marca SOLO la casilla de {@code db} en el árbol, desmarca cualquier otra — usado por {@link #onNewQueryForDatabase} y cada "Generar…" del explorador de esquema, para no tener que adivinar/buscar cuál base marcar antes de abrir el script generado. */
+    private void selectOnlyDatabase(DatabaseEntry db) {
+        for (CheckBoxTreeItem<Object> item : ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot())) {
+            item.setSelected(item.getValue() == db);
+        }
+    }
+
+    /**
+     * Único punto de entrada de "Generar…" desde {@link ConnectionTreeCell}
+     * — reparte según la acción pedida (ver {@code SchemaTreeNode
+     * .GenerateAction}) al método real, sin cambiar la firma del
+     * constructor de {@code ConnectionTreeCell} cada vez que se agregue una
+     * acción nueva.
+     */
+    private void onGenerateScript(SchemaTreeNode.Item item, SchemaTreeNode.GenerateAction action) {
+        switch (action) {
+            case SELECT -> onGenerateSelect(item);
+            case INSERT -> onGenerateInsert(item);
+            case UPDATE -> onGenerateUpdate(item);
+            case DELETE -> onGenerateDelete(item);
+            case CREATE_TABLE -> onGenerateCreateTable(item);
+            case CREATE_SCRIPT -> onGenerateCreateScript(item);
+        }
+    }
+
     /**
      * "Generar SELECT" del explorador de esquema (clic derecho o doble clic
      * en una fila de Tabla/Vista, ver {@code ConnectionTreeCell}) — arma
-     * {@code SELECT col1, col2, ... FROM tabla} con las columnas reales ya
-     * conocidas (del mismo caché que ya llenó el árbol, sin viaje nuevo a la
-     * base) y abre una pestaña nueva, marcando SOLO la casilla de esa base
-     * — mismo patrón que {@link #onNewQueryForDatabase}.
+     * {@code SELECT col1, col2, ... FROM tabla} con las columnas reales.
+     *
+     * <p><b>Esquema progresivo (2026-08-25):</b> antes esto leía
+     * {@code columnsByTable}, un caché masivo con las columnas de TODAS las
+     * tablas de la base, cargado de un jalón al expandirla — hallazgo en
+     * vivo del usuario contra bases DEV reales de cliente: ese fetch masivo
+     * era lo que dejaba el árbol pegado en "Cargando esquema…" en bases
+     * grandes. Ahora pasa por {@link #generateFromColumnDetails}, el mismo
+     * camino caché-primero-si-no-fetch que ya usaban UPDATE/DELETE/CREATE
+     * TABLE — instantáneo si esta tabla ya se tocó antes en la sesión, o un
+     * fetch real (con "Generando…" en {@code statusLabel}) la primera vez.
      */
     private void onGenerateSelect(SchemaTreeNode.Item item) {
-        List<String> columns = SchemaIntrospector.cached(item.database().id())
-                .map(SchemaIntrospector.SchemaInfo::columnsByTable)
-                .map(byTable -> byTable.get(item.name()))
-                .orElse(null);
-        String columnList = (columns == null || columns.isEmpty()) ? "*" : String.join(", ", columns);
-        String sql = "SELECT " + columnList + " FROM " + item.name();
+        generateFromColumnDetails(item, "SELECT", columns -> {
+            String columnList = columns.isEmpty() ? "*"
+                    : columns.stream().map(ColumnMetadata::name).collect(Collectors.joining(", "));
+            return "SELECT " + columnList + " FROM " + item.name();
+        });
+    }
 
-        for (CheckBoxTreeItem<Object> treeItem : ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot())) {
-            treeItem.setSelected(treeItem.getValue() == item.database());
+    /** "Generar INSERT" (solo tablas) — mismo camino que {@link #onGenerateSelect} ahora (ver su javadoc), solo los nombres de columna le importan a {@code SqlScriptGenerator#generateInsertScript}. */
+    private void onGenerateInsert(SchemaTreeNode.Item item) {
+        generateFromColumnDetails(item, "INSERT", columns ->
+                SqlScriptGenerator.generateInsertScript(item.name(), columns.stream().map(ColumnMetadata::name).toList()));
+    }
+
+    /** "Generar UPDATE" (solo tablas) — a diferencia de SELECT/INSERT, necesita saber cuál columna es la PK (para el WHERE), así que sí puede implicar un viaje real a la base si nunca se pidió antes en esta sesión (ver {@link #generateFromColumnDetails}). */
+    private void onGenerateUpdate(SchemaTreeNode.Item item) {
+        generateFromColumnDetails(item, "UPDATE", columns -> SqlScriptGenerator.generateUpdateScript(item.name(), columns));
+    }
+
+    /** "Generar DELETE" (solo tablas) — mismo motivo que UPDATE: necesita la PK real. */
+    private void onGenerateDelete(SchemaTreeNode.Item item) {
+        generateFromColumnDetails(item, "DELETE", columns -> SqlScriptGenerator.generateDeleteScript(item.name(), columns));
+    }
+
+    /** "Generar script CREATE" de una tabla — mejor esfuerzo desde columnas (tipo/NOT NULL/PK), ver {@code SqlScriptGenerator#generateCreateTableScript}. Ningún motor expone un DDL completo listo para tablas como sí tiene para rutinas — de ahí la diferencia con {@link #onGenerateCreateScript}. */
+    private void onGenerateCreateTable(SchemaTreeNode.Item item) {
+        generateFromColumnDetails(item, "CREATE TABLE", columns -> SqlScriptGenerator.generateCreateTableScript(item.name(), columns));
+    }
+
+    /**
+     * Columnas con tipo/PK reales — instantáneo si ya se pidieron antes en
+     * esta sesión ({@link SchemaIntrospector#cachedColumns}); si no, un
+     * fetch real en segundo plano (con feedback en {@code statusLabel}
+     * mientras corre). Camino compartido por las 5 acciones de tabla
+     * (SELECT/INSERT/UPDATE/DELETE/CREATE TABLE) desde el esquema
+     * progresivo (2026-08-25) — antes SELECT/INSERT tenían su propio atajo
+     * "instantáneo" leyendo un caché masivo de columnas que se cargaba
+     * completo al expandir la base; ese caché desapareció (era la causa
+     * real de que el árbol se quedara pegado en "Cargando esquema…" contra
+     * bases DEV grandes del cliente), así que ahora las 5 comparten este
+     * mismo mecanismo bajo demanda.
+     */
+    private void generateFromColumnDetails(SchemaTreeNode.Item item, String label, Function<List<ColumnMetadata>, String> scriptBuilder) {
+        generateFromCacheOrFetch(item, label, "faro-script-columns",
+                () -> SchemaIntrospector.cachedColumns(item.database().id(), item.name()),
+                () -> SchemaIntrospector.fetchColumns(item.database(), credentials, pool, item.name()),
+                scriptBuilder);
+    }
+
+    /**
+     * "Generar script CREATE" de vista/función/procedimiento/trigger — a
+     * diferencia de una tabla, sí hay un DDL real que el motor puede dar de
+     * un solo viaje ({@code pg_get_viewdef}/{@code pg_get_functiondef}/
+     * {@code pg_get_triggerdef} en PostgreSQL, {@code OBJECT_DEFINITION()}
+     * en SQL Server — ver {@code SchemaIntrospector#fetchDefinition}).
+     * Mismo patrón caché-primero-si-no-fetch que {@link #generateFromColumnDetails}.
+     */
+    private void onGenerateCreateScript(SchemaTreeNode.Item item) {
+        generateFromCacheOrFetch(item, "script CREATE", "faro-script-definition",
+                () -> SchemaIntrospector.cachedDefinition(item.database().id(), item.kind(), item.name()),
+                () -> SchemaIntrospector.fetchDefinition(item.database(), credentials, pool, item.kind(), item.name(), item.parentTable()),
+                script -> script);
+    }
+
+    /**
+     * Único armazón real de "caché primero, si no fetch en segundo plano con
+     * feedback" — {@link #generateFromColumnDetails}/{@link #onGenerateCreateScript}
+     * eran dos copias casi idénticas de esto (hallazgo real de revisión de
+     * código, 2026-08-25: cache-lookup+early-return, mensaje "Generando…",
+     * construir el {@code Task}, éxito→{@link #applyGeneratedScript}, falla→log
+     * + mensaje, hilo demonio — diferían solo en de dónde sale el valor
+     * cacheado/el {@code Task} y el nombre del hilo).
+     *
+     * <p><b>{@code pendingKey} (hallazgo real de revisión de código,
+     * 2026-08-25):</b> repetir el mismo "Generar…" antes de que el primer
+     * fetch termine (doble clic en la fila + clic derecho, o el usuario
+     * impaciente repitiendo el clic) mandaba 2 consultas JDBC idénticas en
+     * paralelo, sin ningún candado — a diferencia de
+     * {@code loading}/{@code categoryLoading} en {@code SchemaIntrospector},
+     * que sí dedupan la carga de esquema. La llave usa {@code label} (no
+     * {@code threadName}) a propósito: SELECT/INSERT/UPDATE/DELETE/CREATE
+     * TABLE de una tabla comparten el mismo {@code threadName}
+     * ("faro-script-columns", ver {@link #generateFromColumnDetails}) pero
+     * cada una es una acción distinta que el usuario sí quiere ver
+     * completada por separado (su propia pestaña con su propio SQL) — dedup
+     * por {@code threadName} habría descartado en silencio, sin pestaña ni
+     * aviso, un SELECT pedido justo después de un UPDATE sobre la misma
+     * tabla mientras el UPDATE seguía en curso. Por {@code label} solo
+     * dedupa el caso real que importa: repetir la MISMA acción sobre el
+     * MISMO objeto antes de que termine.
+     */
+    private <T> void generateFromCacheOrFetch(
+            SchemaTreeNode.Item item, String label, String threadName,
+            Supplier<Optional<T>> cacheLookup, Supplier<Task<T>> taskFactory, Function<T, String> scriptBuilder) {
+        Optional<T> cached = cacheLookup.get();
+        if (cached.isPresent()) {
+            applyGeneratedScript(item, label, scriptBuilder.apply(cached.get()));
+            return;
         }
+        String pendingKey = label + ":" + item.database().id() + ":" + item.name();
+        if (!pendingGenerations.add(pendingKey)) {
+            return;
+        }
+        statusLabel.setText("Generando " + label + " para " + item.name() + "…");
+        Task<T> task = taskFactory.get();
+        task.setOnSucceeded(e -> {
+            pendingGenerations.remove(pendingKey);
+            applyGeneratedScript(item, label, scriptBuilder.apply(task.getValue()));
+        });
+        task.setOnFailed(e -> {
+            pendingGenerations.remove(pendingKey);
+            logger.warn("Generar {} falló para [{}] {}", label, item.database().alias(), item.name(), task.getException());
+            statusLabel.setText("No se pudo generar " + label + " de " + item.name() + " — revisa Diagnóstico.");
+        });
+        Thread thread = new Thread(task, threadName);
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    /** Último paso común de cualquier "Generar…": marcar SOLO la casilla de la base dueña, abrir una pestaña nueva con el script, y avisar en {@code statusLabel}/Diagnóstico. */
+    private void applyGeneratedScript(SchemaTreeNode.Item item, String label, String sql) {
+        selectOnlyDatabase(item.database());
         addQueryTab(sql, null);
-        statusLabel.setText("SELECT generado para " + item.name() + " — su casilla ya quedó marcada.");
-        logger.info("onGenerateSelect: [{}] {}", item.database().alias(), sql);
+        statusLabel.setText(label + " generado para " + item.name() + " — su casilla ya quedó marcada.");
+        logger.info("Generar {}: [{}] {}", label, item.database().alias(), sql);
     }
 
     /**

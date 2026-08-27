@@ -146,10 +146,28 @@ public class AddDatabaseDialogController {
         }
         DatabaseEntry probe = new DatabaseEntry(values.alias, values.host, values.port,
                 values.databaseName, engineCombo.getValue(), modeCombo.getValue());
-        log.info("Probando conexión — {} ({}, usuario={})", probe.jdbcUrl(), probe.engine(), userField.getText());
+        String user = userField.getText();
+        String password = passwordField.getText();
+        // Hallazgo en vivo del usuario (2026-08-25, bases reales de cliente): los campos
+        // quedan vacíos cuando esta base no tiene un override propio en CredentialStore
+        // (startEdit precarga desde credentials.get(entry.id()), que a propósito NO cae al
+        // default de sesión — ver su javadoc) aunque sí exista un default guardado en
+        // "Credenciales por defecto…". Antes esto probaba la conexión con usuario="" en ese
+        // caso, mientras que la ejecución real de consultas SIEMPRE resuelve con fallback
+        // (credentials.resolve). Se iguala acá: campo vacío → cae al mismo resolve() que usa
+        // la app de verdad, antes de probar. En modo "agregar" (editing == null) probe.id()
+        // es un UUID recién generado sin ningún override propio, así que resolve() ahí
+        // equivale exactamente a getDefault() — mismo camino, sin caso especial aparte.
+        if (isBlank(user)) {
+            Optional<CredentialStore.Credentials> resolved = credentials.resolve(editing != null ? editing.id() : probe.id());
+            if (resolved.isPresent()) {
+                user = resolved.get().user();
+                password = resolved.get().password();
+            }
+        }
+        log.info("Probando conexión — {} ({}, usuario={})", probe.jdbcUrl(), probe.engine(), user);
         setTestStatus("Conectando…", null);
-        try (Connection conn = DriverManager.getConnection(
-                probe.jdbcUrl(), userField.getText(), passwordField.getText())) {
+        try (Connection conn = DriverManager.getConnection(probe.jdbcUrl(), user, password)) {
             String version = conn.getMetaData().getDatabaseProductVersion();
             log.info("Prueba de conexión OK — {}", version.lines().findFirst().orElse(version));
             setTestStatus("Conectado — " + version.lines().findFirst().orElse(version), "status-success");
@@ -187,6 +205,17 @@ public class AddDatabaseDialogController {
         if (values == null) {
             log.debug("Guardado de base de datos rechazado — formulario incompleto o inválido.");
             testStatusLabel.setText("Completa alias, host, puerto y base de datos.");
+            return;
+        }
+        // Antes esto se guardaba en silencio (DatabaseEntry.setPoolSize ya ajusta el
+        // valor internamente a este piso) sin ningún aviso — el pedido explícito del
+        // usuario (2026-08-25) fue que la UI NO deje bajar de ahí, no solo que el dato
+        // quede corregido por dentro sin que se note. Rechazar acá, antes de mutar nada.
+        if (values.poolSize() < DatabaseEntry.MIN_POOL_SIZE) {
+            log.debug("Guardado de base de datos rechazado — tamaño de pool {} menor al mínimo {}.",
+                    values.poolSize(), DatabaseEntry.MIN_POOL_SIZE);
+            testStatusLabel.setText("El tamaño de pool mínimo es " + DatabaseEntry.MIN_POOL_SIZE
+                    + " — con menos, cancelar una consulta puede no funcionar bien.");
             return;
         }
 

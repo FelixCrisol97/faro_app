@@ -32,4 +32,12 @@ public enum DbEngine {
     public int defaultPort() {
         return defaultPort;
     }
+
+    /** Esquema por defecto de cada motor ("public"/"dbo") — antes vivía duplicado como switch inline en {@code SchemaIntrospector}. */
+    public String defaultSchema() {
+        return switch (this) {
+            case POSTGRES -> "public";
+            case SQL_SERVER -> "dbo";
+        };
+    }
 }

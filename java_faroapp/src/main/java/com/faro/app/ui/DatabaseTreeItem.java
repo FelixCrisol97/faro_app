@@ -8,7 +8,7 @@ import com.faro.app.data.CredentialStore;
 import com.faro.app.model.DatabaseEntry;
 import com.faro.app.query.ConnectionPoolManager;
 import com.faro.app.query.SchemaIntrospector;
-import com.faro.app.query.SchemaIntrospector.SchemaInfo;
+import com.faro.app.query.SchemaIntrospector.SchemaStructure;
 import com.faro.app.ui.SchemaTreeNode.Kind;
 
 import javafx.application.Platform;
@@ -80,39 +80,107 @@ final class DatabaseTreeItem extends CheckBoxTreeItem<Object> {
     }
 
     private void requestSchema() {
-        Optional<SchemaInfo> cached = SchemaIntrospector.cached(db.id());
+        Optional<SchemaStructure> cached = SchemaIntrospector.cached(db.id());
         if (cached.isPresent()) {
-            super.getChildren().setAll(categoryItems(cached.get()));
+            super.getChildren().setAll(categoryItems());
             return;
         }
         super.getChildren().setAll(List.of(new TreeItem<>("Cargando esquema…")));
         SchemaIntrospector.loadInBackground(db, credentials, pool,
-                info -> Platform.runLater(() -> super.getChildren().setAll(categoryItems(info))));
+                structure -> Platform.runLater(() -> super.getChildren().setAll(categoryItems())),
+                // Hallazgo en vivo del usuario (2026-08-25, bases reales de cliente): sin esto
+                // la fila se quedaba en "Cargando esquema…" para siempre si el fetch fallaba
+                // (credenciales vencidas, red, permisos) — parecía un bloqueo, el único rastro
+                // real quedaba en el log. childrenRequested ya sigue en true, así que expandir
+                // de nuevo esta fila no reintenta solo; "Recargar esquema" del menú contextual
+                // (ya existente) sí vuelve a pedirlo.
+                error -> Platform.runLater(() -> super.getChildren().setAll(
+                        List.of(new TreeItem<>("Error al cargar esquema: " + shortCause(error))))));
     }
 
-    private List<TreeItem<Object>> categoryItems(SchemaInfo info) {
-        Map<Kind, List<String>> byKind = schemaFilter.isEmpty()
-                ? SchemaTreeNode.namesByKind(info)
-                : SchemaTreeNode.filterSchema(info, schemaFilter);
+    /** Primera línea del mensaje real (los de JDBC pueden traer varias) — o el nombre de la clase si no hay mensaje. Package-private a propósito — {@link CategoryTreeItem} la reusa para su propio estado de error. */
+    static String shortCause(Throwable error) {
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            return error.getClass().getSimpleName();
+        }
+        return message.lines().findFirst().orElse(message);
+    }
+
+    /**
+     * Las 6 categorías — se llama solo después de que la estructura
+     * (Tablas/Vistas) YA está en {@link SchemaIntrospector#cached}, así que
+     * leerla acá nunca dispara un fetch por sí sola.
+     *
+     * <p><b>Esquema progresivo (2026-08-25):</b> en el recorrido normal (sin
+     * {@link #schemaFilter}), Tablas/Vistas se arman de inmediato (ya están
+     * cargadas); Funciones/Procedimientos/Triggers/Tipos se arman como
+     * {@link CategoryTreeItem} — perezoso, cada una pide su propio fetch
+     * solo cuando el usuario la expande, no antes. En modo búsqueda por
+     * esquema ({@link #schemaFilter} no vacío) se sigue exactamente el
+     * comportamiento de siempre, ver {@link #filteredCategoryItems}.
+     */
+    private List<TreeItem<Object>> categoryItems() {
+        if (!schemaFilter.isEmpty()) {
+            return filteredCategoryItems();
+        }
+        SchemaStructure structure = SchemaIntrospector.cached(db.id()).orElseThrow();
+        List<TreeItem<Object>> categories = new java.util.ArrayList<>();
+        categories.add(eagerCategory(Kind.TABLES, structure.tableNames(), name -> null));
+        categories.add(eagerCategory(Kind.VIEWS, structure.viewNames(), name -> null));
+        categories.add(new CategoryTreeItem(db, Kind.FUNCTIONS, credentials, pool));
+        categories.add(new CategoryTreeItem(db, Kind.PROCEDURES, credentials, pool));
+        categories.add(new CategoryTreeItem(db, Kind.TRIGGERS, credentials, pool));
+        categories.add(new CategoryTreeItem(db, Kind.TYPES, credentials, pool));
+        return categories;
+    }
+
+    private TreeItem<Object> eagerCategory(Kind kind, List<String> names, java.util.function.Function<String, String> parentTableLookup) {
+        TreeItem<Object> categoryItem = new TreeItem<>(new SchemaTreeNode.Category(db, kind, names.size()));
+        categoryItem.getChildren().setAll(itemNodes(db, kind, names, parentTableLookup));
+        return categoryItem;
+    }
+
+    /**
+     * Modo búsqueda por nombre de esquema ({@link #schemaFilter} no vacío) —
+     * arma las 6 categorías desde lo que YA esté en caché ahora mismo
+     * ({@link SchemaIntrospector#cachedNamesByKind}), sin carga perezosa: si
+     * esta base entró a la lista fue justo porque algo YA cacheado calzó el
+     * filtro (ver {@code ConnectionTreeBuilder#matches}) — pedir más no
+     * cambiaría el resultado del filtro que ya se usó para decidir mostrar
+     * esta fila. Mismo comportamiento de siempre (previo al esquema
+     * progresivo): categorías reales, auto-expandidas, sin lazy-load.
+     */
+    private List<TreeItem<Object>> filteredCategoryItems() {
+        Map<Kind, List<String>> byKind = SchemaTreeNode.filterSchema(SchemaIntrospector.cachedNamesByKind(db.id()), schemaFilter);
         List<TreeItem<Object>> categories = new java.util.ArrayList<>();
         for (Kind kind : Kind.values()) {
             List<String> names = byKind.getOrDefault(kind, List.of());
-            if (!schemaFilter.isEmpty() && names.isEmpty()) {
+            if (names.isEmpty()) {
                 // Filtrando por esquema: una categoría sin ningún nombre que calce no
                 // aporta nada — se omite en vez de mostrarla vacía (distinto del
-                // recorrido normal sin filtro, donde SÍ se listan las 5 aunque una
+                // recorrido normal sin filtro, donde SÍ se listan las 6 aunque una
                 // esté en 0, para que el conteo real quede a la vista).
                 continue;
             }
-            TreeItem<Object> categoryItem = new TreeItem<>(new SchemaTreeNode.Category(db, kind, names.size()));
-            for (String name : names) {
-                categoryItem.getChildren().add(new TreeItem<>(new SchemaTreeNode.Item(db, kind, name)));
-            }
-            if (!schemaFilter.isEmpty()) {
-                categoryItem.setExpanded(true);
-            }
+            java.util.function.Function<String, String> parentTableLookup = kind == Kind.TRIGGERS
+                    ? name -> SchemaIntrospector.cachedTriggerParentTable(db.id(), name).orElse(null)
+                    : name -> null;
+            TreeItem<Object> categoryItem = eagerCategory(kind, names, parentTableLookup);
+            categoryItem.setExpanded(true);
             categories.add(categoryItem);
         }
         return categories;
+    }
+
+    /** Convierte nombres reales en hijos {@code TreeItem<SchemaTreeNode.Item>} — reusado por {@link #eagerCategory} y por {@link CategoryTreeItem} al terminar su propia carga perezosa. {@code parentTableLookup} solo se consulta para {@code Kind#TRIGGERS} (ver {@code SchemaTreeNode.Item#parentTable}). */
+    static List<TreeItem<Object>> itemNodes(
+            DatabaseEntry db, Kind kind, List<String> names, java.util.function.Function<String, String> parentTableLookup) {
+        List<TreeItem<Object>> items = new java.util.ArrayList<>();
+        for (String name : names) {
+            String parentTable = kind == Kind.TRIGGERS ? parentTableLookup.apply(name) : null;
+            items.add(new TreeItem<>(new SchemaTreeNode.Item(db, kind, name, parentTable)));
+        }
+        return items;
     }
 }

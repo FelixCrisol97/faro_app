@@ -1,10 +1,13 @@
 package com.faro.app.ui;
 
+import java.util.List;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import com.faro.app.model.DatabaseEntry;
 import com.faro.app.model.Server;
 import com.faro.app.model.ServerMode;
+import com.faro.app.ui.SchemaTreeNode.GenerateAction;
 import com.faro.app.ui.SchemaTreeNode.Kind;
 
 import javafx.beans.property.BooleanProperty;
@@ -91,8 +94,13 @@ public class ConnectionTreeCell extends TreeCell<Object> {
     private final SVGPath schemaItemIcon = new SVGPath();
     private final Label schemaItemLabel = new Label();
     private final HBox schemaItemRow;
-    private final ContextMenu schemaItemContextMenu;
+    /** Vacío al construirse — {@code updateItem()} decide qué subconjunto de los 5 MenuItem de abajo le corresponde a cada fila vía {@link #menuItemsFor}, no todos aplican a todos los tipos. */
+    private final ContextMenu schemaItemContextMenu = new ContextMenu();
     private final MenuItem generateSelectItem = new MenuItem("Generar SELECT");
+    private final MenuItem generateInsertItem = new MenuItem("Generar INSERT");
+    private final MenuItem generateUpdateItem = new MenuItem("Generar UPDATE");
+    private final MenuItem generateDeleteItem = new MenuItem("Generar DELETE");
+    private final MenuItem generateCreateItem = new MenuItem("Generar script CREATE");
 
     // -- Menú contextual (clic derecho) de una fila de base — construido una sola vez --
     private final ContextMenu databaseContextMenu;
@@ -108,7 +116,7 @@ public class ConnectionTreeCell extends TreeCell<Object> {
             Consumer<DatabaseEntry> onNewQueryRequested,
             Consumer<DatabaseEntry> onDeleteRequested,
             Consumer<DatabaseEntry> onDiscoverRequested,
-            Consumer<SchemaTreeNode.Item> onGenerateSelectRequested) {
+            BiConsumer<SchemaTreeNode.Item, GenerateAction> onGenerateRequested) {
         serverNameLabel.getStyleClass().add("tree-server-name");
         HBox.setHgrow(serverNameLabel, Priority.ALWAYS);
         serverCountLabel.getStyleClass().add("tree-count");
@@ -239,30 +247,52 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         schemaItemRow = new HBox(6, schemaItemIcon, schemaItemLabel);
         schemaItemRow.setAlignment(Pos.CENTER_LEFT);
         fixHeight(schemaItemRow);
-        // "Generar SELECT" — solo tiene sentido en Tablas/Vistas (columnas reales
-        // conocidas); en Funciones/Procedimientos/Triggers armar un SELECT/CALL
-        // correcto depende de la firma real (parámetros), fuera de alcance a
-        // propósito (ver DatabaseTreeItem/SchemaTreeNode). Doble clic dispara lo
-        // mismo — atajo extra, nunca el único camino (mismo criterio que el resto
-        // de esta celda), y el ítem del menú se deshabilita solo (no se oculta,
-        // para que quede claro que la opción existe pero no aplica acá) cuando la
-        // fila no es de Tabla/Vista.
-        generateSelectItem.setOnAction(event -> {
+        // Menú "Generar…" — qué acciones aplican a cada fila depende de su tipo (ver
+        // menuItemsFor(), llamado desde updateItem()): Tabla tiene las 5; Vista solo
+        // SELECT+CREATE (no toda vista es escribible, "Generar UPDATE/INSERT/DELETE"
+        // se queda fuera a propósito); Función/Procedimiento/Trigger solo CREATE — un
+        // SELECT/CALL correcto ahí depende de la firma real (parámetros), fuera de
+        // alcance a propósito (ver SchemaIntrospector). Doble clic en Tabla/Vista
+        // dispara SELECT directo — atajo extra, nunca el único camino (mismo criterio
+        // que el resto de esta celda).
+        generateSelectItem.setOnAction(event -> fireGenerate(onGenerateRequested, GenerateAction.SELECT));
+        generateInsertItem.setOnAction(event -> fireGenerate(onGenerateRequested, GenerateAction.INSERT));
+        generateUpdateItem.setOnAction(event -> fireGenerate(onGenerateRequested, GenerateAction.UPDATE));
+        generateDeleteItem.setOnAction(event -> fireGenerate(onGenerateRequested, GenerateAction.DELETE));
+        // "Generar script CREATE" es un solo ítem para los 2 casos posibles (tabla vs.
+        // el resto) — nunca conviven en la misma fila, así que basta decidir la acción
+        // real al hacer clic, en vez de 2 MenuItem con el mismo texto.
+        generateCreateItem.setOnAction(event -> {
             if (schemaItemTarget != null) {
-                onGenerateSelectRequested.accept(schemaItemTarget);
+                fireGenerate(onGenerateRequested,
+                        schemaItemTarget.kind() == Kind.TABLES ? GenerateAction.CREATE_TABLE : GenerateAction.CREATE_SCRIPT);
             }
         });
-        schemaItemContextMenu = new ContextMenu(generateSelectItem);
         schemaItemRow.setOnMouseClicked(event -> {
             if (event.getButton() == MouseButton.PRIMARY && event.getClickCount() == 2
                     && schemaItemTarget != null && isQueryable(schemaItemTarget.kind())) {
-                onGenerateSelectRequested.accept(schemaItemTarget);
+                onGenerateRequested.accept(schemaItemTarget, GenerateAction.SELECT);
             }
         });
     }
 
+    private void fireGenerate(BiConsumer<SchemaTreeNode.Item, GenerateAction> onGenerateRequested, GenerateAction action) {
+        if (schemaItemTarget != null) {
+            onGenerateRequested.accept(schemaItemTarget, action);
+        }
+    }
+
     private static boolean isQueryable(Kind kind) {
         return kind == Kind.TABLES || kind == Kind.VIEWS;
+    }
+
+    /** Tabla: las 5. Vista: SELECT + CREATE (nunca INSERT/UPDATE/DELETE — no toda vista es escribible). Función/Procedimiento/Trigger/Tipo: solo CREATE (un SELECT/CALL o "instanciar" un tipo no tienen equivalente genérico seguro). */
+    private List<MenuItem> menuItemsFor(Kind kind) {
+        return switch (kind) {
+            case TABLES -> List.of(generateSelectItem, generateInsertItem, generateUpdateItem, generateDeleteItem, generateCreateItem);
+            case VIEWS -> List.of(generateSelectItem, generateCreateItem);
+            case FUNCTIONS, PROCEDURES, TRIGGERS, TYPES -> List.of(generateCreateItem);
+        };
     }
 
     /** {@code prefHeight == minHeight == maxHeight == ROW_HEIGHT}, para que no pueda haber mismatch con {@code fixedCellSize}. */
@@ -308,7 +338,12 @@ public class ConnectionTreeCell extends TreeCell<Object> {
             schemaItemTarget = null;
             setContextMenu(null);
             schemaCategoryLabel.setText(category.kind().label());
-            schemaCategoryCountLabel.setText(String.valueOf(category.count()));
+            // Esquema progresivo (2026-08-25): Funciones/Procedimientos/Triggers/Tipos son
+            // categorías perezosas (CategoryTreeItem) — mientras no se hayan expandido, su
+            // conteo real todavía no se sabe (SchemaTreeNode.UNKNOWN_COUNT), así que se deja
+            // en blanco en vez de imprimir "-1".
+            schemaCategoryCountLabel.setText(
+                    category.count() == SchemaTreeNode.UNKNOWN_COUNT ? "" : String.valueOf(category.count()));
             setGraphic(schemaCategoryRow);
         } else if (item instanceof SchemaTreeNode.Item schemaItem) {
             unbindCheckbox();
@@ -317,7 +352,7 @@ public class ConnectionTreeCell extends TreeCell<Object> {
             schemaItemTarget = schemaItem;
             schemaItemIcon.setContent(isQueryable(schemaItem.kind()) ? Icons.TABLE : Icons.SETTINGS);
             schemaItemLabel.setText(schemaItem.name());
-            generateSelectItem.setDisable(!isQueryable(schemaItem.kind()));
+            schemaItemContextMenu.getItems().setAll(menuItemsFor(schemaItem.kind()));
             setContextMenu(schemaItemContextMenu);
             setGraphic(schemaItemRow);
         } else {

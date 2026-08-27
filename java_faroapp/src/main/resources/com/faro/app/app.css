@@ -10,11 +10,11 @@
  * README — el mismo bug de estilos apareció doce veces seguidas con el
  * sistema de dos archivos separados).
  *
- * Fuentes/radios/tamaños/sombras que NO cambian entre temas se dejan
- * literales acá mismo (no hay razón para tokenizarlos). La única
- * excepción es la sombra de menús/popups (`rgba(15,23,42,0.15)`) y el
- * fondo del `.tooltip` — ambos son fijos en los dos temas por diseño
- * real (`app_shadows.dart`/convención de tooltip), no un descuido.
+ * Radios/sombras que NO cambian entre temas se dejan literales acá mismo
+ * (no hay razón para tokenizarlos). La única excepción es la sombra de
+ * menús/popups (`rgba(15,23,42,0.15)`) y el fondo del `.tooltip` — ambos
+ * son fijos en los dos temas por diseño real (`app_shadows.dart`/
+ * convención de tooltip), no un descuido.
  *
  * IMPORTANTE — sin verificar en una ventana real todavía (ver README,
  * "Sistema de temas — reescritura a variables"): la reescritura completa
@@ -24,6 +24,26 @@
  * solo corriendo la app se sabe si el mecanismo de "looked-up color"
  * resuelve como se espera en las 6 ventanas reales.
  */
+
+/* ---- Tamaño de fuente de toda la interfaz (2026-08-26) — NO se tokeniza
+   acá como el resto de las variables `-token-*` de este archivo: se probó
+   con `-token-font-*` sobre `.root` (mismo mecanismo de "looked-up value"
+   que sí funciona para color/radio/lo que sea) y falló en una ventana
+   real con "Expected '<number>' while parsing '-fx-font-size'" — hallazgo
+   real, verificado contra el propio `CssParser` de OpenJFX:
+   `-fx-font-size` tiene su propia gramática dedicada (`parseSize`/
+   `isSize`) que exige un literal NUMBER+unidad y nunca cae al camino
+   genérico de lookup que sí usan las propiedades de tipo Paint — es una
+   limitación real del parser, no algo tokenizable con el patrón de
+   siempre. Los ~36 valores de `-fx-font-size` de esta hoja se dejan
+   literales, EXACTAMENTE como estaban (9.5px a 18px según la zona); el
+   tamaño en vivo se resuelve del lado de Java, en
+   `Theme#scaledAppCssUri` — genera una copia de este archivo con esos
+   mismos literales desplazados por `AppPreferences#fontScaleDelta`, ver
+   el javadoc de esa clase. El 14px de `.sql-editor` NO se toca por ese
+   mecanismo — ya tiene su propio control independiente
+   (`AppPreferences#editorFontSize`, aplicado como estilo inline por
+   `CodeArea`, desde antes de este cambio). */
 
 .app-root {
     -fx-background-color: -token-background;
@@ -58,10 +78,73 @@
 .scroll-bar .thumb:pressed {
     -fx-background-color: -token-accent-base;
 }
+/* Causa real encontrada (2026-08-26, con un log de diagnóstico temporal en
+   MainController — el usuario confirmó "sigo sin ver la barra" incluso con
+   solo 20-50 filas, y el log mostró el nodo real: orientation=VERTICAL
+   width=1.0 height=613.0 visible=true opacity=1.0 — la barra EXISTE, está
+   visible, pero su propio ancho es de 1 píxel, un hilo invisible aunque
+   técnicamente "esté ahí"). Dos intentos previos en esta misma fecha
+   fallaron por asumir sin verificar contra el código fuente real de
+   ScrollBarSkin: un -fx-min-height en .thumb (que ScrollBarSkin ignora,
+   redimensiona el thumb a mano vía resize() directo, nunca pasa por layout
+   normal) y la teoría de "colapsa por el ratio filas visibles/totales"
+   (JavaFX ya tiene un piso propio ahí, ~1.5× el ancho de la barra).
+
+   La causa real, confirmada leyendo ScrollBarSkin.java de OpenJFX:
+   ScrollBarSkin#computePrefWidth() (vertical) calcula el ancho de TODA la
+   barra como el máximo entre incButton.prefWidth()/decButton.prefWidth() —
+   sin ningún valor de respaldo. Cada botón calcula el suyo desde
+   arrow.prefWidth(). La regla de abajo (.increment-arrow/.decrement-arrow,
+   ya existía desde el diseño original) les pone -fx-shape:" " (flecha
+   vacía) + -fx-padding:0 para ocultar el triángulo — eso hace que
+   arrow.prefWidth() sea 0, que se propaga hasta volver 0 (o ~1px tras
+   redondeo) el ancho de LA BARRA COMPLETA, no solo de la flecha. Esto no es
+   nuevo de hoy — probablemente lleva así desde que se escribió esta regla;
+   nadie lo había notado porque nunca hizo falta agarrar la barra a mano en
+   una tabla lo bastante larga hasta ahora.
+
+   Arreglo real: ancho/alto explícito en la barra MISMA (no en el thumb) —
+   a diferencia del intento con .thumb, esto SÍ funciona: Region#prefWidth()
+   devuelve el valor puesto por CSS directo, sin llamar a
+   computePrefWidth() en absoluto, si ese valor no es USE_COMPUTED_SIZE —
+   evita por completo la cadena rota de arriba, no depende de que
+   ScrollBarSkin coopere. */
+.scroll-bar:vertical {
+    -fx-pref-width: 14px;
+    -fx-min-width: 14px;
+}
+.scroll-bar:horizontal {
+    -fx-pref-height: 14px;
+    -fx-min-height: 14px;
+}
+/* Ronda 3 del mismo hallazgo de arriba (2026-08-26) — el arreglo de
+   ancho/alto en `.scroll-bar` mismo hizo que la barra en sí se viera con
+   tamaño real (confirmado por log: width=15.0), pero un log más detallado
+   (revisando el `.thumb` directo, no solo el carril) mostró que el thumb
+   vertical seguía en `height=1.0` a pesar de eso — el arreglo anterior era
+   incompleto, no volvió a estar mal. Causa real, confirmada contra
+   `ScrollBarSkin.java` de la rama de JavaFX 21 real que usa este proyecto
+   (`openjdk/jfx21u`, no `master` — verificado aparte por si acaso, misma
+   fórmula en las dos): `minThumbLength() = 1.5 × getBreadth()`, pero
+   `getBreadth()` NO lee el tamaño de la barra — lee
+   `decButton.prefWidth()`/`incButton.prefWidth()` (el ancho preferido de
+   estos botones) directo, sin pasar por la barra en absoluto. La regla de
+   abajo nunca les puso un ancho/alto propio, así que seguían en 0 (mismo
+   origen que el bug de la barra: sus flechas en `-fx-shape:" "` con
+   padding 0) — `getBreadth()` seguía devolviendo 0, `minThumbLength()`
+   seguía en 0, y a 500,000+ filas el thumb colapsaba a 1px de todas formas,
+   sin importar que la barra que lo contiene ya tuviera 15px reales. */
+/* -fx-pref-width/height acá controla minThumbLength() (= 1.5 × esto, ver el
+   comentario de arriba) — 30px da un piso de ~45px (subido de 20px/~30px,
+   el usuario lo siguió viendo chico). No afecta el ancho visible de la
+   barra en sí (eso lo controla `.scroll-bar:vertical`/`:horizontal`
+   arriba, ya en 14px, sin queja aparte). */
 .scroll-bar .increment-button,
 .scroll-bar .decrement-button {
     -fx-background-color: transparent;
     -fx-padding: 0;
+    -fx-pref-width: 30px;
+    -fx-pref-height: 30px;
 }
 .scroll-bar .increment-arrow,
 .scroll-bar .decrement-arrow {
@@ -392,6 +475,18 @@
     -fx-background-color: transparent;
     -fx-text-fill: -token-text-muted;
     -fx-padding: 0 8 0 4;
+    /* RichTextFX (LineNumberFactory) trae su propio -fx-font-size por
+       defecto para este selector, vía el user-agent stylesheet que carga
+       el Skin del CodeArea — más específico que la simple herencia desde
+       el CodeArea, así que el -fx-font-size inline que MainController le
+       pone al CodeArea (AppPreferences#editorFontSize) nunca le llegaba al
+       número de línea, solo al texto (hallazgo real, reportado con
+       captura, 2026-08-26: "el numero que indica el numero de linea del
+       script, no [se redimensiona]"). 1em = mismo tamaño que el texto,
+       relativo al valor heredado — a diferencia de -fx-font-size con un
+       token -token-*, "em" SÍ es una unidad válida para la gramática de
+       -fx-font-size (no una variable con lookup), por eso funciona. */
+    -fx-font-size: 1em;
 }
 /* Texto SIN resaltar (identificadores, puntuación, espacios) — RichTextFX
    envuelve cada tramo en un Text con la clase base "text" (la que trae

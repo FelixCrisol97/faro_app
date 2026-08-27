@@ -42,14 +42,28 @@ public final class PreferencesDialog {
                 controller.selectShortcutsTab();
             }
 
-            Scene scene = new Scene(root, 460, 420);
-            Theme.applyTo(scene, preferences.isDarkTheme(), preferences.accentName());
+            // 420 de alto (valor original) se quedaba corto para el contenido real de la
+            // pestaña Rendimiento (4 filas de grilla + 2 notas de varias líneas) — sin
+            // espacio suficiente, el VBox comprimía la nota más larga ("Fetch size...")
+            // hasta dejar solo una línea con "…" (reportado con captura, 2026-08-25).
+            // 460x560 dio margen para eso, pero el usuario reportó después (2026-08-26,
+            // con captura) que la fila de acentos se veía apretada — el último círculo
+            // (el seleccionado, con su anillo) quedaba cortado por el borde de la
+            // ventana. 500x600 + mínimos subidos a juego le dan aire real a esa fila sin
+            // apretar nada más; min height/width + resizable como red de seguridad si
+            // una nota futura es más larga todavía — mismo criterio ya aplicado en
+            // add-database-dialog.
+            Scene scene = new Scene(root, 500, 600);
+            Theme.applyTo(scene, preferences.isDarkTheme(), preferences.accentName(), preferences.fontScaleDelta());
 
             Stage stage = new Stage();
             stage.setTitle("Preferencias");
             stage.initOwner(owner);
             stage.initModality(Modality.WINDOW_MODAL);
             stage.setScene(scene);
+            stage.setResizable(true);
+            stage.setMinWidth(460);
+            stage.setMinHeight(520);
             controller.attachStage(stage);
 
             stage.showAndWait();

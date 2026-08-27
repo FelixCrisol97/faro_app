@@ -144,14 +144,11 @@
                     <StackPane VBox.vgrow="ALWAYS">
                         <VBox fx:id="connectionsPanel">
                             <HBox alignment="CENTER_LEFT" spacing="6">
-                                <padding><Insets top="10" right="8" bottom="6" left="12"/></padding>
-                                <Region HBox.hgrow="ALWAYS"/>
+                                <padding><Insets top="10" right="8" bottom="8" left="12"/></padding>
+                                <TextField fx:id="connectionFilterField" styleClass="text-field" promptText="Buscar base…" HBox.hgrow="ALWAYS"/>
                                 <Button fx:id="selectAllDatabasesButton" text="Todas" styleClass="button-secondary" onAction="#onSelectAllDatabases"/>
                                 <Button fx:id="addDatabaseButton" styleClass="button-icon" onAction="#onAddDatabase"/>
                             </HBox>
-                            <TextField fx:id="connectionFilterField" styleClass="text-field" promptText="Buscar base…">
-                                <VBox.margin><Insets top="0" right="8" bottom="8" left="12"/></VBox.margin>
-                            </TextField>
                             <TreeView fx:id="connectionTree" styleClass="connection-tree" VBox.vgrow="ALWAYS" showRoot="false" fixedCellSize="28"/>
                         </VBox>
                         <VBox fx:id="historyPanel" visible="false" managed="false" spacing="4">

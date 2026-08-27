@@ -85,7 +85,7 @@ public final class ConnectionTreeBuilder {
         if (filter.isEmpty() || db.alias().toLowerCase(Locale.ROOT).contains(filter)) {
             return true;
         }
-        return SchemaIntrospector.cached(db.id()).map(info -> SchemaTreeNode.matchesAnyName(info, filter)).orElse(false);
+        return SchemaTreeNode.matchesAnyName(SchemaIntrospector.cachedNamesByKind(db.id()), filter);
     }
 
     /**

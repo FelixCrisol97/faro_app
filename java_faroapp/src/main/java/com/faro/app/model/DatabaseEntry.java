@@ -17,6 +17,14 @@ import java.util.UUID;
  */
 public class DatabaseEntry {
 
+    /**
+     * Piso duro de pool de conexiones — ver {@link #setPoolSize} para el
+     * motivo real. Expuesto público para que la UI (diálogos de Agregar/
+     * editar base de datos y Preferencias) pueda rechazar el guardado con
+     * el mismo número, en vez de repetir el "2" mágico en varios sitios.
+     */
+    public static final int MIN_POOL_SIZE = 2;
+
     // volatile: el diálogo de editar muta estos campos en el hilo de JavaFX
     // mientras una ejecución en curso (hilo de fondo) los puede estar
     // leyendo al mismo tiempo vía jdbcUrl()/alias()/etc. — sin volatile, el
@@ -132,7 +140,7 @@ public class DatabaseEntry {
      * ahí, no solo que quede documentado en un comentario.
      */
     public void setPoolSize(int poolSize) {
-        this.poolSize = Math.max(2, poolSize);
+        this.poolSize = Math.max(MIN_POOL_SIZE, poolSize);
     }
 
     public int queryTimeoutSeconds() {
