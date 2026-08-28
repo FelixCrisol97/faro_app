@@ -3059,3 +3059,47 @@ Para ser exhaustivo de verdad, esta distinción importa — no todo lo de esta l
 ### 7. Verificación final
 
 `mvn clean compile`/`mvn clean test` en verde — **73 tests**, sin ningún test nuevo agregado por este feature completo (mismo criterio de todo el proyecto: comportamiento visual/UI no se testea con JUnit acá). Verificado repetidamente con `mvn javafx:run` + stderr capturado que no hay `CSS Error` ni excepciones de `FXMLLoader`. El resto de la verificación fue 100% en la app real, con el usuario probando cada ronda y mandando capturas — no hubo ningún punto de este feature que se diera por bueno solo porque compiló o pasó los tests, después del error real de la primera ronda (interfaz sin estilo) que sí se documentó así por error y se corrigió la próxima vez.
+
+---
+
+## 2026-08-27 — El empaquetado portable (`jpackage`) nunca se había corrido de verdad — 2 bugs reales encontrados y arreglados al correrlo por primera vez
+
+Pedido del usuario: "ayudame a checar el tema de compilar todo el proyecto para que jale en modo portable en cualquier equipo windows". El README (antes de la reescritura de ayer) ya documentaba el comando de `jpackage` como "documentado, NO ejecutado todavía" — corrido de verdad hoy por primera vez, encontró 2 bugs reales que ningún `mvn compile`/`mvn test` podía haber detectado.
+
+**Bug 1 — `Faro.exe` no abría en absoluto: "JavaFX runtime components are missing".** Causa real: `Main.java` extiende `javafx.application.Application` directamente, y el JAR empaquetado (`mvn -Ppackage`) no es modular (decisión de diseño ya documentada, sin `module-info.java`). La JVM tiene un chequeo específico: si la clase declarada `Main-Class` en el manifest extiende `Application` y el módulo `javafx.graphics` no está presente vía `--module-path`, rechaza arrancar con ese mensaje exacto — sin importar que las clases de JavaFX SÍ estén en el classpath del JAR (ahí están, pero no como módulo, que es lo que el chequeo exige). `mvn javafx:run` nunca mostró este bug porque `javafx-maven-plugin` arma su propio module-path con `javafx.graphics` presente — el bug SOLO existe en el camino de distribución (`jpackage`/`java -jar`), que nunca se había corrido hasta hoy.
+
+**Arreglo real:** `Launcher.java` (nuevo, `com.faro.app.Launcher`) — una clase que NO extiende `Application`, con un `main(String[])` que solo llama a `Main.main(args)`. Al no extender `Application`, el chequeo de la JVM ni se dispara. `pom.xml`, perfil `package`: el `ManifestResourceTransformer` de `maven-shade-plugin` ahora pone `Launcher` como `Main-Class`, no `${mainClass}` (que sigue siendo `Main`, y sigue siendo lo que usa `javafx:run` — sin cambios ahí, ese camino nunca tuvo el bug). El comando de `jpackage` del README también se actualizó (`--main-class com.faro.app.Launcher`).
+
+**Bug 2, encontrado DESPUÉS de arreglar el 1 y volver a correr `Faro.exe` — SQL Server tronaba con "No suitable driver", PostgreSQL sí conectaba.** Causa real: `pom.xml`/`maven-shade-plugin` fusiona múltiples JARs en uno — `postgresql-42.7.4.jar` y `mssql-jdbc-12.8.1.jre11.jar` declaran CADA UNO su propio `META-INF/services/java.sql.Driver` (mecanismo de auto-registro JDBC 4.0/SPI) en la MISMA ruta dentro del JAR. Sin un transformer específico, el comportamiento por defecto de shade es sobrescribir (se queda con el último que procesa), no fusionar — confirmado con `unzip -p target/faro-app.jar META-INF/services/java.sql.Driver`: solo `org.postgresql.Driver` sobrevivía, la línea de `com.microsoft.sqlserver.jdbc.SQLServerDriver` había desaparecido del JAR final. Esto es invisible en `mvn javafx:run`/`mvn test` — ninguno de los dos empaqueta nada, corren directo contra el classpath de Maven donde los dos JARs de driver siguen siendo archivos separados, cada uno con su propio `META-INF/services` intacto.
+
+**Arreglo real:** `ServicesResourceTransformer` (nuevo, agregado a la misma lista de `<transformers>` del perfil `package`) — en vez de sobrescribir, CONCATENA el contenido de cada `META-INF/services/<mismo-nombre>` que encuentra entre todos los JARs fusionados. Verificado después: `unzip -p ... META-INF/services/java.sql.Driver` mostró las 2 líneas, una por driver.
+
+**Verificado de verdad, corriendo el `.exe` real, no solo "compila" — el criterio que este mismo README pedía y nunca se había cumplido para esta parte:**
+1. `mvn -Ppackage clean package` → `target/faro-app.jar` (18MB), manifest confirmado con `unzip -p ... META-INF/MANIFEST.MF` (`Main-Class: com.faro.app.Launcher`).
+2. `jpackage --type app-image ...` → `target/dist/Faro/` (141MB con runtime embebido), `Faro.exe` presente.
+3. **Antes del arreglo del Bug 1**: `Faro.exe` no abría ninguna ventana, error de consola confirmado.
+4. **Después del arreglo del Bug 1, antes del Bug 2**: la ventana SÍ abrió (`"Ventana principal mostrada."` en el log), pero las 3 bases SQL Server de prueba tronaban con `"No suitable driver"` en el log real — PostgreSQL sí intentaba conectar (fallaba por "Connection refused" porque los contenedores Docker de `bodegas-test` no estaban corriendo en ese momento, error esperado y sin relación).
+5. **Después de los 2 arreglos**: la ventana abre, las 3 bases SQL Server ya intentan conectar de verdad con el driver correcto (mismo "Connection refused" esperado por los contenedores apagados — ya no "No suitable driver"), sin ninguna excepción no capturada en el log completo.
+
+`mvn test` (sin `clean` — `Faro.exe` corriendo dejaba el directorio `target/dist` bloqueado para borrar, hubo que matar el proceso primero) — 73/73 en verde, sin tests nuevos (el empaquetado no es lógica testeable con JUnit, es configuración de build + comportamiento de classpath en tiempo de ejecución). README actualizado con el comando corregido y marcado como verificado, no solo documentado.
+
+**Pendiente real, sin resolver hoy:** el instalador con asistente (`--type exe`/`--type msi`) sigue sin poder probarse — necesita WiX Toolset v3, no instalado en esta máquina. `--type app-image` (la carpeta portable, lo que pidió el usuario) es lo que quedó verificado.
+
+---
+
+## 2026-08-27 (continuación) — Tercer bug real, esta vez de TRANSPORTE, no de build: comprimir la carpeta portable con el compresor integrado de Windows la dejó incompleta
+
+El usuario copió `target\dist\Faro\` a otro equipo Windows y `Faro.exe` tronó ahí con **"Failed to find JVM in '...\Faro\runtime' directory."** — un error distinto a los dos de la ronda anterior (esos ya estaban resueltos; este es nuevo, de cómo se movió la carpeta, no de cómo se construyó).
+
+**Causa real, encontrada comparando la carpeta local contra lo que se había transferido:** en algún punto (compresión con el explorador de Windows, "Enviar a → Carpeta comprimida (zip)", del lado del usuario) se generó un `Faro.zip` de solo **16.9 MB** — sospechosamente cerca del tamaño del JAR solo (18 MB), cuando la carpeta completa pesa **141 MB** (`runtime/` sola son 123 MB, 315 archivos). El compresor integrado de Windows tiene problemas documentados con carpetas de un runtime de Java empaquetado (muchísimos archivos chicos anidados, rutas largas combinadas con `legal/` de cada módulo) — el zip resultante se arma "exitosamente" sin ningún error visible, pero le faltan archivos completos adentro. **Extraño aparte, sin explicación encontrada:** la carpeta `target/dist/Faro/runtime` local TAMBIÉN había desaparecido para cuando se investigó esto (no se encontró evidencia de que Windows Defender la haya puesto en cuarentena — `Get-MpThreatDetection`/`Get-MpThreat` sin resultados relacionados) — se optó por reconstruir todo desde cero en vez de seguir investigando una desaparición que no se pudo reproducir ni explicar con certeza.
+
+**Arreglo real: reconstrucción completa + compresión con 7-Zip en vez del compresor integrado, con verificación real antes de entregar el archivo.**
+1. `mvn -Ppackage clean package` + `jpackage --type app-image` de nuevo, desde cero.
+2. Confirmado ANTES de comprimir: `target/dist/Faro/runtime` = 123 MB, 315 archivos (conteo real con `find | wc -l`, no supuesto).
+3. Comprimido con `7z.exe` (ya presente en la máquina, `NanaZip`) — el log de 7z mismo confirma "Files read from disk: 319" contra "67 folders, 319 files" escaneados, coincide exacto (0 archivos saltados).
+4. **Verificación real, no solo confiar en el log de 7z:** extraído a una carpeta aparte (`/tmp/faro_verify`), contados los archivos ahí (319, coincide), `runtime/` confirmado en 123 MB de nuevo.
+5. **`Faro.exe` corrido de verdad desde esa extracción independiente** — `"Ventana principal mostrada."` en el log, sin ninguna excepción no capturada (mismos "Connection refused" esperados de los contenedores Docker apagados).
+
+Entregado `target/dist/Faro.7z` (48 MB comprimido) en vez de un `.zip` — se ofreció generar también un `.zip` normal si el usuario prefiere no depender de tener 7-Zip/similar instalado para abrirlo en el equipo destino (no se generó todavía, solo ofrecido).
+
+**Lección real para dejar anotada:** un archivo comprimido que se genera "sin errores" no es evidencia de que esté completo — hace falta contar archivos/tamaño antes y después, y en lo posible probar el resultado extraído en un lugar aparte antes de darlo por bueno. Mismo criterio de "verificar de verdad, no solo que no truene" que ya se aplicó al resto de esta ronda de empaquetado.

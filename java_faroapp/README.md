@@ -21,12 +21,16 @@ El perfil `package` no corre en el build normal — `mvn compile`/`mvn test`/`mv
 mkdir target\dist-input
 copy target\faro-app.jar target\dist-input\
 jpackage --type app-image --input target\dist-input --dest target\dist ^
-  --name Faro --main-jar faro-app.jar --main-class com.faro.app.Main ^
+  --name Faro --main-jar faro-app.jar --main-class com.faro.app.Launcher ^
   --app-version 0.1.0 --icon ..\flutter_faroapp\windows\runner\resources\app_icon.ico ^
   --java-options "-Xmx4g"
 ```
 
-`--type app-image` no necesita nada más — produce una carpeta con `Faro.exe` copiable a cualquier máquina Windows. Un instalador con asistente (`--type exe`/`--type msi`) necesita **WiX Toolset v3** instalado y en el `PATH`, que no viene con este repo.
+`--main-class com.faro.app.Launcher`, **no** `com.faro.app.Main` — `Main` extiende `javafx.application.Application`; un JAR sin módulos con esa clase como punto de entrada hace que la JVM rechace arrancar ("JavaFX runtime components are missing"). `Launcher` es una clase intermedia sin esa herencia que solo delega a `Main.main(...)` (ver su javadoc). `mvn javafx:run` no necesita esto — ese plugin arma su propio module-path.
+
+`--type app-image` produce una carpeta (`target\dist\Faro\`, con `Faro.exe` + runtime embebido) copiable a cualquier máquina Windows sin instalar Java — **verificado corriendo el `.exe` real**, ventana y conexión a PostgreSQL/SQL Server confirmadas. Un instalador con asistente (`--type exe`/`--type msi`) necesita **WiX Toolset v3** instalado y en el `PATH`, que no viene con este repo.
+
+**Al transportar la carpeta a otra máquina, comprímela con 7-Zip (o similar) en vez del compresor integrado de Windows ("Enviar a → Carpeta comprimida")** — este último puede dejar el zip incompleto sin ningún error visible cuando la carpeta tiene muchos archivos chicos anidados, como `runtime\` (~123 MB, 300+ archivos). Síntoma si pasa: `Faro.exe` en la máquina destino truena con `"Failed to find JVM in '...\runtime' directory."`. Verifica antes de transferir que el comprimido pese cerca de los ~50 MB esperados (el runtime comprime bien), no ~17 MB (eso significa que `runtime\` se quedó afuera).
 
 ## Arquitectura
 

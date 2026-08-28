@@ -219,9 +219,25 @@
                   <finalName>faro-app</finalName>
                   <createDependencyReducedPom>false</createDependencyReducedPom>
                   <transformers>
+                    <!-- com.faro.app.Launcher, NO ${mainClass} (com.faro.app.Main) — Main
+                         extiende Application, y un JAR sin módulos con esa clase como
+                         Main-Class hace que la JVM rechace arrancar ("JavaFX runtime
+                         components are missing"), hallazgo real corriendo jpackage de
+                         verdad por primera vez. Ver el javadoc de Launcher. -->
                     <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                      <mainClass>${mainClass}</mainClass>
+                      <mainClass>com.faro.app.Launcher</mainClass>
                     </transformer>
+                    <!-- Sin esto, shade se queda con SOLO uno de los dos
+                         META-INF/services/java.sql.Driver (postgresql y mssql-jdbc
+                         declaran cada uno el suyo en esa misma ruta — por defecto
+                         shade sobrescribe en vez de fusionar) — hallazgo real
+                         corriendo el JAR empaquetado: PostgreSQL conectaba,
+                         SQL Server tronaba con "No suitable driver" porque su
+                         entrada de auto-registro (JDBC 4.0 SPI) había desaparecido
+                         del JAR final. Este transformer concatena todos los
+                         META-INF/services/* de incluso más de 2 archivos, no
+                         solo se queda con el último. -->
+                    <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                   </transformers>
                   <filters>
                     <filter>
