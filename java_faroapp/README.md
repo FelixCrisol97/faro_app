@@ -129,7 +129,6 @@ Pestaña "Diagnóstico" en la ventana principal — log visual de sesión (ejecu
 - "Explicar plan de ejecución" en SQL Server (`SHOWPLAN_ALL`) no se ha corrido contra un servidor SQL Server real — solo contra el comportamiento documentado del driver.
 - Historial de consultas no persiste entre sesiones (a propósito, ver "Persistencia").
 - Sin inferencia de tipo en Importar CSV; sin soporte de campos multilínea entre comillas.
-- Sin instalador con asistente (`.exe`/`.msi`) — necesita WiX Toolset v3, no incluido.
 - Fetch size configurable solo tiene efecto real en SQL Server, no en PostgreSQL todavía.
 - Ningún test cubre el mecanismo de tamaño de fuente en vivo ni el layout de JavaFX en general — es comportamiento visual, verificado a mano en la app real.
 
