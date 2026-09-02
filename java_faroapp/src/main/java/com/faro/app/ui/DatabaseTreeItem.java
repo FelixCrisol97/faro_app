@@ -86,16 +86,32 @@ final class DatabaseTreeItem extends CheckBoxTreeItem<Object> {
             return;
         }
         super.getChildren().setAll(List.of(new TreeItem<>("Cargando esquema…")));
+        // db.setConnectionStatus(...) en los 2 callbacks (2026-08-28, pedido explícito
+        // del usuario: "ya implementaste que tenga un pool de conexiones en cuanto
+        // inicia la app, entonces estos círculos de conexión deberían estar
+        // sincronizados") — esta carga de esquema YA prueba una conexión real (el
+        // primer fetch de cada base, disparado solo/automático al arrancar la app vía
+        // ConnectionTreeBuilder recorriendo el árbol, no algo nuevo de hoy), así que es
+        // una fuente real de "esta base sí/no responde" sin necesitar un botón de
+        // "Probar conexión" aparte. Ambos wrapeados en Platform.runLater (ya lo estaban
+        // por otra razón) — DatabaseEntry#connectionStatus es una propiedad de JavaFX
+        // desde hoy, solo se puede mutar en el hilo de la UI.
         SchemaIntrospector.loadInBackground(db, credentials, pool,
-                structure -> Platform.runLater(() -> super.getChildren().setAll(categoryItems())),
+                structure -> Platform.runLater(() -> {
+                    db.setConnectionStatus(DatabaseEntry.ConnectionStatus.CONNECTED);
+                    super.getChildren().setAll(categoryItems());
+                }),
                 // Hallazgo en vivo del usuario (2026-08-25, bases reales de cliente): sin esto
                 // la fila se quedaba en "Cargando esquema…" para siempre si el fetch fallaba
                 // (credenciales vencidas, red, permisos) — parecía un bloqueo, el único rastro
                 // real quedaba en el log. childrenRequested ya sigue en true, así que expandir
                 // de nuevo esta fila no reintenta solo; "Recargar esquema" del menú contextual
                 // (ya existente) sí vuelve a pedirlo.
-                error -> Platform.runLater(() -> super.getChildren().setAll(
-                        List.of(new TreeItem<>("Error al cargar esquema: " + shortCause(error))))));
+                error -> Platform.runLater(() -> {
+                    db.setConnectionStatus(DatabaseEntry.ConnectionStatus.FAILED);
+                    super.getChildren().setAll(
+                            List.of(new TreeItem<>("Error al cargar esquema: " + shortCause(error))));
+                }));
     }
 
     /** Primera línea del mensaje real (los de JDBC pueden traer varias) — o el nombre de la clase si no hay mensaje. Package-private a propósito — {@link CategoryTreeItem} la reusa para su propio estado de error. */

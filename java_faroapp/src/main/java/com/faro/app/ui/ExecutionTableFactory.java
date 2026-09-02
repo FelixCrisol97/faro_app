@@ -9,8 +9,8 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.ProgressBar;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 
@@ -60,16 +60,43 @@ public final class ExecutionTableFactory {
             alias.getStyleClass().add("exec-alias");
             alias.setPrefWidth(150);
             alias.setMaxWidth(150);
+            // Ancho fijo a propósito (layout de columnas, para que los valores queden
+            // alineados entre filas como una tabla real) — un alias/host más largo que
+            // esto SÍ se sigue cortando con "..." (comportamiento normal de Label), no
+            // hay forma de "auto-ajustar" sin romper esa alineación. Tooltip con el
+            // texto completo como salida real para ese caso (2026-08-28, pregunta
+            // directa del usuario: "qué ocurre si una base de datos es demasiado
+            // larga"), enlazado al propio textProperty (no al de ExecutionStatus
+            // directo) para que siga lo que la celda tenga bindeado en cada momento,
+            // sin importar el reciclado de celdas del ListView.
+            Tooltip aliasTooltip = new Tooltip();
+            aliasTooltip.textProperty().bind(alias.textProperty());
+            Tooltip.install(alias, aliasTooltip);
             host.getStyleClass().add("exec-host");
-            host.setPrefWidth(120);
-            host.setMaxWidth(120);
+            Tooltip hostTooltip = new Tooltip();
+            hostTooltip.textProperty().bind(host.textProperty());
+            Tooltip.install(host, hostTooltip);
+            // 120px se cortaba ("localhost:5...", captura del usuario) — 170px le da
+            // aire real, sobre todo con el tamaño de fuente de la interfaz subido
+            // (Preferencias → Apariencia, que también escala esta etiqueta).
+            host.setPrefWidth(170);
+            host.setMaxWidth(170);
             badge.getStyleClass().add("exec-badge");
             bar.getStyleClass().add("exec-bar");
-            HBox.setHgrow(bar, Priority.ALWAYS);
-            bar.setMaxWidth(Double.MAX_VALUE);
+            // Antes crecía para llenar todo el espacio libre (hgrow=ALWAYS,
+            // maxWidth=infinito) — "ocupa demasiado espacio", pedido explícito del
+            // usuario, con captura: "reducela a una tercera parte de su tamaño".
+            // Ancho fijo en vez de creciente — de paso deja más aire para que
+            // alias/host/filas no se corten tan seguido.
+            bar.setPrefWidth(150);
+            bar.setMaxWidth(150);
             rows.getStyleClass().add("exec-rows");
-            rows.setPrefWidth(80);
-            rows.setMaxWidth(80);
+            // 80px alcanzaba para un número solo — con el sufijo " fila(s)" agregado
+            // (ver updateItem) un resultado grande (ej. "3000000 fila(s)") ya no cabía.
+            // 120px tampoco alcanzó del todo ("500000 fil...", captura del usuario) —
+            // subido a 160px, mismo motivo que host de arriba.
+            rows.setPrefWidth(160);
+            rows.setMaxWidth(160);
             elapsed.getStyleClass().add("exec-elapsed");
             elapsed.setPrefWidth(100);
             elapsed.setMaxWidth(100);
@@ -117,8 +144,13 @@ public final class ExecutionTableFactory {
 
             alias.textProperty().bind(status.databaseAliasProperty());
             host.textProperty().bind(status.hostProperty());
+            // "<número>" a secas (2026-08-28, hallazgo real del usuario: "veo un
+            // detalle... hay un número 0, no sé qué indique ese número") — sin ninguna
+            // unidad/etiqueta cerca, un 0 (consulta que de verdad no devolvió filas,
+            // ej. un UPDATE) es indistinguible de "no sé qué es esto". "fila(s)" deja
+            // claro qué mide sin necesitar una columna de encabezado aparte.
             rows.textProperty().bind(Bindings.createStringBinding(
-                    () -> Integer.toString(status.rowCountProperty().get()), status.rowCountProperty()));
+                    () -> status.rowCountProperty().get() + " fila(s)", status.rowCountProperty()));
             cancelButton.disableProperty().bind(Bindings.createBooleanBinding(
                     () -> status.stateProperty().get() != ExecutionStatus.State.RUNNING,
                     status.stateProperty()));

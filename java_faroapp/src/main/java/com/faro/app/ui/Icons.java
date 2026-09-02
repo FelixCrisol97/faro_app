@@ -48,6 +48,12 @@ public final class Icons {
     /** Círculo (r=3, centro 12,12) + el cuerpo del engrane — igual que Lucide `settings`. */
     public static final String SETTINGS = "M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"
             + "M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z";
+    /** Rect redondeado (x=4 y=11 w=16 h=10 rx=2, mismo cálculo que {@link #TABLE}) + el arco cerrado — igual que Lucide `lock`, usado para el modo "Solo lectura" de una base (2026-08-28, reemplaza el texto "SIN RESTRICCIONES"/"SOLO LECTURA", pedido explícito del usuario: "se me hace muy [pesado el texto], hay forma de usar iconos"). */
+    public static final String LOCK = "M6 11h12a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-6a2 2 0 0 1 2 -2Z"
+            + "M8 11V7a4 4 0 0 1 8 0v4";
+    /** Mismo cuerpo que {@link #LOCK}, arco abierto — igual que Lucide `lock-open`, para el modo "Sin restricciones". */
+    public static final String LOCK_OPEN = "M6 11h12a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-6a2 2 0 0 1 2 -2Z"
+            + "M8 11V7a4 4 0 0 1 7.6-1.8";
 
     /** Ícono de trazo (borde, sin relleno) — la mayoría de los íconos de Lucide. */
     public static SVGPath strokeIcon(String path) {

@@ -70,8 +70,12 @@
    contraste en reposo sin perder la idea de "sutil" del diseño; el acento
    en hover/pressed reemplaza al viejo -token-text-muted, para que agarrar
    el thumb se sienta obvio, no solo "un poco más oscuro". */
+/* Color fijo, literal, IGUAL en los 2 temas (2026-08-28, pedido explícito del
+   usuario, con captura) — antes usaba -token-text-muted, que cambia de tono
+   entre claro/oscuro; el usuario quiere el mismo gris siempre en reposo, sin
+   tocar el hover/pressed de abajo (esos sí siguen con el acento del tema). */
 .scroll-bar .thumb {
-    -fx-background-color: -token-text-muted;
+    -fx-background-color: #9CA3AF;
     -fx-background-radius: 6px;
 }
 .scroll-bar .thumb:hover,
@@ -312,12 +316,24 @@
 
 /* La flecha de expandir/colapsar por defecto (Modena) se pone blanca en
    :selected, asumiendo un fondo de selección oscuro — forzada a un color
-   fijo (--text-muted) sin importar el estado de selección, en los dos
-   temas, para que no cambie de aspecto al alternar. */
+   fijo sin importar el estado de selección, en los dos temas, para que no
+   cambie de aspecto al alternar.
+   2026-08-28, pedido explícito del usuario ("esas flechas negras se ven muy
+   feas") — bajada de -token-text-muted (se leía como negro sólido, mismo
+   peso visual que texto real) a -token-gray-icon (el mismo tono suave que
+   ya usan el lápiz/bote de basura de cada fila, ver .tree-edit-icon) + un
+   poco más chica, para que se sienta parte de la misma familia de íconos
+   en vez de un triángulo Modena crudo sin tocar. No se reemplazó por un
+   ícono Lucide propio (como el candado) porque el nodo de disclosure lo
+   arma el Skin de TreeCell por dentro — no hay forma de meterle un SVGPath
+   propio sin reescribir ese Skin, cambio bastante más grande e imposible
+   de probar sin una ventana real. */
 .connection-tree .tree-cell .tree-disclosure-node .arrow,
 .connection-tree .tree-cell:filled:selected .tree-disclosure-node .arrow,
 .connection-tree .tree-cell:filled:hover .tree-disclosure-node .arrow {
-    -fx-background-color: -token-text-muted;
+    -fx-background-color: -token-gray-icon;
+    -fx-scale-x: 0.85;
+    -fx-scale-y: 0.85;
 }
 
 /* Checkbox de selección — el tema Modena por defecto de JavaFX (caja gris
@@ -327,13 +343,26 @@
    La palomita en sí (.mark, más abajo) sí es un check real desde 2026-08-22
    — antes se veía como un bloque sólido por poco espacio, no porque
    faltara la forma. */
+/* 4px de radio (2026-08-28, antes) se leía casi circular en una caja tan chica
+   (~14px) — bajado a 2px a pedido explícito del usuario ("prefiero que sea
+   cuadrado pero con bordes"): cuadrado de verdad, con solo un filo suave, no
+   redondo. No confundir con statusDot (el punto de color de conexión,
+   Circle real, SÍ circular a propósito — es otro elemento de la fila). */
+/* Tamaño explícito (2026-08-28, pedido explícito del usuario, con captura:
+   "has mas grandes los checkbox de las bd, estan muy chicos") — antes sin
+   ancho/alto propio, dependía del tamaño por defecto de Modena (~13px real).
+   18px + más padding interno para la palomita. */
 .connection-tree .check-box > .box {
     -fx-background-color: -token-surface;
     -fx-border-color: -token-gray-border;
-    -fx-border-width: 1.4;
-    -fx-border-radius: 4;
-    -fx-background-radius: 4;
-    -fx-padding: 2 2 2 2;
+    -fx-border-width: 1.6;
+    -fx-border-radius: 3;
+    -fx-background-radius: 3;
+    -fx-min-width: 18;
+    -fx-min-height: 18;
+    -fx-pref-width: 18;
+    -fx-pref-height: 18;
+    -fx-padding: 3 3 3 3;
 }
 .connection-tree .check-box:hover > .box {
     -fx-border-color: -token-accent-base;
@@ -374,6 +403,17 @@
 .tree-db-name {
     -fx-font-size: 12.5px;
     -fx-text-fill: -token-text;
+}
+/* IP:puerto junto al alias (2026-08-28, pedido explícito del usuario: "no veo en
+   algún subtítulo... la ip a la que está conectado") — texto chico en la MISMA fila
+   que el alias, no una segunda línea debajo: cambiar a 2 líneas hubiera necesitado
+   subir fixedCellSize del árbol (mismo tipo de bug de altura de fila que ya se
+   encontró hoy en el grid de resultados), riesgo innecesario para algo que cabe
+   perfecto en una fila si se hace suficientemente chico. */
+.tree-db-host {
+    -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace;
+    -fx-font-size: 9.5px;
+    -fx-text-fill: -token-text-muted;
 }
 .tree-engine-badge {
     -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace; /* --font-mono */
@@ -453,6 +493,26 @@
 .tree-edit-button:hover .tree-edit-icon {
     -fx-stroke: -token-accent-base;
 }
+/* Candado del modo de una base (2026-08-28, reemplaza el texto "SIN
+   RESTRICCIONES"/"SOLO LECTURA" — pedido explícito del usuario, el texto se
+   sentía muy pesado). Cerrado (solo lectura) = color neutro, mismo criterio que
+   el resto de íconos pasivos de la fila; abierto (sin restricciones) usa el
+   mismo tono de warning que tenía el badge de texto que reemplaza — una base sin
+   protección sigue siendo el estado que vale la pena notar de un vistazo. */
+.tree-mode-icon {
+    -fx-fill: transparent;
+    -fx-stroke: -token-gray-icon;
+    -fx-stroke-width: 2.6;
+    -fx-stroke-line-cap: round;
+    -fx-stroke-line-join: round;
+}
+/* -token-warn-base (2026-08-28, antes) — el usuario esperaba verde para "sin
+   restricciones" ("se ve de color gris en lugar de verde cuando se cambia
+   entre opciones"), no el ámbar de advertencia que tenía el badge de texto
+   viejo. Cambiado a -token-success-base a pedido explícito. */
+.tree-mode-icon-unrestricted {
+    -fx-stroke: -token-success-base;
+}
 
 /* ---- Editor SQL (RichTextFX CodeArea) — contra demo_html/styles.css
    .sql-editor-wrap/.sql-gutter/.tok-*: fondo --surface-alt (no blanco),
@@ -497,6 +557,7 @@
    las de abajo ganan por venir después en el archivo. */
 .sql-editor .text {
     -fx-fill: -token-text;
+    -fx-font-weight: bold; /* pedido explícito del usuario (2026-08-28) — todo el texto del editor en negrita */
 }
 /* RichTextFX deja el color del cursor y de la selección sin definir a
    propósito en su propia hoja de estilos — sin esto, caen en negro/algo
@@ -782,9 +843,14 @@
     -fx-background-color: transparent;
     -fx-padding: 0;
 }
-.exec-cell-root {
-    -fx-border-color: transparent transparent -token-border transparent;
-}
+/* .exec-cell-root ya no tiene reglas propias (2026-08-28, pedido explícito
+   del usuario: "quisiera que se quitaran esas 2 líneas que salen por cada
+   registro... algo así como lo que vemos en la pestaña de diagnóstico que
+   no se ve que sea una tabla") — antes tenía un borde inferior por fila
+   (formato de rejilla/tabla real, ver .diagnostic-panel .list-cell más
+   abajo, que nunca tuvo borde). La clase se deja puesta en
+   ExecutionTableFactory por si hace falta un gancho de estilo más
+   adelante — hoy no necesita ninguna regla. */
 .exec-row {
     -fx-padding: 8 12 8 12;
 }

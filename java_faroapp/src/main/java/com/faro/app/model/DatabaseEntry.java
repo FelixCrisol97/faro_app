@@ -3,6 +3,11 @@ package com.faro.app.model;
 import java.util.Objects;
 import java.util.UUID;
 
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.property.SimpleObjectProperty;
+
 /**
  * Una base de datos individual — la unidad real de conexión. {@link #engine}
  * y {@link #mode} viven aquí, no en {@link Server}: un servidor es solo un
@@ -42,7 +47,35 @@ public class DatabaseEntry {
     private volatile String databaseName;
     private volatile DbEngine engine;
     private volatile ServerMode mode;
-    private volatile ConnectionStatus connectionStatus;
+    /**
+     * {@code ObjectProperty}, no un campo plano (2026-08-28) — antes era
+     * {@code volatile}, thread-safe para lectura/escritura cruda, pero
+     * mutarlo no avisaba a nadie: el punto de color del árbol solo se
+     * actualizaba si algo más disparaba {@code connectionTree.refresh()}
+     * después. Como propiedad real, {@code ConnectionTreeCell} puede
+     * ENLAZARSE a ella (ver {@code updateDatabaseRow}) y repintarse sola en
+     * cuanto cualquier hilo la cambie — pedido explícito del usuario: "estos
+     * círculos de conexión deberían estar sincronizados". Las propiedades de
+     * JavaFX NO son thread-safe para escribir desde un hilo que no sea el de
+     * la UI — cada {@code setConnectionStatus} desde un hilo de fondo (carga
+     * de esquema, ejecución de consultas) tiene que pasar por
+     * {@code Platform.runLater}, ya lo hacían los llamadores existentes por
+     * otras razones.
+     */
+    private final ObjectProperty<ConnectionStatus> connectionStatus =
+            new SimpleObjectProperty<>(ConnectionStatus.UNKNOWN);
+    /**
+     * {@code true} mientras esta base tiene una consulta corriendo de verdad
+     * ahora mismo (2026-08-28, pedido explícito del usuario: "si se está
+     * haciendo uso de esa BD... que pardee o se mueva el círculo... para que
+     * se entienda mejor") — puramente de sesión, NUNCA se persiste (no tiene
+     * sentido arrancar la app con una base marcada "en uso" de la corrida
+     * anterior). {@code MainController#onRunQuery} la prende al arrancar una
+     * corrida y la apaga cuando el estado de esa base deja de ser
+     * {@code RUNNING}; {@code ConnectionTreeCell} la usa para animar
+     * {@code statusDot}.
+     */
+    private final BooleanProperty inUse = new SimpleBooleanProperty(false);
     private volatile int poolSize = 4;
     private volatile int queryTimeoutSeconds = 30;
 
@@ -60,7 +93,6 @@ public class DatabaseEntry {
         this.databaseName = Objects.requireNonNull(databaseName);
         this.engine = Objects.requireNonNull(engine);
         this.mode = Objects.requireNonNull(mode);
-        this.connectionStatus = ConnectionStatus.UNKNOWN;
     }
 
     public String id() {
@@ -116,11 +148,29 @@ public class DatabaseEntry {
     }
 
     public ConnectionStatus connectionStatus() {
+        return connectionStatus.get();
+    }
+
+    /** Solo desde el hilo de JavaFX — ver el javadoc del campo {@link #connectionStatus}. */
+    public void setConnectionStatus(ConnectionStatus connectionStatus) {
+        this.connectionStatus.set(connectionStatus);
+    }
+
+    public ObjectProperty<ConnectionStatus> connectionStatusProperty() {
         return connectionStatus;
     }
 
-    public void setConnectionStatus(ConnectionStatus connectionStatus) {
-        this.connectionStatus = connectionStatus;
+    public boolean isInUse() {
+        return inUse.get();
+    }
+
+    /** Solo desde el hilo de JavaFX — ver el javadoc del campo {@link #inUse}. */
+    public void setInUse(boolean inUse) {
+        this.inUse.set(inUse);
+    }
+
+    public BooleanProperty inUseProperty() {
+        return inUse;
     }
 
     /** Tamaño del pool de conexiones (HikariCP) — un pool por servidor, ver README. */

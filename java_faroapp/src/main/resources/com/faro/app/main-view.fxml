@@ -67,6 +67,7 @@
                 </Menu>
                 <Menu text="Conexiones">
                     <MenuItem text="Agregar base de datos…" onAction="#onAddDatabase"/>
+                    <MenuItem text="Nuevo grupo de conexiones…" onAction="#onNewGroup"/>
                     <MenuItem text="Descubrir bases en esta IP…" onAction="#onDiscoverDatabases"/>
                     <MenuItem text="Probar todas las conexiones" onAction="#onTestAllConnections"/>
                     <SeparatorMenuItem/>
@@ -149,7 +150,7 @@
                                 <Button fx:id="selectAllDatabasesButton" text="Todas" styleClass="button-secondary" onAction="#onSelectAllDatabases"/>
                                 <Button fx:id="addDatabaseButton" styleClass="button-icon" onAction="#onAddDatabase"/>
                             </HBox>
-                            <TreeView fx:id="connectionTree" styleClass="connection-tree" VBox.vgrow="ALWAYS" showRoot="false" fixedCellSize="28"/>
+                            <TreeView fx:id="connectionTree" styleClass="connection-tree" VBox.vgrow="ALWAYS" showRoot="false" fixedCellSize="44"/>
                         </VBox>
                         <VBox fx:id="historyPanel" visible="false" managed="false" spacing="4">
                             <padding><Insets top="10" right="8" bottom="8" left="8"/></padding>

@@ -3105,3 +3105,113 @@ El usuario copió `target\dist\Faro\` a otro equipo Windows y `Faro.exe` tronó 
 Entregado `target/dist/Faro.7z` (48 MB comprimido) en vez de un `.zip` — se ofreció generar también un `.zip` normal si el usuario prefiere no depender de tener 7-Zip/similar instalado para abrirlo en el equipo destino (no se generó todavía, solo ofrecido).
 
 **Lección real para dejar anotada:** un archivo comprimido que se genera "sin errores" no es evidencia de que esté completo — hace falta contar archivos/tamaño antes y después, y en lo posible probar el resultado extraído en un lugar aparte antes de darlo por bueno. Mismo criterio de "verificar de verdad, no solo que no truene" que ya se aplicó al resto de esta ronda de empaquetado.
+
+---
+
+## 2026-08-28 (continuación) — Ronda larga de uso real del árbol de conexiones: selección por pestaña, el bug del doble clic (4 intentos hasta la causa raíz), candado de modo clicable, estado de conexión real sincronizado con animación "en uso", agrupar bases, y pulir visualmente toda la fila
+
+Sesión de prueba en vivo más larga de todo el proyecto hasta ahora — el usuario fue usando la app de verdad (no solo mirando capturas) y reportando cada fricción real según aparecía. Se agrupa todo por funcionalidad, no en el orden exacto en que se pidió, porque varias se intercalaron a mitad de otras.
+
+### 1. Cada pestaña de consulta recuerda su propia selección de bases (arquitectura real, no cosmético)
+
+**El bug real:** el usuario abría una pestaña nueva para la Bodega X (clic derecho → "Nueva consulta para esta base"), después otra para la Bodega Y, y al volver a la pestaña de X, el árbol mostraba marcada Y — "de nada me sirve cambiar entre ventanas si no mantienen la BD que yo abrí en una ventana aparte". Causa real, confirmada leyendo el código: `onRunQuery()` leía las casillas marcadas DIRECTO del árbol (`connectionTree.getRoot()`), un solo estado GLOBAL compartido por TODAS las pestañas a la vez — nunca hubo aislamiento por pestaña, era un hueco de diseño real, no una regresión de este día.
+
+**Arreglo real:**
+- `QueryTabState` (clase interna de `MainController`) gana `Set<String> selectedDatabaseIds`.
+- `capturedSelectedDatabaseIds()`/`applySelectedDatabaseIds(Set<String>)` (nuevos) — leen/escriben las casillas REALES del árbol contra un conjunto de ids.
+- Listener nuevo en `queryTabPane.getSelectionModel().selectedItemProperty()` (agregado en `initialize()`): al cambiar de pestaña, guarda la selección de la pestaña que se deja (`oldTab`) y aplica al árbol la de la que se activa (`newTab`) — el árbol sigue siendo la única fuente visual (nunca hubo 2 árboles), solo que ahora "qué muestra marcado" cambia con la pestaña activa.
+- `addQueryTab` gana un tercer parámetro opcional (`Set<String> initialSelectedDatabaseIds`) — `null` hereda una COPIA de la selección de la pestaña saliente (Ctrl+T/"+", como ya se sentía antes); un valor explícito fuerza esa selección exacta (`onNewQueryForDatabase`/`applyGeneratedScript`, que antes mutaban el árbol ANTES de crear la pestaña — orden que hubiera corrompido la selección de la pestaña SALIENTE al guardarla mal en el listener nuevo; se cambió a pasar `Set.of(db.id())` directo, sin tocar el árbol antes de la creación).
+- `selectOnlyDatabase` (el método viejo que mutaba el árbol a mano) quedó sin uso, se borró.
+
+**Confirmado por el usuario en vivo, tras el arreglo del punto 2 de abajo (que destapó un segundo bug real en el camino).**
+
+### 2. El bug del doble clic abriendo "Editar base" solo — 4 intentos reales hasta encontrar la causa de raíz
+
+Empezó como un reporte puntual ("doble clic en el candado, se abre y se cierra la BD al mismo tiempo") y se fue **expandiendo** con cada intento — patrón real de "arreglo parcial que tapa un síntoma pero no la causa", documentado explícito para no repetirlo:
+
+1. **Intento 1 (candado):** `modeIcon.setOnMouseClicked` ignoraba el segundo clic de un doble clic (`clickCount != 1`) con un `return` SIN `event.consume()`. Ese evento sin consumir subía hasta `connectionTree.setOnMouseClicked(this::onTreeClicked)` en `MainController` — un manejador GLOBAL a nivel de TODO el árbol que abría "Editar base" en cualquier doble clic mientras una base siguiera con el resaltado de fila del `TreeView`. Arreglado consumiendo siempre, actuando solo si `clickCount == 1`.
+2. **El usuario confirmó el candado arreglado, pero reportó lo mismo en el nombre de la base** — mismo patrón exacto en `aliasLabel`, arreglado igual.
+3. **El usuario reportó lo mismo otra vez, insistiendo que era "justo al dar clic en el nombre"** — la fila ahora tiene 2 líneas (alias + IP, ver punto 4), con zonas reales sin ningún manejador propio (el hueco vertical entre líneas, el texto de la IP mismo, el padding extra) que dejaban pasar el clic directo hacia el árbol. Arreglado con una red de seguridad a nivel de TODA la fila (`databaseRow.setOnMousePressed`/`setOnMouseReleased`, consume cualquier clic primario que no haya sido ya consumido por un hijo más específico).
+4. **El usuario confirmó: "el tema de la ventana de edición está ok, ya solo se abre al dar doble clic"** — es decir, ya NO se abría por accidente, solo cuando de verdad se quería. Cerrado ese frente.
+
+**Hallazgo real aparte, mismo bug de fondo pero manifestándose distinto — el candado seguía "expandiendo la BD" con doble clic incluso después del punto 1.** Causa real, DISTINTA a la de arriba: expandir/colapsar una fila del árbol es comportamiento NATIVO de JavaFX (`TreeCell`), y actúa en `MOUSE_PRESSED` — ANTES de que `MOUSE_CLICKED` siquiera exista. Consumir solo en `setOnMouseClicked` (lo que se había hecho hasta ahí) llega tarde: el expandir ya pasó. Arreglado agregando `setOnMousePressed`/`setOnMouseReleased` (consumen el clic primario ANTES de que llegue a la lógica nativa de expandir) tanto en `modeIcon` como en `aliasLabel` — el propio `MOUSE_CLICKED` de esos nodos sigue funcionando igual (JavaFX lo sintetiza independiente de si `PRESSED`/`RELEASED` se consumieron).
+
+**La causa raíz de fondo, encontrada al final:** `MainController` tenía `connectionTree.setOnMouseClicked(this::onTreeClicked)` — un manejador a nivel de TODO el árbol, que abría "Editar base" en CUALQUIER doble clic sobre una fila con una base seleccionada, sin importar qué parte específica de la fila se tocó. Cada intento de arriba tapaba un síntoma (un nodo más filtrando el clic) sin arreglar que el diseño real era "el árbol entero reacciona a doble clic en cualquier parte" — pedido explícito del usuario tras el segundo reporte: "no hay forma de quitar el evento global... que solo se active... cuando esté en el texto solamente". **Se quitó el manejador global por completo** — `onTreeClicked`/su registro se eliminaron; el doble-clic-abre-editar ahora vive SOLO en `aliasLabel` (`ConnectionTreeCell`), como una acción más de ese nodo específico, igual que el resto de la celda (clic sencillo marca la casilla, doble clic abre Editar, ambos con `event.consume()` siempre).
+
+**Confirmado por el usuario en vivo, cada paso, con captura real cuando hizo falta** — no se dio ningún intento por bueno sin que el usuario lo confirmara corriendo la app.
+
+### 3. Candado de modo — ahora es clicable para alternar Solo lectura ↔ Sin restricciones
+
+Pedido explícito: "que ese mismo icono sirva para intercambiar entre esas 2 opciones, y en la opción de editar que se quede igual" (el diálogo de Agregar/editar base conserva su combo de modo intacto, sin tocar). `MainController#onToggleDatabaseMode` (nuevo) alterna `ServerMode` directo, sin confirmación (mismo criterio que el diálogo de editar, que tampoco la pide). `ConnectionTreeCell` gana un sexto parámetro de constructor (`Consumer<DatabaseEntry> onModeToggleRequested`).
+
+**Bug real encontrado al probar: "el botón del candado no siempre reacciona".** Causa: `modeIcon` es un `SVGPath` de solo trazo (`-fx-fill: transparent`) — JavaFX solo detecta clics sobre el TRAZO mismo por defecto, no sobre toda la caja del ícono; un candado pequeño tiene un trazo angosto, la mayoría de los clics caían en el hueco de adentro y no tocaban ningún nodo real. `editIcon`/`deleteIcon` no sufrían esto porque su clic vive en el `StackPane` que los envuelve (área rectangular normal), no en el `SVGPath` directo como el candado. Arreglado con `modeIcon.setPickOnBounds(true)` — toda la caja del ícono, no solo el trazo, queda clicable.
+
+**Confirmado por el usuario en vivo.**
+
+### 4. Pulido visual de toda la fila de base de datos — checkbox, punto de estado, flecha, alineación, colores
+
+Serie de ajustes, cada uno con captura del usuario y confirmado o corregido en la siguiente ronda:
+
+- **IP como segunda línea** — antes en la misma línea que el alias ("se vería mejor que esté abajo o arriba del nombre"). `aliasAndHostBox` (`VBox`) apila alias + `host:puerto`. Subió `ROW_HEIGHT` de 28 a 36px para no cortar la segunda línea.
+- **"Muy junto entre filas"** — `ROW_HEIGHT` subido otra vez a 44px + padding vertical de la fila de 1px a 4px.
+- **Checkbox circular → cuadrado con bordes suaves** — radio de esquina bajado de 4px (se leía casi redondo en una caja tan chica) a 2px.
+- **Checkbox "muy chico"** — tamaño explícito agregado (antes dependía del default de Modena, ~13px): 18×18px + más padding interno.
+- **Flecha de expandir/colapsar "muy fea"/"negra"** — bajada de `-token-text-muted` (se leía como negro sólido) a `-token-gray-icon` (mismo tono suave que lápiz/basura de cada fila) + escala 0.85. No se pudo reemplazar por un ícono Lucide propio — ese nodo lo arma el `Skin` de `TreeCell` por dentro, cambiarlo de raíz hubiera sido mucho más invasivo sin poder probarlo en vivo.
+- **Punto de estado y checkbox "disparejos"** (con imagen de referencia) — dos problemas reales: (a) el punto (`Circle`, radio 3.5 = 7px) era mucho más chico que el checkbox nuevo (18px), subido el radio a 5 (10px); (b) los dos eran hijos DIRECTOS de la fila con alineación `TOP_LEFT`, así que compartían el borde SUPERIOR en vez del centro — el punto quedaba "flotando" arriba. Arreglado agrupándolos (junto con candado/badge/lápiz/basura del otro lado) en sub-`HBox` propios (`leadingIconsBox`/`trailingIconsBox`) con `CENTER_LEFT` — se centran entre sí dentro de su propio grupo, y como ese grupo mide lo que mida su hijo más alto (el checkbox, ~18px), termina alineado contra la PRIMERA línea de texto (el alias), no contra el bloque de 2 líneas completo.
+- **"El checkbox está abajo de la BD, debería estar al mismo nivel que el nombre"** — alineación de `databaseRow` cambiada de `CENTER_LEFT` (centraba contra el alto TOTAL de la fila de 2 líneas, cayendo en el hueco entre ellas) a `TOP_LEFT`.
+- **Candado verde para "sin restricciones", no ámbar** — el usuario esperaba verde ("se ve de color gris en lugar de verde"), no el tono de advertencia que tenía el badge de texto viejo que reemplazó. Cambiado `-token-warn-base` → `-token-success-base`.
+- **Color del scroll fijo, igual en los 2 temas** (con captura de referencia) — antes `-token-text-muted` (cambia de tono entre claro/oscuro); cambiado a un gris literal fijo `#9CA3AF`, sin tocar el hover/pressed (que sigue con el acento del tema, "eso está bien" según el usuario).
+- **Tema oscuro "más oscuro, sin el tinte azul"** — la paleta oscura usaba la familia "slate" de Tailwind (`#0F172A`/`#1E293B`/`#334155`, con tinte azul real, valores originales del diseño Flutter) — cambiada a "zinc" (gris neutro de verdad) y más oscura en cada paso: `#09090B`/`#18181B`/`#27272A`/`#3F3F46` (fondo/superficie/superficie-alt/borde), texto y grises de íconos ajustados a juego. Acento/éxito/error/advertencia se dejaron intactos — el pedido fue sobre fondo/superficie, no esos.
+- **Texto del editor SQL en negrita** — pedido explícito, `.sql-editor .text { -fx-font-weight: bold; }`.
+
+**Todo confirmado en vivo por el usuario, ronda por ronda.**
+
+### 5. Pestaña "Ejecución" — más compacta, sin formato de tabla, con tooltips
+
+- **Barra verde de progreso reducida a 150px fijo** ("ocupa demasiado espacio... reducela a una tercera parte") — antes crecía para llenar todo el espacio libre (`hgrow=ALWAYS`, ancho infinito).
+- **Quitado el borde inferior por fila** (`.exec-cell-root`) — el usuario no quería que se viera como tabla ("algo así como lo que vemos en la pestaña de diagnóstico que no se ve que sea una tabla"); Diagnóstico nunca tuvo ese borde, se igualó el criterio.
+- **`host`/`rows` ensanchados** (170px/160px, antes 120px cada uno) — se cortaban ("localhost:5...", "500000 fil...", con captura), sobre todo con el tamaño de fuente de la interfaz subido (esas etiquetas también se escalan con `fontScaleDelta`).
+- **Pregunta real del usuario: "¿no deberían ajustarse automáticamente los textos? ¿qué pasa si una base es demasiado larga?"** — respuesta honesta: es un layout de columnas CON ANCHO FIJO a propósito (para que los valores queden alineados entre filas como una tabla real); un valor más largo que el ancho fijo SÍ se sigue cortando con "..." — no hay forma de "auto-ajustar" sin romper esa alineación. Se agregó un `Tooltip` con el texto completo en `alias`/`host` (enlazado al propio `textProperty` del `Label`, no al de `ExecutionStatus` directo, para que siga lo que la celda tenga bindeado pese al reciclado del `ListView`) — la salida real para el caso de un nombre muy largo.
+
+**Todo confirmado en vivo.**
+
+### 6. Estado de conexión real, sincronizado con lo que de verdad pasa, persistente entre sesiones, con animación "en uso"
+
+Pedido explícito y detallado del usuario, con su propio razonamiento incluido: "ya se probó que la conexión funciona, debería estar en verde siempre... tú implementaste que ya tenga un pool de conexiones en cuanto inicia la app, entonces estos círculos deberían estar sincronizados, y si la contraseña cambió que se marque en rojo... y si se está haciendo uso de esa BD que pardee o se mueva el círculo para que se entienda mejor".
+
+**Contradice una decisión de diseño documentada desde antes** (README: "cada arranque empieza en UNKNOWN para todas, cargar un estado 'Conectado' de la sesión pasada sería engañoso") — el usuario la reemplaza a propósito, con el mismo razonamiento que resuelve la objeción original: si el estado guardado se vuelve a confirmar (o corregir) contra una conexión real apenas arranca la app, ya no es "engañoso", es solo el punto de partida.
+
+- **`DatabaseEntry.connectionStatus` pasó de campo `volatile` plano a `ObjectProperty<ConnectionStatus>`** — antes mutarlo no avisaba a nadie, el punto solo se actualizaba si algo más disparaba `connectionTree.refresh()` después. Como propiedad real, `ConnectionTreeCell` se ENGANCHA a ella (`connectionStatusProperty()`) con un listener que se repinta solo — el punto ya no depende de que la celda se refresque por otro motivo. Las propiedades de JavaFX NO son thread-safe para escribir desde un hilo que no sea el de la UI, así que cada `setConnectionStatus` desde un hilo de fondo pasa por `Platform.runLater` (los llamadores ya lo hacían por otras razones).
+- **Sincronizado con 2 fuentes reales, no un botón de "probar" aparte:**
+  - `DatabaseTreeItem#requestSchema` — la carga de esquema (que ya se dispara sola al iniciar la app, recorriendo el árbol) marca CONNECTED si el fetch tiene éxito, FAILED si falla.
+  - `QueryExecutionService#runOne` — marca CONNECTED apenas la conexión abre con éxito (antes de correr nada); FAILED específicamente en el `catch (RuntimeException e)` (el que ya atrapaba `HikariPool.PoolInitializationException`, la excepción real de "no se pudo conectar") — a propósito NO en el `catch (SQLException e)` de arriba, que cubre errores de SQL con la conexión YA abierta con éxito (marcar rojo ahí volvería rojo un punto que en realidad conecta bien, solo que el script tiene un error).
+- **Persistencia** — `ConnectionRegistryStore` guarda `connectionStatus` SOLO si es CONNECTED o FAILED (nunca UNKNOWN/TESTING — cargar "Probando…" de una sesión pasada se quedaría pegado ahí para siempre, sin ningún proceso real detrás).
+- **Animación "en uso"** — `DatabaseEntry` gana `BooleanProperty inUse` (puramente de sesión, nunca se persiste). `MainController#onRunQuery` la prende al arrancar una corrida y la apaga cuando el estado de ESA base deja de ser `RUNNING` (éxito, error, o cancelada). `ConnectionTreeCell` reacciona con un `FadeTransition` (pulso de opacidad 1.0↔0.35, 600ms por medio ciclo, vaivén indefinido mientras dure) sobre `statusDot`.
+
+**Verificado real, no solo compilado:** con las 3 bases de SQL Server apagadas (contenedores Docker no corriendo) en el momento de esta ronda, sus conexiones fallaron de verdad vía el camino de `RuntimeException` recién conectado — sin ninguna excepción de threading ni NPE en el log, confirmando que el `Platform.runLater` en cada punto de escritura funciona. **Pendiente de confirmación real del usuario:** que el verde persiste al cerrar/reabrir la app, y que el pulso se ve bien en vivo — ninguno de los dos se puede confirmar sin verlo en pantalla.
+
+### 7. Agrupar bases de datos — funcionalidad que no existía en absoluto
+
+El usuario mandó una imagen de referencia con bases agrupadas bajo un encabezado ("Bodegas Centro") y preguntó cómo agruparlas. **Hallazgo real al investigar, no una opinión:** no existía NINGUNA forma en la UI de crear un grupo nuevo — `new Server(...)` solo se construía en un lugar de todo el código: al CARGAR `connections.json` ya existente. Los grupos que sí se veían (ej. "Bodegas de prueba (Docker)") venían de datos ya guardados a mano, nunca de una acción del usuario.
+
+**Arreglo real — 2 piezas nuevas:**
+- **"Conexiones → Nuevo grupo de conexiones…"** (`MainController#onNewGroup`, ítem de menú nuevo) — pide un nombre, crea un `Server` vacío.
+- **Clic derecho en una base → "Mover a grupo…"** (`MainController#onMoveDatabaseToGroup`, ítem nuevo en `databaseContextMenu` de `ConnectionTreeCell`, que gana un séptimo parámetro de constructor) — `ChoiceDialog` con los grupos existentes + "(Sin grupo)" + "(Nuevo grupo…)" (esta última pide el nombre aparte, mismo patrón de 2 pasos que "Guardar como favorito"). Reusa `ConnectionRegistry#removeDatabase` (ya existía, quita de donde esté sin que el llamador sepa cuál caso es) antes de agregar al destino elegido.
+
+**Confirmado por el usuario en vivo: "funciona".**
+
+### 8. Pestañas de consulta persistentes entre sesiones
+
+Pedido explícito: "si dejé 2 ventanas abiertas para la próxima vez que abra la app que sigan viéndose esas 2 ventanas con sus respectivos scripts".
+
+- **`SavedQueryTab`** (record nuevo, paquete `data`) — `sql`, `filePath` (nullable), `selectedDatabaseIds`. Se persiste el TEXTO real del editor (no solo la ruta del archivo), para que una pestaña con cambios sin guardar tampoco se pierda al cerrar la app — igual que un editor de código moderno restaura sus buffers.
+- **`ConnectionRegistryStore.save`/`load`** ganan el campo `queryTabs` — `load` ahora devuelve un `LoadResult(ConnectionRegistry, List<SavedQueryTab>)` en vez de solo el registro (2 sitios que lo llaman: el arranque normal SÍ usa las pestañas devueltas; "Importar configuración" descarta esa parte a propósito, mismo criterio que ya excluye credenciales de import/export — un script a medio escribir de quien exporta no debería aparecer en la sesión de quien importa).
+- **`onExportConfig` pasa `List.of()` a propósito** — un archivo exportado NUNCA incluye pestañas abiertas, mismo motivo de arriba.
+- **`MainController.initialize()`** — si `restoredQueryTabs` (poblado por `loadOrCreateRegistry()`, corre antes de armar las pestañas) no está vacío, recrea una pestaña por cada entrada guardada en vez del único tab en blanco de siempre.
+- **`capturedQueryTabsForSave()`** (nuevo) — sincroniza primero la pestaña ACTIVA con el árbol real (su `selectedDatabaseIds` guardado solo se actualiza al CAMBIAR de pestaña, ver punto 1) antes de recorrer todas las pestañas abiertas.
+
+**Sin confirmar en vivo todavía** — necesita que el usuario cierre la app con la X real (no matar el proceso) y la vuelva a abrir; no se pudo simular ese ciclo completo desde acá.
+
+### Verificación de toda la ronda
+
+`mvn clean compile`/`mvn clean test` en verde — **73 tests**, sin ningún test nuevo (todo comportamiento visual/interacción de UI, mismo criterio de siempre en este proyecto). Cada pieza se verificó por separado con `mvn javafx:run` + stderr/log capturado (cero excepciones de threading, cero `CSS Error`) y se le pidió confirmación al usuario en la app real antes de seguir con la siguiente — varias rondas del punto 2 (el bug del doble clic) se dieron por "arregladas" prematuramente y tuvieron que corregirse de nuevo, documentado arriba sin ocultarlo.

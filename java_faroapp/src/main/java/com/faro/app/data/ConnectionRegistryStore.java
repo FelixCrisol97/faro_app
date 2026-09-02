@@ -59,8 +59,13 @@ public final class ConnectionRegistryStore {
     private ConnectionRegistryStore() {
     }
 
+    /** Resultado de {@link #load} — el registro real más las pestañas de consulta guardadas (2026-08-28), separado del registro porque restaurar pestañas es tarea de {@code MainController}, no de {@link ConnectionRegistry}. Vacío para un archivo exportado (ver el javadoc de {@link SavedQueryTab}) o para uno viejo de antes de este campo. */
+    public record LoadResult(ConnectionRegistry registry, List<SavedQueryTab> queryTabs) {
+    }
+
     public static void save(
-            ConnectionRegistry registry, AppPreferences preferences, FavoritesStore favorites, Path file)
+            ConnectionRegistry registry, AppPreferences preferences, FavoritesStore favorites,
+            List<SavedQueryTab> queryTabs, Path file)
             throws IOException {
         JsonObject root = new JsonObject();
 
@@ -105,6 +110,22 @@ public final class ConnectionRegistryStore {
         }
         root.add("ungroupedDatabases", ungrouped);
 
+        JsonArray queryTabsJson = new JsonArray();
+        for (SavedQueryTab tab : queryTabs) {
+            JsonObject tabJson = new JsonObject();
+            tabJson.addProperty("sql", tab.sql());
+            if (tab.filePath() != null) {
+                tabJson.addProperty("filePath", tab.filePath());
+            }
+            JsonArray idsJson = new JsonArray();
+            for (String id : tab.selectedDatabaseIds()) {
+                idsJson.add(id);
+            }
+            tabJson.add("selectedDatabaseIds", idsJson);
+            queryTabsJson.add(tabJson);
+        }
+        root.add("queryTabs", queryTabsJson);
+
         if (file.getParent() != null) {
             Files.createDirectories(file.getParent());
         }
@@ -113,7 +134,7 @@ public final class ConnectionRegistryStore {
                 file, registry.servers().size(), favorites.all().size());
     }
 
-    public static ConnectionRegistry load(Path file, AppPreferences preferences, FavoritesStore favorites)
+    public static LoadResult load(Path file, AppPreferences preferences, FavoritesStore favorites)
             throws IOException {
         log.info("Cargando registro desde {}", file);
         String content = Files.readString(file, StandardCharsets.UTF_8);
@@ -177,9 +198,27 @@ public final class ConnectionRegistryStore {
                 registry.ungroupedDatabases().add(fromJson(element.getAsJsonObject()));
             }
         }
-        log.info("Registro cargado — {} servidor(es), {} base(s) sin agrupar, {} favorito(s).",
-                registry.servers().size(), registry.ungroupedDatabases().size(), favorites.all().size());
-        return registry;
+
+        List<SavedQueryTab> queryTabs = new ArrayList<>();
+        if (root.has("queryTabs")) {
+            for (JsonElement element : root.getAsJsonArray("queryTabs")) {
+                JsonObject tabJson = element.getAsJsonObject();
+                List<String> selectedIds = new ArrayList<>();
+                if (tabJson.has("selectedDatabaseIds")) {
+                    for (JsonElement idElement : tabJson.getAsJsonArray("selectedDatabaseIds")) {
+                        selectedIds.add(idElement.getAsString());
+                    }
+                }
+                queryTabs.add(new SavedQueryTab(
+                        tabJson.get("sql").getAsString(),
+                        tabJson.has("filePath") ? tabJson.get("filePath").getAsString() : null,
+                        selectedIds));
+            }
+        }
+
+        log.info("Registro cargado — {} servidor(es), {} base(s) sin agrupar, {} favorito(s), {} pestaña(s) de consulta.",
+                registry.servers().size(), registry.ungroupedDatabases().size(), favorites.all().size(), queryTabs.size());
+        return new LoadResult(registry, queryTabs);
     }
 
     private static JsonObject toJson(DatabaseEntry db) {
@@ -193,6 +232,19 @@ public final class ConnectionRegistryStore {
         json.addProperty("mode", db.mode().name());
         json.addProperty("poolSize", db.poolSize());
         json.addProperty("queryTimeoutSeconds", db.queryTimeoutSeconds());
+        // Solo CONNECTED/FAILED (2026-08-28, pedido explícito del usuario: "ya se probó
+        // que la conexión funciona... debería estar en verde siempre... cierro y abro
+        // la app y debería estar en verde"). UNKNOWN (nunca se probó) y TESTING (estado
+        // transitorio de "Probar todas las conexiones", si la app se cerrara justo a
+        // mitad de esa prueba) no se guardan a propósito — cargar "Probando…" de una
+        // sesión pasada se quedaría pegado ahí para siempre, sin ningún proceso real
+        // detrás que lo resuelva. Sin este campo en el JSON, load() cae al default de
+        // la propiedad (UNKNOWN) — mismo comportamiento de antes para bases nunca
+        // probadas.
+        if (db.connectionStatus() == DatabaseEntry.ConnectionStatus.CONNECTED
+                || db.connectionStatus() == DatabaseEntry.ConnectionStatus.FAILED) {
+            json.addProperty("connectionStatus", db.connectionStatus().name());
+        }
         return json;
     }
 
@@ -210,6 +262,15 @@ public final class ConnectionRegistryStore {
         }
         if (json.has("queryTimeoutSeconds")) {
             db.setQueryTimeoutSeconds(json.get("queryTimeoutSeconds").getAsInt());
+        }
+        // Un estado guardado es solo el PUNTO DE PARTIDA al abrir la app — no la
+        // verdad final: en cuanto el árbol expande esta base (o corre una consulta
+        // contra ella), DatabaseTreeItem/QueryExecutionService confirman o corrigen
+        // este valor contra una conexión real de verdad (ver sus comentarios) — así
+        // que un "verde" guardado de una contraseña que después cambió se corrige
+        // solo, sin quedar engañando a nadie más que unos segundos.
+        if (json.has("connectionStatus")) {
+            db.setConnectionStatus(DatabaseEntry.ConnectionStatus.valueOf(json.get("connectionStatus").getAsString()));
         }
         return db;
     }

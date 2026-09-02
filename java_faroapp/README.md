@@ -47,7 +47,11 @@ Barra de menú completa (Archivo/Editar/Consulta/Conexiones/Ver/Herramientas/Ayu
 
 ## Árbol de conexiones y explorador de esquema
 
-Árbol de servidores → bases de datos (`ConnectionTreeBuilder`/`ConnectionTreeCell`/`ConnectionRegistry`). Cada fila de base muestra: casilla de selección, punto de estado de conexión (con tooltip), alias clickeable, candado de modo (solo lectura / sin restricciones), badge de motor (PG/MSSQL), e ícono de editar siempre visible. Buscador de bases arriba del árbol, junto con "Todas"/"Ninguna" y "+" agregar, todo en una sola fila.
+Árbol de servidores ("grupos", libres y opcionales) → bases de datos (`ConnectionTreeBuilder`/`ConnectionTreeCell`/`ConnectionRegistry`). Cada fila de base muestra: casilla de selección, punto de estado de conexión (con tooltip), alias (clic sencillo marca/desmarca la casilla, doble clic abre Editar) + `host:puerto` como segunda línea, candado de modo (clicable — alterna Solo lectura ↔ Sin restricciones directo, sin abrir ningún diálogo), badge de motor (PG/MSSQL), e ícono de editar siempre visible. Buscador de bases arriba del árbol, junto con "Todas"/"Ninguna" y "+" agregar, todo en una sola fila.
+
+**Grupos** — "Conexiones → Nuevo grupo de conexiones…" crea un grupo vacío; clic derecho en una base → "Mover a grupo…" la mueve a un grupo existente, a "(Sin grupo)", o a uno nuevo (pide el nombre aparte).
+
+**Estado de conexión, sincronizado con conexiones reales, no un botón aparte** — el punto de color se actualiza solo (es una propiedad reactiva de `DatabaseEntry`) cada vez que la carga de esquema o una ejecución de consulta prueban esa base de verdad: verde si conecta, rojo si falla (sin confundir un fallo de conexión con un error de SQL sobre una conexión que sí abrió bien). Persiste entre sesiones (solo verde/rojo, nunca el estado transitorio "Probando…") — al abrir la app se re-verifica solo en cuanto la carga de esquema toca esa base, así que un color guardado desactualizado (ej. contraseña que cambió) se corrige solo en segundos. Mientras una base tiene una consulta corriendo, su punto pulsa (fundido de opacidad en bucle).
 
 **Explorador de esquema por base** (`SchemaIntrospector`, `DatabaseTreeItem`, `CategoryTreeItem`) — expandir una base en el árbol carga su estructura real vía JDBC:
 
@@ -71,12 +75,14 @@ Barra de menú completa (Archivo/Editar/Consulta/Conexiones/Ver/Herramientas/Ayu
 - **Autocompletado** (`Ctrl+Espacio`) — sugiere palabras clave SQL que empiecen con lo escrito antes del cursor. Limitado a palabras clave, no nombres reales de tabla/columna.
 - **Zoom del editor** — `Ctrl +`/`Ctrl -`/`Ctrl 0` y `Ctrl` + rueda del mouse/trackpad, controla el tamaño de fuente SOLO del editor (`AppPreferences#editorFontSize`, también ajustable como spinner en Preferencias → Apariencia). Independiente del tamaño de fuente del resto de la interfaz (ver "Apariencia" más abajo).
 - Clic derecho en una base del árbol → "Nueva consulta para esta base" marca esa base y abre una pestaña ya asociada a ella, sin tener que ir a buscarla después.
+- **Cada pestaña recuerda su propia selección de bases** — las casillas marcadas en el árbol son POR PESTAÑA, no un estado global compartido: cambiar de pestaña cambia solas las casillas marcadas para reflejar la selección de esa pestaña. Una pestaña nueva (Ctrl+T/"+") hereda la selección de la que estaba activa; "Nueva consulta para esta base" y "Generar…" del explorador de esquema asocian la pestaña nueva a una sola base específica.
+- **Las pestañas abiertas persisten entre sesiones** — texto del editor (incluyendo cambios sin guardar), archivo asociado si tiene, y su selección de bases se guardan al cerrar la app y se restauran al abrirla. Nunca se incluyen en "Importar/Exportar configuración" (mismo criterio que las credenciales).
 
 ## Ejecución de consultas
 
-"Ejecutar" (F5) corre el SQL de la pestaña activa contra todas las bases marcadas en el árbol, en paralelo (`QueryExecutionService`, hasta N bases a la vez — configurable en Preferencias), con un pool `HikariCP` propio por base. Si una base falla, no aborta a las demás — el error se acumula y se muestra.
+"Ejecutar" (F5) corre el SQL de la pestaña activa contra las bases marcadas EN ESA PESTAÑA (ver arriba), en paralelo (`QueryExecutionService`, hasta N bases a la vez — configurable en Preferencias), con un pool `HikariCP` propio por base. Si una base falla, no aborta a las demás — el error se acumula y se muestra.
 
-- **Pestaña "Ejecución"** — una fila por base marcada, estado en vivo (Ejecutando/Éxito/Error/Cancelado) + filas + tiempo, actualizada a medida que cada base termina, no todas al final.
+- **Pestaña "Ejecución"** — lista plana (sin bordes ni formato de tabla), una fila por base marcada, estado en vivo (Ejecutando/Éxito/Error/Cancelado) + filas + tiempo, actualizada a medida que cada base termina, no todas al final. Alias/host tienen ancho fijo (para que las columnas queden alineadas entre filas) con tooltip mostrando el texto completo si se corta.
 - **Cancelación real** — botón por fila o "Consulta → Cancelar ejecución" (menú), vía `Statement.cancel()`, con respaldo real `KILL <spid>` (SQL Server) / `pg_cancel_backend(pid)` (PostgreSQL) para cuando `cancel()` no alcanza a interrumpir la consulta en el servidor. El respaldo necesita una conexión libre en el pool de esa base — se recomienda `poolSize >= 2` si se depende de él.
 - **Modo solo lectura** — una base marcada como tal rechaza cualquier sentencia que no empiece con SELECT/WITH/SHOW/EXPLAIN/DESCRIBE, antes de tocar la base. Es una heurística por primera palabra clave, no un parser SQL completo.
 - **Explicar plan de ejecución** ("Consulta → Explicar plan…") corre solo contra la primera base marcada — un plan es específico de una base/motor. `EXPLAIN` en PostgreSQL, `SET SHOWPLAN_ALL` en SQL Server.
@@ -107,7 +113,7 @@ Tres pestañas, todas aplican y guardan de inmediato — no hay botones "Guardar
 
 ## Persistencia
 
-- **Conexiones + preferencias + favoritos** — `~/.faro/connections.json` (JSON plano vía Gson), se carga al abrir y se guarda al cerrar, con autoguardado cada 2 minutos por si la app se cierra de forma anormal.
+- **Conexiones + preferencias + favoritos + pestañas de consulta abiertas + estado de conexión (verde/rojo)** — `~/.faro/connections.json` (JSON plano vía Gson), se carga al abrir y se guarda al cerrar, con autoguardado cada 2 minutos por si la app se cierra de forma anormal.
 - **Credenciales** — `~/.faro/credentials.dat`, cifradas con DPAPI (Windows Data Protection API, atadas a la cuenta de Windows del usuario — no portables a otra cuenta/máquina). Nunca en JSON plano, nunca incluidas en "Importar/Exportar configuración".
 - **Historial de consultas** — en memoria únicamente, se pierde al cerrar la app (tope de 50 entradas, sin duplicados consecutivos).
 - **Favoritos** — sí persisten, junto con el resto de `connections.json`.

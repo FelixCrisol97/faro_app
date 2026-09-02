@@ -259,6 +259,13 @@ public final class QueryExecutionService {
         int rowCount = 0;
         try (Connection conn = pool.getConnection(db, creds.get());
              Statement jdbcStatement = conn.createStatement()) {
+            // Conexión real, exitosa, de verdad — mismo punto de sincronización real
+            // que la carga de esquema de DatabaseTreeItem (2026-08-28, pedido
+            // explícito del usuario: "estos círculos de conexión deberían estar
+            // sincronizados"). Platform.runLater — DatabaseEntry#connectionStatus es
+            // una propiedad de JavaFX, este método corre en un hilo de fondo (uno por
+            // base, ver QueryExecutionService#execute).
+            Platform.runLater(() -> db.setConnectionStatus(DatabaseEntry.ConnectionStatus.CONNECTED));
             // Versión real del motor para la barra de estado de abajo
             // ("PostgreSQL 15.4 · SQL Server 2019", igual que
             // faro-java-prototipo.html) — getDatabaseProductVersion() es
@@ -337,6 +344,17 @@ public final class QueryExecutionService {
             // una URL/config inválida — sin este catch, executor.invokeAll() se traga la
             // excepción en su Future descartado y esa fila se quedaba en "Ejecutando…" para
             // siempre, sin ningún error visible (hallazgo real de /code-review).
+            //
+            // ESTE catch específico (no el de SQLException de arriba) es el punto real
+            // donde pool.getConnection(...) falló en sí — pedido explícito del usuario
+            // (2026-08-28): "si por alguna razón la contraseña cambió, que se marque en
+            // rojo... que indique que no ha podido hacerse una conexión exitosa". A
+            // propósito NO se toca connectionStatus en el catch de SQLException de
+            // arriba — ese cubre errores de SQL (sintaxis, permisos sobre una tabla,
+            // etc.) con la conexión YA abierta con éxito, marcar FAILED ahí volvería
+            // rojo un punto que en realidad sí conecta bien, solo que el script tiene
+            // un error.
+            Platform.runLater(() -> db.setConnectionStatus(DatabaseEntry.ConnectionStatus.FAILED));
             log.error("[{}] Excepción no esperada tras {} ms.", db.alias(), System.currentTimeMillis() - startedAt, e);
             errors.add(db.alias() + ": " + e.getMessage());
             reportFailure(status, String.valueOf(e.getMessage()), startedAt);

@@ -10,12 +10,18 @@
  * existe en este sistema).
  */
 .root {
-    -token-background: #0F172A;
-    -token-surface: #1E293B;
-    -token-surface-alt: #334155;
-    -token-text: #F1F5F9;
-    -token-text-muted: #AEBACB;
-    -token-border: #334155;
+    /* 2026-08-28, pedido explícito del usuario ("quisiera que fuera más oscuro,
+       tiene un color medio azul oscuro") — bajado de la familia "slate" de
+       Tailwind (con tinte azul real, #0F172A/#1E293B/#334155, valores originales
+       de app_colors.dart) a "zinc" (gris neutro de verdad, sin tinte de color) y
+       más oscuro en cada paso. Acento/éxito/error/warning se dejan intactos —
+       el pedido fue sobre el fondo/superficie, no sobre esos. */
+    -token-background: #09090B;
+    -token-surface: #18181B;
+    -token-surface-alt: #27272A;
+    -token-text: #F4F4F5;
+    -token-text-muted: #A1A1AA;
+    -token-border: #3F3F46;
 
     -token-success-base: #34D399;
     -token-error-base: #F87171;
@@ -45,7 +51,9 @@
        compartido, pedido explícito del usuario. */
     -token-editor-selection: rgba(129,140,248,.45);
 
-    /* Mismo gris inferido para los dos casos en oscuro — ver theme-light.css. */
-    -token-gray-icon: #64748B;
-    -token-gray-border: #64748B;
+    /* Mismo gris inferido para los dos casos en oscuro — ver theme-light.css.
+       Pasado a zinc-500 (#71717A) junto con el resto de la paleta oscura de
+       arriba, para que no quede un tinte azul suelto entre grises neutros. */
+    -token-gray-icon: #71717A;
+    -token-gray-border: #71717A;
 }

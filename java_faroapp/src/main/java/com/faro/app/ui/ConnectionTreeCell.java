@@ -10,7 +10,10 @@ import com.faro.app.model.ServerMode;
 import com.faro.app.ui.SchemaTreeNode.GenerateAction;
 import com.faro.app.ui.SchemaTreeNode.Kind;
 
+import javafx.animation.Animation;
+import javafx.animation.FadeTransition;
 import javafx.beans.property.BooleanProperty;
+import javafx.beans.value.ChangeListener;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Cursor;
@@ -26,8 +29,10 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
 import javafx.scene.shape.Circle;
 import javafx.scene.shape.SVGPath;
+import javafx.util.Duration;
 
 /**
  * Celda del árbol de conexiones — renderiza tres tipos de fila distintos
@@ -61,8 +66,20 @@ public class ConnectionTreeCell extends TreeCell<Object> {
      * fila mide una altura distinta a la que JavaFX asume por el layout
      * virtualizado, y el árbol recalcula el layout en cada clic — se veía
      * como toda la lista parpadeando.
+     *
+     * <p>28→36→44 (2026-08-28) — la fila de base pasó de 1 línea (alias) a 2
+     * (alias + IP:puerto apilados, ver {@link #aliasAndHostBox}), necesita
+     * más alto para no cortar la segunda línea; 36px ya evitaba el corte,
+     * pero el usuario lo vio "muy junto" entre filas — subido otra vez a
+     * 44px + más padding vertical (ver {@code databaseRow.setPadding}) para
+     * que se note un respiro real entre una base y la siguiente. Como
+     * {@code fixedCellSize} es del `TreeView` completo (no por tipo de
+     * fila), TODAS las filas —servidor, categoría de esquema, objeto de
+     * esquema— también crecen a 44px aunque sigan teniendo 1 sola línea;
+     * quedan con más aire, no rotas (se centran verticalmente igual que
+     * antes).
      */
-    private static final double ROW_HEIGHT = 28;
+    private static final double ROW_HEIGHT = 44;
 
     // -- Fila de servidor: construida una sola vez --
     private final Label serverNameLabel = new Label();
@@ -71,15 +88,36 @@ public class ConnectionTreeCell extends TreeCell<Object> {
 
     // -- Fila de base de datos: construida una sola vez --
     private final CheckBox checkBox = new CheckBox();
-    private final Circle statusDot = new Circle(3.5);
+    /** 3.5 → 5 (2026-08-28, pedido explícito del usuario, con captura: el punto se veía "muy chico" contra la casilla de 18px). */
+    private final Circle statusDot = new Circle(5);
     private final Tooltip statusTooltip = new Tooltip();
     private final Label aliasLabel = new Label();
-    private final Label unrestrictedBadge = new Label("SIN RESTRICCIONES");
+    private final Label hostLabel = new Label();
+    /** Alias + IP:puerto apiladas (2026-08-28, a pedido del usuario — "creo se vería mejor que esté abajo o arriba del nombre de la BD"). Necesitó subir {@link #ROW_HEIGHT} para que las 2 líneas no se corten. */
+    private final VBox aliasAndHostBox;
+    /** Candado del modo (2026-08-28) — reemplaza el texto "SIN RESTRICCIONES"/"SOLO LECTURA" de antes, pedido explícito del usuario ("se me hace muy [pesado], hay forma de usar iconos"). Cerrado = solo lectura, abierto = sin restricciones — mismo lenguaje visual que Lucide `lock`/`lock-open` (ver Icons.java), con tooltip para quien de verdad necesite el texto exacto. */
+    private final SVGPath modeIcon = new SVGPath();
+    private final Tooltip modeTooltip = new Tooltip();
     private final Label engineBadge = new Label();
     private final SVGPath editIcon = new SVGPath();
     private final StackPane editButton;
     private final SVGPath deleteIcon = new SVGPath();
     private final StackPane deleteButton;
+    /**
+     * checkBox + statusDot agrupados aparte (2026-08-28, pedido explícito del
+     * usuario, con captura: "el círculo... debe estar alineado" — antes ambos
+     * eran hijos DIRECTOS de databaseRow con TOP_LEFT, así que un Circle de 10px
+     * (statusDot) y una casilla de 18px (checkBox) alineaban por el borde
+     * SUPERIOR, no por el centro — el punto quedaba "flotando" arriba en vez de
+     * centrado contra la casilla). CENTER_LEFT adentro de este sub-HBox los
+     * centra entre sí (su alto lo define el más alto de los dos, checkBox); el
+     * databaseRow de afuera sigue en TOP_LEFT, así que este grupo completo se
+     * alinea contra la PRIMERA línea de aliasAndHostBox (el alias), no contra el
+     * bloque de 2 líneas entero.
+     */
+    private final HBox leadingIconsBox;
+    /** Misma razón que {@link #leadingIconsBox}, para el candado/badge/lápiz/basura del lado derecho. */
+    private final HBox trailingIconsBox;
     private final HBox databaseRow;
 
     // -- Encabezado de sección ("Sin grupo"): construido una sola vez --
@@ -111,12 +149,34 @@ public class ConnectionTreeCell extends TreeCell<Object> {
     private DatabaseTreeItem editTreeItem;
     private SchemaTreeNode.Item schemaItemTarget;
 
+    /**
+     * Ver el javadoc de {@link DatabaseEntry#connectionStatusProperty()} — a
+     * diferencia del resto de esta celda (que solo LEE datos frescos en cada
+     * {@code updateItem()}), el punto de color necesita reaccionar SOLO
+     * cuando cambia, sin esperar a que la celda se repinte por otro motivo
+     * (2026-08-28, pedido explícito del usuario: "estos círculos de conexión
+     * deberían estar sincronizados"). {@code statusListenerTarget} rastrea a
+     * cuál {@code DatabaseEntry} están enganchados los 2 listeners de abajo
+     * ahora mismo, para desengancharlos del anterior antes de reusar esta
+     * celda con una base distinta — mismo motivo por el que
+     * {@code boundCheckProperty} existe para la casilla.
+     */
+    private DatabaseEntry statusListenerTarget;
+    private final ChangeListener<DatabaseEntry.ConnectionStatus> connectionStatusListener =
+            (obs, oldStatus, newStatus) -> refreshStatusDot(statusListenerTarget);
+    private final ChangeListener<Boolean> inUseListener =
+            (obs, wasInUse, isInUse) -> refreshInUseAnimation(statusListenerTarget);
+    /** Pulso de opacidad mientras {@link DatabaseEntry#isInUse()} — ver {@link #refreshInUseAnimation}. */
+    private final FadeTransition inUsePulse = new FadeTransition(Duration.millis(600), statusDot);
+
     public ConnectionTreeCell(
             Consumer<DatabaseEntry> onEditRequested,
             Consumer<DatabaseEntry> onNewQueryRequested,
             Consumer<DatabaseEntry> onDeleteRequested,
             Consumer<DatabaseEntry> onDiscoverRequested,
-            BiConsumer<SchemaTreeNode.Item, GenerateAction> onGenerateRequested) {
+            BiConsumer<SchemaTreeNode.Item, GenerateAction> onGenerateRequested,
+            Consumer<DatabaseEntry> onModeToggleRequested,
+            Consumer<DatabaseEntry> onMoveToGroupRequested) {
         serverNameLabel.getStyleClass().add("tree-server-name");
         HBox.setHgrow(serverNameLabel, Priority.ALWAYS);
         serverCountLabel.getStyleClass().add("tree-count");
@@ -124,25 +184,137 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         serverRow.setAlignment(Pos.CENTER_LEFT);
         fixHeight(serverRow);
 
+        // Preventivo (2026-08-28, mismo bug que aliasLabel/modeIcon/schemaItemRow,
+        // no reportado todavía para la casilla en sí pero mismo riesgo real: un
+        // MOUSE_CLICKED que llega hasta acá sin consumir sube hasta
+        // MainController#onTreeClicked y abre "Editar base" en cualquier doble
+        // clic). CheckBox ya alterna su propio estado por su cuenta (Skin interno,
+        // no manejado a mano acá) — este handler solo CONSUME, no toca
+        // selectedProperty, para no interferir con eso.
+        checkBox.setOnMouseClicked(event -> {
+            if (event.getButton() == MouseButton.PRIMARY) {
+                event.consume();
+            }
+        });
+
         aliasLabel.getStyleClass().add("tree-db-name");
-        HBox.setHgrow(aliasLabel, Priority.ALWAYS);
+        hostLabel.getStyleClass().add("tree-db-host");
+        // Alias arriba, IP:puerto abajo — apiladas, no lado a lado (probado en la
+        // misma línea primero, el usuario prefirió esto). El hgrow vive en esta
+        // VBox, no en ninguno de los 2 Label — así el hueco de espacio libre queda
+        // DESPUÉS de las 2 líneas (mismo lugar de siempre, antes de los badges/
+        // íconos de la derecha), no separando visualmente el alias de su IP.
+        aliasAndHostBox = new VBox(0, aliasLabel, hostLabel);
+        HBox.setHgrow(aliasAndHostBox, Priority.ALWAYS);
         aliasLabel.setCursor(Cursor.HAND);
-        // Clic en el nombre marca/desmarca la casilla de esa base — el
-        // usuario esperaba esto ("como yo le hice clic al nombre de la BD
-        // debería marcarme la casilla"). Solo en aliasLabel (hermano de
-        // checkBox, no ancestro) para no interferir con el propio manejo
-        // de clic de la casilla — un handler a nivel de fila causaría un
-        // doble-toggle que se cancela al hacer clic directo en la casilla.
+        // Clic sencillo en el nombre marca/desmarca la casilla de esa base ("como yo
+        // le hice clic al nombre de la BD debería marcarme la casilla", pedido
+        // explícito del usuario) — doble clic abre Editar base. Los dos SOLO acá, en
+        // el texto del alias, no en ningún nivel más alto de la fila/el árbol
+        // (2026-08-28, pedido explícito del usuario tras encontrar que un manejador
+        // global de doble clic en `MainController` reaccionaba a CUALQUIER parte de
+        // la fila — candado, filas de esquema, etc. — no solo al texto: "no hay
+        // forma de quitar el evento global... que solo se active... cuando esté en
+        // el texto solamente"). `event.consume()` corre siempre que el clic aterriza
+        // acá (se actúe o no sobre él) para que nunca se filtre hacia el árbol
+        // entero — mismo criterio en {@code modeIcon}/{@code checkBox}/
+        // {@code schemaItemRow} más abajo. Solo botón primario — el derecho abre el
+        // menú contextual, no debe tocar la casilla ni abrir Editar.
+        //
+        // MOUSE_PRESSED/RELEASED (2026-08-28, mismo bug real que ya apareció en
+        // modeIcon, ahora confirmado acá también: "el doble clic sobre la BD
+        // despliega el esquema pero también abre la ventana de editar BD al mismo
+        // tiempo") — expandir/colapsar la fila es comportamiento NATIVO de
+        // TreeCell, actúa en MOUSE_PRESSED, antes de que MOUSE_CLICKED exista.
+        // Consumir solo en setOnMouseClicked (más abajo) llega tarde. Ver el
+        // comentario largo en modeIcon para el detalle completo de por qué esto
+        // funciona sin romper el propio MOUSE_CLICKED de este mismo nodo.
+        aliasLabel.setOnMousePressed(event -> {
+            if (event.getButton() == MouseButton.PRIMARY) {
+                event.consume();
+            }
+        });
+        aliasLabel.setOnMouseReleased(event -> {
+            if (event.getButton() == MouseButton.PRIMARY) {
+                event.consume();
+            }
+        });
         aliasLabel.setOnMouseClicked(event -> {
+            if (event.getButton() != MouseButton.PRIMARY) {
+                return;
+            }
             event.consume();
-            checkBox.setSelected(!checkBox.isSelected());
+            if (event.getClickCount() == 1) {
+                checkBox.setSelected(!checkBox.isSelected());
+            } else if (event.getClickCount() == 2 && editTarget != null) {
+                onEditRequested.accept(editTarget);
+            }
         });
         engineBadge.getStyleClass().add("tree-engine-badge");
 
         Tooltip.install(statusDot, statusTooltip);
-        unrestrictedBadge.getStyleClass().add("tree-unrestricted-badge");
-        unrestrictedBadge.setManaged(false);
-        unrestrictedBadge.setVisible(false);
+        // Pulso de opacidad (2026-08-28, pedido explícito del usuario) mientras una
+        // base tiene una consulta corriendo — ver DatabaseEntry#inUse y
+        // refreshInUseAnimation. 0.35 de piso (no 0, para que el punto nunca
+        // desaparezca del todo — sigue siendo el indicador de a qué estado de
+        // conexión real va a volver cuando termine), 600ms por medio ciclo, vaivén
+        // indefinido mientras dure la consulta.
+        inUsePulse.setFromValue(1.0);
+        inUsePulse.setToValue(0.35);
+        inUsePulse.setCycleCount(Animation.INDEFINITE);
+        inUsePulse.setAutoReverse(true);
+        modeIcon.getStyleClass().add("tree-mode-icon");
+        modeIcon.setScaleX(0.55);
+        modeIcon.setScaleY(0.55);
+        // Sin esto (2026-08-28, bug real: "el botón del candado no siempre
+        // reacciona") — un SVGPath con relleno transparente (trazo nada más, ver
+        // .tree-mode-icon en app.css) solo es "clickeable" en el trazo mismo por
+        // defecto, no en toda su caja — clics que caen en el hueco de adentro del
+        // candado (la mayoría, el trazo es angosto) no tocaban ningún nodo real y
+        // el evento se perdía sin llegar a ningún handler. editIcon/deleteIcon no
+        // sufren esto porque su clic vive en el StackPane que los envuelve
+        // (editButton/deleteButton, con área rectangular normal), no en el SVGPath
+        // directo como acá. pickOnBounds hace que TODA la caja del ícono (no solo
+        // el trazo) sea clickeable.
+        modeIcon.setPickOnBounds(true);
+        Tooltip.install(modeIcon, modeTooltip);
+        // Clic en el candado alterna el modo directo, sin abrir el diálogo de editar
+        // (2026-08-28, pedido explícito del usuario). Mismo chequeo de botón primario
+        // Y de clickCount que aliasLabel arriba, MISMA razón para consumir siempre
+        // que aterrice acá (evita que "abre y cierra la BD al mismo tiempo" se
+        // convierta también en "abre la ventana de Editar" — ver el comentario
+        // largo en aliasLabel más arriba, mismo bug, mismo arreglo).
+        modeIcon.setCursor(Cursor.HAND);
+        // Sin esto (2026-08-28, bug real: "doy doble clic [en el candado] y se
+        // despliega la BD") — el doble clic para expandir/colapsar una fila del
+        // árbol es comportamiento NATIVO de JavaFX (TreeCell), no algo de esta
+        // app, y actúa en MOUSE_PRESSED — antes de que MOUSE_CLICKED siquiera se
+        // sintetice. Consumir el clic en setOnMouseClicked (más abajo) llega
+        // tarde: el expandir/colapsar ya pasó. Consumiendo PRESSED/RELEASED acá
+        // (antes de que suban al TreeCell) evita que la fila reaccione, sin
+        // afectar el propio MOUSE_CLICKED de este nodo (JavaFX lo sintetiza
+        // igual, aunque PRESSED/RELEASED se hayan consumido). Solo botón
+        // primario, para no interferir con el clic derecho que abre el menú
+        // contextual.
+        modeIcon.setOnMousePressed(event -> {
+            if (event.getButton() == MouseButton.PRIMARY) {
+                event.consume();
+            }
+        });
+        modeIcon.setOnMouseReleased(event -> {
+            if (event.getButton() == MouseButton.PRIMARY) {
+                event.consume();
+            }
+        });
+        modeIcon.setOnMouseClicked(event -> {
+            if (event.getButton() != MouseButton.PRIMARY) {
+                return;
+            }
+            event.consume();
+            if (event.getClickCount() == 1 && editTarget != null) {
+                onModeToggleRequested.accept(editTarget);
+            }
+        });
 
         editIcon.setContent(Icons.PENCIL);
         editIcon.getStyleClass().add("tree-edit-icon");
@@ -178,9 +350,46 @@ public class ConnectionTreeCell extends TreeCell<Object> {
             }
         });
 
-        databaseRow = new HBox(6, checkBox, statusDot, aliasLabel, unrestrictedBadge, engineBadge, editButton, deleteButton);
-        databaseRow.setAlignment(Pos.CENTER_LEFT);
-        databaseRow.setPadding(new Insets(1, 0, 1, 0));
+        leadingIconsBox = new HBox(6, checkBox, statusDot);
+        leadingIconsBox.setAlignment(Pos.CENTER_LEFT);
+        trailingIconsBox = new HBox(6, modeIcon, engineBadge, editButton, deleteButton);
+        trailingIconsBox.setAlignment(Pos.CENTER_LEFT);
+
+        databaseRow = new HBox(6, leadingIconsBox, aliasAndHostBox, trailingIconsBox);
+        // TOP_LEFT, no CENTER_LEFT (2026-08-28, pedido explícito del usuario, con
+        // captura: "el checkbox está abajo de la BD, debería estar al mismo nivel
+        // que el nombre") — la fila tiene 2 líneas de texto apiladas (alias + IP,
+        // ver aliasAndHostBox) desde que se agregó la IP; CENTER_LEFT centraba la
+        // casilla/candado/badges/íconos contra el ALTO TOTAL de la fila (44px), que
+        // cae justo en el hueco ENTRE las 2 líneas, no contra el alias. TOP_LEFT los
+        // alinea con la primera línea (el alias), que es el nivel que se espera —
+        // leadingIconsBox/trailingIconsBox (ver su javadoc) resuelven el resto:
+        // que checkBox/statusDot (y candado/badge/lápiz/basura) se centren ENTRE
+        // SÍ, no solo contra el alias.
+        databaseRow.setAlignment(Pos.TOP_LEFT);
+        databaseRow.setPadding(new Insets(4, 0, 4, 0));
+        // Red de seguridad a nivel de TODA la fila (2026-08-28) — el mismo bug de
+        // expandir/colapsar nativo en MOUSE_PRESSED seguía filtrándose incluso
+        // después de arreglarlo en aliasLabel: la fila ahora tiene 2 líneas (alias +
+        // IP, ver aliasAndHostBox) con más alto que antes, y hay zonas reales sin
+        // ningún manejador propio (el hueco vertical entre las 2 líneas, el propio
+        // texto de la IP, el margen extra del padding) que dejaban pasar el clic
+        // directo hacia TreeCell. En vez de seguir agregando el mismo parche nodo
+        // por nodo cada vez que aparece un hueco nuevo, esto consume CUALQUIER
+        // clic primario que llegue hasta acá sin haber sido ya consumido por un
+        // hijo más específico (checkBox/aliasLabel/modeIcon/editButton/
+        // deleteButton, que siguen actuando igual — bubbling ya los dejó actuar
+        // antes de llegar hasta acá).
+        databaseRow.setOnMousePressed(event -> {
+            if (event.getButton() == MouseButton.PRIMARY) {
+                event.consume();
+            }
+        });
+        databaseRow.setOnMouseReleased(event -> {
+            if (event.getButton() == MouseButton.PRIMARY) {
+                event.consume();
+            }
+        });
         fixHeight(databaseRow);
 
         // Clic derecho en una fila de base — mismo patrón para las 3
@@ -212,6 +421,17 @@ public class ConnectionTreeCell extends TreeCell<Object> {
                 onDeleteRequested.accept(editTarget);
             }
         });
+        // "Mover a grupo…" (2026-08-28, pedido explícito del usuario, con imagen de
+        // referencia: "no veo el tema de poder agrupar las BD") — antes NO existía
+        // ninguna forma de mover una base a un servidor/grupo desde la UI (los
+        // servidores solo se podían crear en el JSON a mano); ver también
+        // MainController#onNewGroup para crear el grupo en sí.
+        MenuItem moveToGroupItem = new MenuItem("Mover a grupo…");
+        moveToGroupItem.setOnAction(event -> {
+            if (editTarget != null) {
+                onMoveToGroupRequested.accept(editTarget);
+            }
+        });
         // "Recargar esquema" (2026-08-25, el usuario preguntó cómo recargar y no
         // existía ninguna forma real — el caché de SchemaIntrospector no tenía
         // invalidación, ni la app un control para pedirla) — descarta el caché de
@@ -226,7 +446,7 @@ public class ConnectionTreeCell extends TreeCell<Object> {
                 editTreeItem.reloadSchema();
             }
         });
-        databaseContextMenu = new ContextMenu(newQueryItem, discoverItem, reloadSchemaItem, deleteItem);
+        databaseContextMenu = new ContextMenu(newQueryItem, discoverItem, reloadSchemaItem, moveToGroupItem, deleteItem);
 
         sectionHeaderLabel.getStyleClass().add("tree-section-label");
         fixHeight(sectionHeaderLabel);
@@ -268,9 +488,21 @@ public class ConnectionTreeCell extends TreeCell<Object> {
                         schemaItemTarget.kind() == Kind.TABLES ? GenerateAction.CREATE_TABLE : GenerateAction.CREATE_SCRIPT);
             }
         });
+        // NUNCA consumía nada (2026-08-28, mismo bug real que aliasLabel/modeIcon,
+        // reportado por el usuario: "al desplegar... tablas, vistas, etc, cualquiera
+        // de esos componentes al hacer doble clic sobre ellos también abren la
+        // ventana de editar BD") — un doble clic sin consumir acá subía hasta
+        // `MainController#onTreeClicked` (nivel de todo el árbol), que abre "Editar
+        // base" en cualquier doble clic mientras una base siga con el resaltado de
+        // fila del TreeView (que no cambia solo por expandir/clickear su esquema).
+        // `event.consume()` siempre que el clic sea primario, se dispare o no
+        // "Generar SELECT" — mismo criterio que el resto de esta celda.
         schemaItemRow.setOnMouseClicked(event -> {
-            if (event.getButton() == MouseButton.PRIMARY && event.getClickCount() == 2
-                    && schemaItemTarget != null && isQueryable(schemaItemTarget.kind())) {
+            if (event.getButton() != MouseButton.PRIMARY) {
+                return;
+            }
+            event.consume();
+            if (event.getClickCount() == 2 && schemaItemTarget != null && isQueryable(schemaItemTarget.kind())) {
                 onGenerateRequested.accept(schemaItemTarget, GenerateAction.SELECT);
             }
         });
@@ -395,23 +627,43 @@ public class ConnectionTreeCell extends TreeCell<Object> {
             }
         }
 
-        String statusStyleClass = "tree-status-dot-" + statusStyleSuffix(db);
-        if (!statusDot.getStyleClass().contains(statusStyleClass)) {
-            statusDot.getStyleClass().removeIf(c -> c.startsWith("tree-status-dot-"));
-            statusDot.getStyleClass().add(statusStyleClass);
+        // Ver el javadoc de statusListenerTarget — enganchar/desenganchar los 2
+        // listeners de connectionStatus/inUse solo cuando esta celda pasa a
+        // representar una base DISTINTA (mismo criterio de "no mutar si no
+        // cambió" que ya rige boundCheckProperty arriba).
+        if (statusListenerTarget != db) {
+            if (statusListenerTarget != null) {
+                statusListenerTarget.connectionStatusProperty().removeListener(connectionStatusListener);
+                statusListenerTarget.inUseProperty().removeListener(inUseListener);
+            }
+            statusListenerTarget = db;
+            db.connectionStatusProperty().addListener(connectionStatusListener);
+            db.inUseProperty().addListener(inUseListener);
         }
-        statusTooltip.setText(statusTooltipText(db));
+        refreshStatusDot(db);
+        refreshInUseAnimation(db);
 
         aliasLabel.setText(db.alias());
+        hostLabel.setText(db.host() + ":" + db.port());
         engineBadge.setText(db.engine().badge());
 
-        // Etiqueta "SIN RESTRICCIONES" — solo para bases que NO son de
-        // solo lectura (igual que faro-java-prototipo.html: una base de
-        // solo lectura no lleva ninguna marca extra, es el caso normal).
+        // Candado del modo — SIEMPRE visible (a diferencia del texto "SIN
+        // RESTRICCIONES" que reemplaza, que solo aparecía en el caso no-lectura):
+        // un ícono cerrado/abierto se lee de un vistazo en los dos estados, no hace
+        // falta esconder el "normal" para no distraer, como sí hacía falta con un
+        // bloque de texto. Mutaciones condicionales (solo si de verdad cambió, no
+        // en cada updateItem) — mismo criterio contra el parpadeo del árbol que ya
+        // usan las demás filas de esta celda, ver el javadoc de la clase.
         boolean unrestricted = db.mode() != ServerMode.READ_ONLY;
-        if (unrestricted != unrestrictedBadge.isVisible()) {
-            unrestrictedBadge.setVisible(unrestricted);
-            unrestrictedBadge.setManaged(unrestricted);
+        modeIcon.setContent(unrestricted ? Icons.LOCK_OPEN : Icons.LOCK);
+        modeTooltip.setText(db.mode().label());
+        boolean hasUnrestrictedStyle = modeIcon.getStyleClass().contains("tree-mode-icon-unrestricted");
+        if (unrestricted != hasUnrestrictedStyle) {
+            if (unrestricted) {
+                modeIcon.getStyleClass().add("tree-mode-icon-unrestricted");
+            } else {
+                modeIcon.getStyleClass().remove("tree-mode-icon-unrestricted");
+            }
         }
 
         editTarget = db;
@@ -440,5 +692,47 @@ public class ConnectionTreeCell extends TreeCell<Object> {
             case TESTING -> "Probando conexión…";
             case UNKNOWN -> "Conexión: nunca probada";
         };
+    }
+
+    /**
+     * Repinta {@code statusDot} contra el estado REAL de {@code db} — llamado
+     * tanto desde {@code updateDatabaseRow} (pintura inicial/reciclado de
+     * celda) como desde {@link #connectionStatusListener} (cambio en vivo,
+     * ver el javadoc de {@code statusListenerTarget}) — los dos casos usan
+     * exactamente la misma lógica, no hay ninguna diferencia entre "recién
+     * pintado" y "cambió mientras ya estaba visible".
+     */
+    private void refreshStatusDot(DatabaseEntry db) {
+        if (db == null) {
+            return;
+        }
+        String statusStyleClass = "tree-status-dot-" + statusStyleSuffix(db);
+        if (!statusDot.getStyleClass().contains(statusStyleClass)) {
+            statusDot.getStyleClass().removeIf(c -> c.startsWith("tree-status-dot-"));
+            statusDot.getStyleClass().add(statusStyleClass);
+        }
+        statusTooltip.setText(statusTooltipText(db));
+    }
+
+    /**
+     * Prende/apaga el pulso de {@link #inUsePulse} contra
+     * {@link DatabaseEntry#isInUse()} — 2026-08-28, pedido explícito del
+     * usuario: "si se está haciendo uso de esa BD... que pardee o se mueva
+     * ese círculo azul indicando que está en uso". {@code playFromStart()}
+     * solo si no estaba ya corriendo (evita reiniciar el pulso a mitad de un
+     * ciclo cada vez que {@code updateDatabaseRow} repinta la celda sin que
+     * {@code inUse} haya cambiado de verdad); {@code stop()} + opacidad 1.0
+     * al apagarse, para no dejar el punto a medio desvanecer.
+     */
+    private void refreshInUseAnimation(DatabaseEntry db) {
+        if (db != null && db.isInUse()) {
+            if (inUsePulse.getStatus() != Animation.Status.RUNNING) {
+                statusDot.setOpacity(1.0);
+                inUsePulse.playFromStart();
+            }
+        } else {
+            inUsePulse.stop();
+            statusDot.setOpacity(1.0);
+        }
     }
 }
