@@ -3269,7 +3269,7 @@ Pedido: "que cargue las tablas solo cuando le de a desplegar, también para los 
 - **Expandir una base ya no consulta esquema** — dibuja las 6 categorías al instante y abre UNA conexión (`probeConnection`, hilo demonio propio) solo para confirmar el punto de estado, que es lo que el usuario pidió con esas palabras ("hasta que le dé clic a la flecha de desplegar la BD me haga la conexión").
 - **`SchemaTreeNode.Loading`/`Error`** (records nuevos) reemplazan los `TreeItem<String>` pelados — la celda les da un `ProgressIndicator` girando y un label rojo con tooltip, respectivamente.
 
-**El usuario reportó "no veo ninguna animación".** Medido: el spinner existe y es indeterminado (`visible=true, indeterminado=true`). No se ve porque contra los contenedores locales la carga tarda **22 ms** (`23:42:05.059 → .081` en el log real). Se le explicó y se le ofreció un mínimo de visibilidad de ~300 ms, **sin implementarlo** — hacer la app deliberadamente más lenta es decisión suya.
+**El usuario reportó "no veo ninguna animación".** Medido: el spinner existe y es indeterminado (`visible=true, indeterminado=true`). No se ve porque contra los contenedores locales la carga tarda **22 ms** (`23:42:05.059 → .081` en el log real). Se le explicó y se le ofreció forzar un mínimo de visibilidad de ~300 ms; **el usuario lo descartó — "déjalo, así está bien, no es necesario, en productivo sí se ve bien"**. Cerrado: el comportamiento actual es el definitivo, y de paso queda confirmado por él que contra bases reales de cliente la animación sí se alcanza a ver.
 
 **Verificado con el log real:** arranque sin nada → expandir BD = 1 pool, 0 queries → expandir categoría = ahí sí el fetch.
 
