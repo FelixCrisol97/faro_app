@@ -43,6 +43,26 @@ public final class SchemaTreeNode {
     public static final int UNKNOWN_COUNT = -1;
 
     /**
+     * Fila temporal de "cargando…" mientras un fetch de esquema está en curso
+     * (2026-09-07, pedido explícito del usuario: "quiero ver una animación de
+     * carga cuando se estén cargando"). Antes esto era un {@code TreeItem<String>}
+     * con el texto pelado — {@code ConnectionTreeCell} lo pintaba con el mismo
+     * camino que el encabezado "SIN GRUPO", sin ninguna señal de movimiento, así
+     * que un fetch lento era indistinguible de un árbol trabado. Como tipo propio,
+     * la celda le puede dar su propio {@code ProgressIndicator} girando.
+     *
+     * <p>{@link Error} es su contraparte para un fetch que falló — mismo motivo
+     * (antes también era un String pelado) y así la celda puede distinguir
+     * "sigue cargando" de "falló" sin adivinar por el texto.
+     */
+    public record Loading(String label) {
+    }
+
+    /** Ver {@link Loading} — fila de un fetch de esquema que falló, con la causa real ya recortada a una línea. */
+    public record Error(String message) {
+    }
+
+    /**
      * {@code parentTable} solo aplica a {@link Kind#TRIGGERS} (no nulo ahí,
      * {@code null} en los otros 4 tipos) — en PostgreSQL, un nombre de
      * trigger es único por tabla, no global, así que

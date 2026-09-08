@@ -232,6 +232,7 @@ public final class ConnectionRegistryStore {
         json.addProperty("mode", db.mode().name());
         json.addProperty("poolSize", db.poolSize());
         json.addProperty("queryTimeoutSeconds", db.queryTimeoutSeconds());
+        json.addProperty("trustServerCertificate", db.trustServerCertificate());
         // Solo CONNECTED/FAILED (2026-08-28, pedido explícito del usuario: "ya se probó
         // que la conexión funciona... debería estar en verde siempre... cierro y abro
         // la app y debería estar en verde"). UNKNOWN (nunca se probó) y TESTING (estado
@@ -262,6 +263,14 @@ public final class ConnectionRegistryStore {
         }
         if (json.has("queryTimeoutSeconds")) {
             db.setQueryTimeoutSeconds(json.get("queryTimeoutSeconds").getAsInt());
+        }
+        // Sin este campo en el JSON (archivo guardado antes del 2026-09-07, cuando
+        // TODAS las conexiones a SQL Server confiaban en el certificado sin verificarlo)
+        // se queda el default del modelo, que es true — o sea, exactamente el
+        // comportamiento que ese archivo tenía cuando se guardó. Un connections.json
+        // viejo no cambia de conducta al abrirlo con esta versión.
+        if (json.has("trustServerCertificate")) {
+            db.setTrustServerCertificate(json.get("trustServerCertificate").getAsBoolean());
         }
         // Un estado guardado es solo el PUNTO DE PARTIDA al abrir la app — no la
         // verdad final: en cuanto el árbol expande esta base (o corre una consulta

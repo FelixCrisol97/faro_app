@@ -58,20 +58,64 @@ final class CategoryTreeItem extends TreeItem<Object> {
         return super.getChildren();
     }
 
+    /**
+     * <b>Tablas y Vistas también pasan por acá desde el 2026-09-07</b> (pedido
+     * explícito del usuario: "que cargue las tablas solo cuando le de a
+     * desplegar, también para los procedimientos, triggers, etc"). Antes eran las
+     * dos únicas categorías EAGER — se traían de un jalón al expandir la base,
+     * así que abrir una base siempre costaba una consulta de esquema aunque el
+     * usuario solo quisiera ver, por ejemplo, los procedimientos.
+     *
+     * <p>Las dos salen del MISMO fetch ({@code SchemaIntrospector#fetchStructure}
+     * trae tablas y vistas juntas, son dos llamadas a {@code getTables} sobre una
+     * sola conexión) — o sea que expandir "Tablas" deja "Vistas" ya lista en
+     * caché, instantánea, y viceversa. Separarlas en dos fetches distintos sería
+     * un viaje de red de más sin ninguna ganancia.
+     */
     private void requestCategory() {
+        if (kind == Kind.TABLES || kind == Kind.VIEWS) {
+            requestStructureCategory();
+            return;
+        }
         Optional<List<String>> cached = SchemaIntrospector.cachedCategory(db.id(), kind);
         if (cached.isPresent()) {
             applyNames(cached.get());
             return;
         }
-        super.getChildren().setAll(List.of(new TreeItem<>("Cargando…")));
+        showLoading();
         SchemaIntrospector.loadCategoryInBackground(db, credentials, pool, kind,
                 names -> Platform.runLater(() -> applyNames(names)),
                 // Mismo motivo que DatabaseTreeItem#requestSchema — sin esto la fila se
                 // quedaba pegada en "Cargando…" para siempre si el fetch de esta categoría
                 // fallaba, indistinguible de uno que de verdad seguía en curso.
-                error -> Platform.runLater(() -> super.getChildren().setAll(
-                        List.of(new TreeItem<>("Error al cargar: " + DatabaseTreeItem.shortCause(error))))));
+                error -> Platform.runLater(() -> showError(error)));
+    }
+
+    /** Ver {@link #requestCategory()} — Tablas/Vistas comparten un solo fetch de estructura. */
+    private void requestStructureCategory() {
+        Optional<SchemaIntrospector.SchemaStructure> cached = SchemaIntrospector.cached(db.id());
+        if (cached.isPresent()) {
+            applyNames(namesFrom(cached.get()));
+            return;
+        }
+        showLoading();
+        SchemaIntrospector.loadInBackground(db, credentials, pool,
+                structure -> Platform.runLater(() -> applyNames(namesFrom(structure))),
+                error -> Platform.runLater(() -> showError(error)));
+    }
+
+    private List<String> namesFrom(SchemaIntrospector.SchemaStructure structure) {
+        return kind == Kind.TABLES ? structure.tableNames() : structure.viewNames();
+    }
+
+    /** Fila con spinner real mientras el fetch está en curso — ver {@code SchemaTreeNode.Loading}. */
+    private void showLoading() {
+        super.getChildren().setAll(List.of(new TreeItem<>(new SchemaTreeNode.Loading("Cargando " + kind.label().toLowerCase() + "…"))));
+    }
+
+    private void showError(Throwable error) {
+        super.getChildren().setAll(
+                List.of(new TreeItem<>(new SchemaTreeNode.Error("Error al cargar: " + DatabaseTreeItem.shortCause(error)))));
     }
 
     /** {@code setValue} actualiza el conteo visible de esta fila (antes en {@link SchemaTreeNode#UNKNOWN_COUNT}) — dispara su propio refresh de celda, no hace falta tocar el árbol desde afuera. */

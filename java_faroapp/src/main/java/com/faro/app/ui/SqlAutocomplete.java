@@ -1,9 +1,11 @@
 package com.faro.app.ui;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 
 import org.fxmisc.richtext.CodeArea;
 
@@ -85,7 +87,16 @@ public final class SqlAutocomplete {
         int replaceStart = start;
         int replaceEnd = caret;
 
-        List<String> matches = new ArrayList<>(SqlFormatter.KEYWORDS.stream()
+        // LinkedHashSet, no ArrayList (2026-09-07, hallazgo #8 de
+        // AUDITORIA_BUGS_RENDIMIENTO.md) — los bucles de abajo hacían
+        // `!matches.contains(name)` sobre una lista, o sea una búsqueda lineal por cada
+        // nombre del esquema: cuadrático. Contra una base DEV real de cliente (miles de
+        // tablas) y un prefijo corto de una o dos letras —justo cuando el autocompletado
+        // más sirve— eso es medio millón de comparaciones en el hilo de la UI antes de
+        // que el popup aparezca. El Set mantiene el orden de inserción igual que la
+        // lista (importa: primero palabras clave, después tablas, después columnas) y
+        // deja el contains en O(1); la deduplicación ahora es implícita.
+        Set<String> matches = new LinkedHashSet<>(SqlFormatter.KEYWORDS.stream()
                 .filter(keyword -> keyword.startsWith(prefixUpper) && !keyword.equals(prefixUpper))
                 .toList());
 
@@ -93,7 +104,7 @@ public final class SqlAutocomplete {
             Optional<SchemaStructure> schema = SchemaIntrospector.cached(activeDb.id());
             if (schema.isPresent()) {
                 for (String name : schema.get().queryableNames()) {
-                    if (name.toUpperCase(Locale.ROOT).startsWith(prefixUpper) && !matches.contains(name)) {
+                    if (name.toUpperCase(Locale.ROOT).startsWith(prefixUpper)) {
                         matches.add(name);
                     }
                 }
@@ -104,7 +115,7 @@ public final class SqlAutocomplete {
                 // autocompletado repetido sobre esa tabla) — se va llenando solo, no
                 // completo desde el primer uso. Ver SchemaIntrospector#cachedColumnNames.
                 for (String name : SchemaIntrospector.cachedColumnNames(activeDb.id())) {
-                    if (name.toUpperCase(Locale.ROOT).startsWith(prefixUpper) && !matches.contains(name)) {
+                    if (name.toUpperCase(Locale.ROOT).startsWith(prefixUpper)) {
                         matches.add(name);
                     }
                 }
@@ -114,13 +125,14 @@ public final class SqlAutocomplete {
             }
         }
 
-        matches.sort(String.CASE_INSENSITIVE_ORDER);
         if (matches.isEmpty()) {
             return;
         }
+        List<String> sortedMatches = new ArrayList<>(matches);
+        sortedMatches.sort(String.CASE_INSENSITIVE_ORDER);
 
         ContextMenu menu = new ContextMenu();
-        for (String candidate : matches) {
+        for (String candidate : sortedMatches) {
             MenuItem item = new MenuItem(candidate);
             item.setOnAction(event -> {
                 codeArea.replaceText(replaceStart, replaceEnd, candidate);

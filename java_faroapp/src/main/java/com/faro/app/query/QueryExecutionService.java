@@ -97,7 +97,7 @@ public final class QueryExecutionService {
             protected QueryResult call() throws InterruptedException {
                 long startedAt = System.currentTimeMillis();
                 AtomicReference<List<String>> columnsRef = new AtomicReference<>();
-                List<List<Object>> rows = Collections.synchronizedList(new ArrayList<>());
+                List<Object[]> rows = Collections.synchronizedList(new ArrayList<>());
                 List<String> errors = Collections.synchronizedList(new ArrayList<>());
 
                 int poolSize = Math.min(Math.max(1, databases.size()), Math.max(1, maxConcurrentDatabases));
@@ -121,6 +121,9 @@ public final class QueryExecutionService {
                 long elapsed = System.currentTimeMillis() - startedAt;
                 log.info("Corrida completa en {} ms — {} fila(s) combinadas, {} error(es) — {}/{} bases con error",
                         elapsed, rows.size(), errors.size(), errors.size(), databases.size());
+                // new ArrayList<>(rows) copia solo la lista de NIVEL SUPERIOR (un array de
+                // referencias) para salir de Collections.synchronizedList — cada fila real
+                // (Object[]) NO se copia, sigue siendo la misma instancia. Ver QueryResult.
                 return new QueryResult(columns == null ? List.of() : columns, new ArrayList<>(rows), new ArrayList<>(errors));
             }
         };
@@ -154,7 +157,7 @@ public final class QueryExecutionService {
                 }
 
                 List<String> columns = new ArrayList<>();
-                List<List<Object>> rows = new ArrayList<>();
+                List<Object[]> rows = new ArrayList<>();
                 try (Connection conn = pool.getConnection(db, creds.get());
                      Statement statement = conn.createStatement()) {
                     switch (db.engine()) {
@@ -183,7 +186,7 @@ public final class QueryExecutionService {
     }
 
     private static void collectPlanRows(
-            ResultSet rs, String databaseAlias, List<String> columns, List<List<Object>> rows) throws SQLException {
+            ResultSet rs, String databaseAlias, List<String> columns, List<Object[]> rows) throws SQLException {
         ResultSetMetaData meta = rs.getMetaData();
         int columnCount = meta.getColumnCount();
         if (columns.isEmpty()) {
@@ -193,10 +196,10 @@ public final class QueryExecutionService {
             }
         }
         while (rs.next()) {
-            List<Object> row = new ArrayList<>(columnCount + 1);
-            row.add(databaseAlias);
+            Object[] row = new Object[columnCount + 1];
+            row[0] = databaseAlias;
             for (int i = 1; i <= columnCount; i++) {
-                row.add(rs.getObject(i));
+                row[i] = rs.getObject(i);
             }
             rows.add(row);
         }
@@ -226,7 +229,7 @@ public final class QueryExecutionService {
     private static void runOne(
             DatabaseEntry db, CredentialStore credentials, ConnectionPoolManager pool, String sql,
             ExecutionStatus status, AtomicReference<List<String>> columnsRef,
-            List<List<Object>> rows, List<String> errors, int fetchSize,
+            List<Object[]> rows, List<String> errors, int fetchSize,
             Map<DbEngine, String> engineVersions) {
         long startedAt = System.currentTimeMillis();
         log.debug("[{}] Iniciando ejecución ({})", db.alias(), db.engine());
@@ -290,7 +293,7 @@ public final class QueryExecutionService {
             jdbcStatement.setFetchSize(fetchSize);
 
             List<String> lastColumnNames = null;
-            List<List<Object>> lastRows = null;
+            List<Object[]> lastRows = null;
             int statementIndex = 0;
             for (String statement : statements) {
                 statementIndex++;
@@ -308,12 +311,12 @@ public final class QueryExecutionService {
                         columnNames.add(meta.getColumnLabel(i));
                     }
 
-                    List<List<Object>> theseRows = new ArrayList<>();
+                    List<Object[]> theseRows = new ArrayList<>();
                     while (rs.next()) {
-                        List<Object> row = new ArrayList<>(columnCount + 1);
-                        row.add(db.alias());
+                        Object[] row = new Object[columnCount + 1];
+                        row[0] = db.alias();
                         for (int i = 1; i <= columnCount; i++) {
-                            row.add(rs.getObject(i));
+                            row[i] = rs.getObject(i);
                         }
                         theseRows.add(row);
                     }

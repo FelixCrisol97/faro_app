@@ -15,9 +15,9 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.Optional;
 import java.util.Set;
 import java.util.Timer;
@@ -51,6 +51,7 @@ import com.faro.app.query.CsvFileNamer;
 import com.faro.app.query.ExecutionStatus;
 import com.faro.app.query.QueryExecutionService;
 import com.faro.app.query.QueryResult;
+import com.faro.app.query.SchemaComparisonService;
 import com.faro.app.query.SchemaIntrospector;
 import com.faro.app.query.SqlFormatter;
 import com.faro.app.query.SqlScriptGenerator;
@@ -271,6 +272,9 @@ public class MainController {
 
     private static final int MAX_HISTORY = 50;
 
+    /** Tope del log visual de la pestaña Diagnóstico — ver {@link #log(LogLevel, String)}. Más alto que {@link #MAX_HISTORY} porque acá sí importa poder mirar hacia atrás varias corridas seguidas (una corrida contra 20 bases puede dejar 20 líneas de golpe), pero acotado igual. */
+    private static final int MAX_DIAGNOSTIC_ENTRIES = 500;
+
     /** Nivel de una entrada del log de Diagnóstico — mismo vocabulario visual que `faro-java-prototipo.html` (INFO/WARN/ERROR/DEBUG, coloreados). */
     private enum LogLevel { INFO, WARN, ERROR, DEBUG }
 
@@ -288,7 +292,7 @@ public class MainController {
     private final ObservableList<DiagnosticEntry> diagnosticLog = FXCollections.observableArrayList();
     private final ObservableList<String> queryHistory = FXCollections.observableArrayList();
     private ConnectionRegistry registry;
-    private TableView<ObservableList<Object>> resultsTable;
+    private TableView<Object[]> resultsTable;
     private ListView<ExecutionStatus> executionTable;
     private RotateTransition exportSpinAnimation;
     private Label executionSummaryLabel;
@@ -317,6 +321,8 @@ public class MainController {
     private int queryTabCounter;
     private Timer autosaveTimer;
     private Timer statusBarTimer;
+    /** Candado del autoguardado en segundo plano — ver {@link #autosave()}. */
+    private final AtomicBoolean autosaveInProgress = new AtomicBoolean(false);
 
     private static final long AUTOSAVE_INTERVAL_MILLIS = 120_000;
     /** Pool activo/total y memoria SÍ cambian en cualquier momento (no solo al terminar una ejecución/exportación, que es cuando refreshStatusBar() ya se llamaba) — hallazgo real del usuario probando en vivo: "lo veo todo estático no veo que cambie". 2.5s de por medio: suficiente para sentirse en vivo, demasiado espaciado como para que leer HikariCP/Runtime en cada tick importe de verdad. */
@@ -330,7 +336,7 @@ public class MainController {
         connectionTree.setCellFactory(tree ->
                 new ConnectionTreeCell(this::openEditDialog, this::onNewQueryForDatabase, this::confirmAndDeleteDatabase,
                         this::onDiscoverForDatabase, this::onGenerateScript, this::onToggleDatabaseMode,
-                        this::onMoveDatabaseToGroup));
+                        this::onMoveDatabaseToGroup, preferences::fontScaleDelta, this::onCompareObject));
         connectionFilterField.textProperty().addListener((obs, oldText, newText) -> {
             connectionFilterText = newText;
             refreshTree();
@@ -539,21 +545,24 @@ public class MainController {
         // no le alcanza (texto de filas contiguas superpuesto, reportado con captura
         // 2026-08-26).
         resultsTable.setFixedCellSize(ResultsTableFactory.rowHeight(preferences.fontScaleDelta()));
-        // Vaciar y reponer los items fuerza a TableView a descartar y reconstruir todas
-        // las celdas de cero, en vez de reciclar las que el VirtualFlow ya tenía
-        // renderizadas — intento real para el mismo bug de `ResultsTableFactory`
-        // (texto de filas cortado SOLO al achicar el zoom). **No demostrado que ayude**:
-        // antes de esto ya se había probado `refresh()` solo, sin efecto, y este cambio
-        // TAMPOCO lo arregló por sí solo — el usuario confirmó "sigue igual, mismo
-        // comportamiento" con exactamente este código puesto. Lo que sí cerró el bug fue
-        // el margen fijo `ResultsTableFactory#SAFETY_MARGIN_PX`, agregado después. Este
-        // bloque se dejó de todas formas (no se probó nunca "solo el margen, sin esto")
-        // por si aporta algo marginal — si algún día se quiere simplificar
-        // `applyCurrentTheme()`, quitar esto primero y confirmar en vivo que el grid
-        // sigue bien es lo razonable, no borrar a ciegas.
-        ObservableList<ObservableList<Object>> currentItems = resultsTable.getItems();
-        resultsTable.setItems(FXCollections.observableArrayList());
-        resultsTable.setItems(currentItems);
+        // La flecha de expandir del árbol también sigue al tamaño de fuente de la
+        // interfaz (2026-09-07, ver ConnectionTreeCell#applyDisclosureScale) — su escala
+        // se aplica en updateItem(), así que hay que forzar el repintado de las celdas
+        // visibles para que tomen el valor nuevo apenas se mueve el slider.
+        connectionTree.refresh();
+        // QUITADO (2026-09-07, hallazgo #11 de AUDITORIA_BUGS_RENDIMIENTO.md, a pedido
+        // explícito del usuario). Acá había un `setItems(lista vacía)` + `setItems(la
+        // misma lista de antes)` — vaciar y reponer la tabla para forzar a JavaFX a
+        // reconstruir TODAS las celdas de cero en cada cambio de tema/acento/tamaño de
+        // fuente (o sea, en cada paso del slider de Preferencias, con el resultado
+        // completo cargado). Era un intento fallido contra el bug del grid (texto de
+        // filas cortado al bajar el zoom): el usuario lo probó con este bloque puesto y
+        // confirmó "sigue igual, mismo comportamiento". Lo que de verdad cerró ese bug
+        // fue el margen fijo `ResultsTableFactory#SAFETY_MARGIN_PX`, que sigue en su
+        // lugar y es lo único que hace falta. Si el síntoma reapareciera al mover el
+        // slider de tamaño con resultados en pantalla, esto es lo primero que habría que
+        // revisar — pero volver a ponerlo solo tendría sentido con evidencia real de que
+        // ayuda, que nunca existió.
     }
 
     /** Muestra el ícono de lo que el clic va a hacer — luna (pasar a oscuro) en tema claro, sol (pasar a claro) en oscuro. */
@@ -568,6 +577,18 @@ public class MainController {
 
     private void log(LogLevel level, String message) {
         diagnosticLog.add(0, new DiagnosticEntry(LocalTime.now(), level, message));
+        // Tope real (2026-09-07, hallazgo #6 de AUDITORIA_BUGS_RENDIMIENTO.md) — antes
+        // esta lista crecía sin límite, a diferencia del historial de consultas que sí
+        // se corta en MAX_HISTORY. Una sesión larga de trabajo real (varias corridas por
+        // hora contra muchas bodegas, cada error de base con su línea, más credenciales/
+        // escaneos/pruebas de conexión) acumulaba miles de entradas que nunca se
+        // liberaban — y como cada entrada nueva se inserta en la posición 0, insertar se
+        // volvía progresivamente más caro (desplaza todo el arreglo) además de nunca
+        // devolver memoria. El archivo de log (logback, con rotación propia) sigue
+        // teniendo la traza completa — esto es solo el visor de la sesión.
+        while (diagnosticLog.size() > MAX_DIAGNOSTIC_ENTRIES) {
+            diagnosticLog.remove(diagnosticLog.size() - 1);
+        }
         setTabBadge(diagnosticTab, "Diagnóstico", diagnosticLog.size());
         switch (level) {
             case ERROR -> logger.error(message);
@@ -740,7 +761,19 @@ public class MainController {
         // Agregado DESPUÉS de replaceText() de arriba — si no, cargar el
         // texto inicial (ej. un archivo abierto) marcaría la pestaña como
         // "con cambios sin guardar" apenas se crea, lo cual sería falso.
-        codeArea.textProperty().addListener((obs, oldText, newText) -> {
+        //
+        // plainTextChanges(), NO textProperty() (2026-09-07, hallazgo #5 de
+        // AUDITORIA_BUGS_RENDIMIENTO.md): en RichTextFX el texto no es un campo, es un
+        // valor derivado del documento — tener un listener puesto en textProperty()
+        // obliga a materializar el documento COMPLETO como un String nuevo en cada
+        // cambio, o sea en cada tecla (y dos veces, porque el listener también recibe el
+        // valor anterior). Con un script grande pegado en la pestaña eso son megabytes
+        // de basura por pulsación, y se siente como latencia al escribir. La propia
+        // documentación de RichTextFX advierte esto y recomienda plainTextChanges(), que
+        // entrega solo el cambio puntual sin armar el texto entero. La suscripción vive
+        // lo que viva el CodeArea (muere con la pestaña, sin fuga) y el cuerpo es
+        // trivial: en cuanto la pestaña ya está sucia no hace nada más.
+        codeArea.plainTextChanges().subscribe(change -> {
             if (!state.dirty) {
                 state.dirty = true;
                 tab.setText("● " + tab.getText());
@@ -895,21 +928,26 @@ public class MainController {
             return;
         }
         CodeArea codeArea = state.codeArea;
-        String haystackLower = codeArea.getText().toLowerCase(Locale.ROOT);
-        String needleLower = needle.toLowerCase(Locale.ROOT);
+        // Sin copia en minúsculas del documento entero (2026-09-07, hallazgo #9 de
+        // AUDITORIA_BUGS_RENDIMIENTO.md) — antes cada "buscar siguiente" hacía
+        // getText().toLowerCase(), o sea DOS copias completas del script por cada F3.
+        // Sobre un script grande, repetir F3 asignaba decenas de MB de basura solo para
+        // encontrar la siguiente coincidencia. indexOfIgnoreCase compara en el lugar con
+        // regionMatches(true, ...) — misma insensibilidad a mayúsculas, sin copiar nada.
+        String haystack = codeArea.getText();
 
         int caret = codeArea.getCaretPosition();
         int index;
         if (forward) {
-            index = haystackLower.indexOf(needleLower, caret);
+            index = indexOfIgnoreCase(haystack, needle, caret, true);
             if (index < 0) {
-                index = haystackLower.indexOf(needleLower);
+                index = indexOfIgnoreCase(haystack, needle, 0, true);
             }
         } else {
             int searchFrom = caret - needle.length() - 1;
-            index = searchFrom >= 0 ? haystackLower.lastIndexOf(needleLower, searchFrom) : -1;
+            index = searchFrom >= 0 ? indexOfIgnoreCase(haystack, needle, searchFrom, false) : -1;
             if (index < 0) {
-                index = haystackLower.lastIndexOf(needleLower);
+                index = indexOfIgnoreCase(haystack, needle, haystack.length() - needle.length(), false);
             }
         }
 
@@ -920,6 +958,35 @@ public class MainController {
         findStatusLabel.setText("");
         codeArea.selectRange(index, index + needle.length());
         codeArea.requestFollowCaret();
+    }
+
+    /**
+     * Equivalente insensible a mayúsculas de {@code indexOf}/{@code lastIndexOf}
+     * SIN copiar el texto — {@code String#regionMatches(true, ...)} compara en el
+     * lugar, carácter por carácter, sobre el documento original (ver
+     * {@link #findInCurrentTab}). {@code forward=false} busca hacia atrás desde
+     * {@code from} inclusive, igual que {@code lastIndexOf}. Devuelve -1 si no hay
+     * ninguna coincidencia en esa dirección.
+     */
+    private static int indexOfIgnoreCase(String haystack, String needle, int from, boolean forward) {
+        int lastPossibleStart = haystack.length() - needle.length();
+        if (needle.isEmpty() || lastPossibleStart < 0) {
+            return -1;
+        }
+        if (forward) {
+            for (int i = Math.max(0, from); i <= lastPossibleStart; i++) {
+                if (haystack.regionMatches(true, i, needle, 0, needle.length())) {
+                    return i;
+                }
+            }
+        } else {
+            for (int i = Math.min(from, lastPossibleStart); i >= 0; i--) {
+                if (haystack.regionMatches(true, i, needle, 0, needle.length())) {
+                    return i;
+                }
+            }
+        }
+        return -1;
     }
 
     /**
@@ -1258,11 +1325,18 @@ public class MainController {
                     });
                     try (Connection conn = DriverManager.getConnection(
                             db.jdbcUrl(), creds.get().user(), creds.get().password())) {
-                        db.setConnectionStatus(DatabaseEntry.ConnectionStatus.CONNECTED);
+                        // Bug real (hallazgo de esta ronda de optimización): a diferencia del
+                        // TESTING de arriba, CONNECTED/FAILED se mutaban DIRECTO desde este hilo
+                        // de fondo (faro-test-all), sin Platform.runLater — connectionStatus es
+                        // una propiedad de JavaFX, mutarla fuera del hilo de la UI no es seguro
+                        // (mismo criterio ya documentado en DatabaseEntry y aplicado en
+                        // QueryExecutionService#runOne, que este método nunca había igualado).
+                        Platform.runLater(() -> db.setConnectionStatus(DatabaseEntry.ConnectionStatus.CONNECTED));
                         connected++;
                     } catch (SQLException e) {
-                        db.setConnectionStatus(DatabaseEntry.ConnectionStatus.FAILED);
-                        failures.add(db.alias() + ": " + e.getMessage());
+                        String message = e.getMessage();
+                        Platform.runLater(() -> db.setConnectionStatus(DatabaseEntry.ConnectionStatus.FAILED));
+                        failures.add(db.alias() + ": " + message);
                     }
                     Platform.runLater(connectionTree::refresh);
                 }
@@ -1400,7 +1474,7 @@ public class MainController {
         List<String> headers = resultsTable.getColumns().stream()
                 .map(TableColumn::getText)
                 .toList();
-        ObservableList<ObservableList<Object>> rows = resultsTable.getItems();
+        ObservableList<Object[]> rows = resultsTable.getItems();
         logger.info("onExportResultsCsv: exportando {} fila(s) a {}", rows.size(), file.getAbsolutePath());
 
         Task<Void> task = new Task<>() {
@@ -1412,13 +1486,13 @@ public class MainController {
                     int written = 0;
                     int total = rows.size();
                     StringBuilder line = new StringBuilder();
-                    for (List<Object> row : rows) {
+                    for (Object[] row : rows) {
                         line.setLength(0);
-                        for (int i = 0; i < row.size(); i++) {
+                        for (int i = 0; i < row.length; i++) {
                             if (i > 0) {
                                 line.append(',');
                             }
-                            Object value = row.get(i);
+                            Object value = row[i];
                             line.append(csvEscape(value == null ? "" : value.toString()));
                         }
                         writer.write(line.toString());
@@ -1949,6 +2023,20 @@ public class MainController {
             return;
         }
         try {
+            // Descartar TODOS los pools antes de reemplazar el registro (2026-09-07,
+            // hallazgo #3 de AUDITORIA_BUGS_RENDIMIENTO.md). Los pools se indexan por id
+            // de base y se arman una sola vez con el host/puerto/credenciales de ese
+            // momento (ver el javadoc de ConnectionPoolManager) — por eso editar o
+            // eliminar una base ya llamaba a evict(). Importar no lo hacía, y un archivo
+            // exportado CONSERVA los ids: si una base cambió de host entre la exportación
+            // y la importación, el pool viejo seguía vivo y la siguiente consulta corría
+            // contra el servidor ANTERIOR, en silencio, mientras el árbol mostraba el host
+            // nuevo. Aparte, los pools de bases que ya no existen en el archivo importado
+            // quedaban abiertos (con sus conexiones TCP) hasta cerrar la app, sin nadie
+            // que pudiera descartarlos. closeAll() y no evict() base por base: importar
+            // reemplaza el registro ENTERO, así que no hay forma de saber cuáles ids
+            // siguen siendo "la misma base" de verdad.
+            pool.closeAll();
             // .registry() nada más — un archivo importado nunca trae pestañas (ver
             // onExportConfig), así que no hay nada que restaurar en las pestañas ya
             // abiertas de esta sesión.
@@ -2083,6 +2171,75 @@ public class MainController {
             }
         }
         return saved;
+    }
+
+    /**
+     * "Comparar en las bases marcadas…" del menú contextual de un objeto de
+     * esquema (2026-09-07, pedido explícito del usuario: verificar que una misma
+     * función/tabla/trigger sea idéntica en todas las bodegas, sin tener que
+     * escribir una consulta ni revisarlas a mano una por una).
+     *
+     * <p>Corre contra las bases MARCADAS en la pestaña activa — mismo criterio
+     * que "Ejecutar", no contra todas las registradas: comparar es una operación
+     * masiva más, y cuáles bodegas entran es justamente lo que el usuario elige
+     * con las casillas. La base del objeto sobre el que se hizo clic derecho se
+     * agrega sola si no estaba marcada (sería absurdo comparar "esta función"
+     * excluyendo la base de donde salió).
+     *
+     * <p>El resultado cae en la pestaña Resultados como cualquier corrida —
+     * incluido "Exportar CSV", que funciona sin ningún camino nuevo.
+     */
+    private void onCompareObject(SchemaTreeNode.Item item) {
+        List<DatabaseEntry> selected = new ArrayList<>(ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot())
+                .stream()
+                .filter(CheckBoxTreeItem::isSelected)
+                .map(treeItem -> (DatabaseEntry) treeItem.getValue())
+                .toList());
+        if (selected.stream().noneMatch(db -> db.id().equals(item.database().id()))) {
+            selected.add(0, item.database());
+        }
+        if (selected.size() < 2) {
+            statusLabel.setText("Marca al menos 2 bases para comparar " + item.name() + ".");
+            log(LogLevel.WARN, "Comparar '" + item.name() + "': hace falta marcar al menos 2 bases.");
+            return;
+        }
+
+        statusLabel.setText("Comparando " + item.name() + " en " + selected.size() + " base(s)…");
+        logger.info("onCompareObject: comparando {} '{}' en {} base(s)", item.kind(), item.name(), selected.size());
+        Task<QueryResult> task = SchemaComparisonService.compare(
+                item.kind(), item.name(), item.parentTable(), selected, credentials, pool,
+                preferences.maxConcurrentDatabases());
+        task.setOnSucceeded(e -> {
+            QueryResult result = task.getValue();
+            ResultsTableFactory.populate(resultsTable, result.columns(), result.rows());
+            setTabBadge(resultsTab, "Resultados", result.rows().size());
+            updateResultsSummary(result.rows().size());
+            // Insumos del nombre sugerido de "Exportar CSV" — acá no hay SQL de por
+            // medio, así que se le pasa un texto que describa la comparación (ver
+            // CsvFileNamer: usa esto solo para armar el nombre del archivo).
+            lastResultDatabaseLabel = selected.size() + "-bases";
+            lastResultSql = "comparacion " + item.kind().label() + " " + item.name();
+            long distintas = result.rows().stream().filter(row -> String.valueOf(row[4]).startsWith("NO")).count();
+            String resumen = distintas == 0
+                    ? "Todas las bases tienen la misma versión de " + item.name() + "."
+                    : distintas + " base(s) con una versión DISTINTA de " + item.name() + ".";
+            statusLabel.setText(resumen);
+            log(distintas == 0 ? LogLevel.INFO : LogLevel.WARN, resumen);
+            for (String error : result.errors()) {
+                log(LogLevel.ERROR, "Comparar " + item.name() + " — " + error);
+            }
+            resultsTab.getTabPane().getSelectionModel().select(resultsTab);
+            refreshStatusBar();
+        });
+        task.setOnFailed(e -> {
+            logger.error("onCompareObject: falló la comparación de {}", item.name(), task.getException());
+            statusLabel.setText("No se pudo comparar " + item.name() + " — revisa Diagnóstico.");
+            log(LogLevel.ERROR, "Comparar " + item.name() + " falló: " + task.getException().getMessage());
+        });
+
+        Thread thread = new Thread(task, "faro-schema-compare");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     /**
@@ -2392,16 +2549,48 @@ public class MainController {
         }, STATUS_BAR_REFRESH_INTERVAL_MILLIS, STATUS_BAR_REFRESH_INTERVAL_MILLIS);
     }
 
+    /**
+     * <b>Captura en el hilo de la UI, escritura en un hilo de fondo</b>
+     * (2026-09-07, hallazgo #4 de {@code AUDITORIA_BUGS_RENDIMIENTO.md}). Antes
+     * todo esto corría dentro del {@code Platform.runLater} del temporizador —
+     * o sea que cada 2 minutos el hilo de JavaFX serializaba el JSON completo
+     * (incluyendo el TEXTO de cada pestaña de consulta abierta), lo escribía a
+     * disco, cifraba las credenciales con DPAPI y escribía un segundo archivo.
+     * Con varias pestañas grandes y un perfil de usuario en disco de red, eso
+     * es un tirón perceptible de la ventana en un momento arbitrario, quizá a
+     * mitad de un tecleo.
+     *
+     * <p>La captura SÍ tiene que quedarse en el hilo de la UI: leer
+     * {@code codeArea.getText()} de cada pestaña y las casillas del árbol
+     * ({@link #capturedQueryTabsForSave()}) solo es seguro ahí. Lo que se movió
+     * es la parte de I/O, con los datos ya capturados en mano.
+     *
+     * <p>Un solo hilo a la vez ({@link #autosaveInProgress}) — dos guardados
+     * solapados escribirían el mismo archivo al mismo tiempo; si el anterior
+     * todavía no termina, este ciclo simplemente se salta (el siguiente tick
+     * llega en 2 minutos, no se pierde nada).
+     */
     private void autosave() {
-        try {
-            ConnectionRegistryStore.save(
-                    registry, preferences, favorites, capturedQueryTabsForSave(), ConnectionRegistryStore.DEFAULT_FILE);
-            CredentialVaultStore.save(credentials, CredentialVaultStore.DEFAULT_FILE);
-            logger.debug("Autoguardado completo.");
-        } catch (IOException | RuntimeException e) {
-            logger.error("Autoguardado falló", e);
-            log(LogLevel.ERROR, "Autoguardado falló: " + e.getMessage());
+        if (!autosaveInProgress.compareAndSet(false, true)) {
+            logger.debug("Autoguardado saltado — el anterior sigue en curso.");
+            return;
         }
+        List<SavedQueryTab> tabs = capturedQueryTabsForSave();
+        Thread thread = new Thread(() -> {
+            try {
+                ConnectionRegistryStore.save(
+                        registry, preferences, favorites, tabs, ConnectionRegistryStore.DEFAULT_FILE);
+                CredentialVaultStore.save(credentials, CredentialVaultStore.DEFAULT_FILE);
+                logger.debug("Autoguardado completo.");
+            } catch (IOException | RuntimeException e) {
+                logger.error("Autoguardado falló", e);
+                Platform.runLater(() -> log(LogLevel.ERROR, "Autoguardado falló: " + e.getMessage()));
+            } finally {
+                autosaveInProgress.set(false);
+            }
+        }, "faro-autosave-write");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     /**

@@ -134,7 +134,22 @@
            solo (TableView no libera memoria de filas fuera de pantalla,
            solo virtualiza qué se RENDERIZA). 4g es un margen explícito, no
            una solución mágica — si algún equipo real tiene menos RAM
-           disponible, bajar este número. -->
+           disponible, bajar este número.
+
+           -XX:+UseG1GC -XX:+UseStringDeduplication (ver
+           OPTIMIZACION_RENDIMIENTO.md) — G1 ya es el recolector por
+           defecto en JDK21+, se deja explícito para no depender de la
+           ergonomía de cada máquina; la deduplicación de String SOLO
+           corre con G1 activo, por eso van juntas. Una corrida masiva trae
+           columnas con muchísimos valores de texto repetidos entre filas
+           (estado, categoría, sucursal, etc.) — cada rs.getString() del
+           driver JDBC crea un String nuevo aunque el contenido sea
+           idéntico a uno que ya existe en otra fila; G1 con esta bandera
+           detecta esos duplicados en segundo plano (durante GC normal, sin
+           pausa extra dedicada) y los hace apuntar al mismo char[]
+           interno. No reduce el número de filas ni de objetos, solo el
+           peso de las cadenas repetidas — gratis en CPU, sin cambiar
+           ningún comportamiento observable. -->
       <plugin>
         <groupId>org.openjfx</groupId>
         <artifactId>javafx-maven-plugin</artifactId>
@@ -143,6 +158,8 @@
           <mainClass>${mainClass}</mainClass>
           <options>
             <option>-Xmx4g</option>
+            <option>-XX:+UseG1GC</option>
+            <option>-XX:+UseStringDeduplication</option>
           </options>
         </configuration>
       </plugin>

@@ -214,6 +214,45 @@
     -fx-font-size: 11.5px;
 }
 
+/* ---- Casilla "Confiar en el certificado del servidor" (diálogo Agregar/editar
+   base) — queda deshabilitada cuando el motor es PostgreSQL, ver
+   AddDatabaseDialogController#syncTrustCertificateAvailability.
+
+   Dos problemas reales, los dos medidos con una sonda que leyó el color
+   efectivo del control (no a ojo), 2026-09-07:
+
+   1. HABILITADA, el texto quedaba en #333333 — gris OSCURO sobre fondo oscuro,
+      o sea ilegible en tema oscuro. Nadie lo había notado porque la casilla
+      nace deshabilitada (PostgreSQL es el motor por defecto del formulario),
+      pero apenas se elegía SQL Server el texto desaparecía. Causa: app.css
+      nunca estilizó un `.check-box` fuera del árbol de conexiones, así que
+      caía al `-fx-text-fill` derivado de Modena, pensado para fondo claro.
+      Por eso la regla base de acá abajo fija el color con el token del tema.
+
+   2. DESHABILITADA, Modena le pone `-fx-opacity: 0.4` a todo control apagado
+      (app.css no tenía NINGUNA regla :disabled propia) y esa opacidad se
+      MULTIPLICA con la del nodo de texto interno — el resultado era más tenue
+      que la nota de al lado aunque las dos tuvieran el mismo color. Por eso
+      acá la opacidad se deja en 1 y es el COLOR (gris atenuado) el único que
+      comunica "esto está inactivo": legible siempre, sin depender de cómo se
+      multipliquen las opacidades de los nodos internos.
+
+   Acotado a estas dos clases a propósito: tocar el :disabled global de la app
+   haría que botones genuinamente apagados (ej. "Exportar CSV" sin resultados)
+   se vieran como si se pudieran presionar. ---- */
+.trust-cert-check {
+    -fx-text-fill: -token-text;
+}
+
+.trust-cert-check:disabled,
+.trust-cert-hint:disabled {
+    -fx-opacity: 1;
+}
+
+.trust-cert-check:disabled {
+    -fx-text-fill: -token-text-muted;
+}
+
 /* ---- Riel de íconos (Conexiones/Historial/Favoritos/Preferencias) — contra
    faro-java-prototipo.html con "Mapa JavaFX" activado. ---- */
 .icon-rail {
@@ -328,12 +367,57 @@
    arma el Skin de TreeCell por dentro — no hay forma de meterle un SVGPath
    propio sin reescribir ese Skin, cambio bastante más grande e imposible
    de probar sin una ventana real. */
+/* El TAMAÑO de la flecha ya no se fija acá (2026-09-07) — lo pone
+   ConnectionTreeCell#applyDisclosureScale en Java, porque tiene que seguir al
+   tamaño de fuente de la interfaz (Preferencias → Apariencia) y ese valor no
+   existe como variable CSS: el mecanismo de escalado reescribe literales de
+   `-fx-font-size` (ver Theme), y un `-fx-scale-*` no es uno de ellos. Acá queda
+   solo el color. */
 .connection-tree .tree-cell .tree-disclosure-node .arrow,
 .connection-tree .tree-cell:filled:selected .tree-disclosure-node .arrow,
 .connection-tree .tree-cell:filled:hover .tree-disclosure-node .arrow {
     -fx-background-color: -token-gray-icon;
-    -fx-scale-x: 0.85;
-    -fx-scale-y: 0.85;
+}
+
+/* Flecha centrada verticalmente en la fila (2026-09-07, reportado por el
+   usuario con captura: "la flecha de despliegue de bd está muy arriba,
+   debería estar más o menos en medio").
+
+   MEDIDO, no estimado: con una sonda que leyó la posición real del nodo dentro
+   de la celda, la flecha caía centrada en y=11.2 de una celda de 44px — o sea
+   casi al borde superior, alineada con la primera línea (el alias) en vez de
+   con el bloque de 2 líneas completo. Es el `TreeCellSkin` de JavaFX el que la
+   coloca, y no expone ninguna propiedad de alineación; `-fx-translate-y` es un
+   corrimiento puramente visual (no toca el layout ni el área clicable del
+   resto de la fila), que es justo lo que hace falta acá.
+
+   11px = 22 (centro real de la celda) - 11.2 (donde caía). Depende de que la
+   fila mida 44px, que es fijo por partida doble: `fixedCellSize="44"` del
+   TreeView en main-view.fxml y ConnectionTreeCell#ROW_HEIGHT — si alguno de
+   los dos cambia, este número hay que recalcularlo. Aplica a TODAS las filas
+   del árbol (bases, grupos, categorías, objetos): las de una sola línea
+   también miden 44px y también quedan mejor centradas. */
+.connection-tree .tree-cell > .tree-disclosure-node {
+    -fx-translate-y: 11;
+}
+
+/* Fila de "Cargando…" del explorador de esquema — ver SchemaTreeNode.Loading.
+   El ProgressIndicator de Modena trae su propio color de acento y un tamaño
+   mucho mayor al de una fila; el tamaño se fija en Java (ConnectionTreeCell) y
+   acá solo el color, para que gire con el acento del tema activo. */
+.tree-loading-spinner .percentage {
+    visibility: hidden;
+}
+.tree-loading-spinner {
+    -fx-progress-color: -token-accent-base;
+}
+.tree-loading-label {
+    -fx-text-fill: -token-text-muted;
+    -fx-font-size: 11.5px;
+}
+.tree-schema-error {
+    -fx-text-fill: -token-error-base;
+    -fx-font-size: 11.5px;
 }
 
 /* Checkbox de selección — el tema Modena por defecto de JavaFX (caja gris

@@ -3215,3 +3215,111 @@ Pedido explícito: "si dejé 2 ventanas abiertas para la próxima vez que abra l
 ### Verificación de toda la ronda
 
 `mvn clean compile`/`mvn clean test` en verde — **73 tests**, sin ningún test nuevo (todo comportamiento visual/interacción de UI, mismo criterio de siempre en este proyecto). Cada pieza se verificó por separado con `mvn javafx:run` + stderr/log capturado (cero excepciones de threading, cero `CSS Error`) y se le pidió confirmación al usuario en la app real antes de seguir con la siguiente — varias rondas del punto 2 (el bug del doble clic) se dieron por "arregladas" prematuramente y tuvieron que corregirse de nuevo, documentado arriba sin ocultarlo.
+
+---
+
+## 2026-09-03 — Optimización de memoria del pipeline de resultados: el resultado completo vivía DOS veces en RAM
+
+Pedido del usuario: "optimices todo el código, mejor rendimiento, mejores prácticas… la app consume mucha RAM cuando hago consultas masivas, que es para lo que está hecha".
+
+**Causa raíz encontrada leyendo el camino completo de una fila, de JDBC a la pantalla:** cada fila pasaba por DOS representaciones separadas. `QueryExecutionService` la armaba como `List<Object>` (una `ArrayList` por fila) dentro de `QueryResult`, y después `ResultsTableFactory#populate` la **volvía a copiar** una por una a un `ObservableList` nuevo (`FXCollections.observableArrayList(row)` dentro de un `for`). Con un resultado real (varias bodegas × cientos de miles de filas) eso significa el resultado ENTERO duplicado en memoria justo en el momento de poblar la tabla, más el overhead por fila de un `ObservableList` (infraestructura de listeners que ninguna fila de esa tabla usa jamás — ninguna celda escucha cambios de su propia fila).
+
+**Arreglo:** la fila pasó a ser un `Object[]` llano (sin envoltorio de colección) y `populate` ahora envuelve la MISMA lista que ya trae `QueryResult` con un solo `FXCollections.observableList(rows)` — un wrapper para toda la tabla, cero copias por fila. `TableView<ObservableList<Object>>` → `TableView<Object[]>`. Blast radius chico y contenido: `QueryResult`, `QueryExecutionService`, `ResultsTableFactory`, `MainController` (campo, export CSV, bloque de tema). Ningún test tocaba esa forma (se verificó con búsqueda antes de cambiar).
+
+**Estimación de impacto** (por overhead de objeto en JVM de 64 bits, NO medida con profiler — no había base real disponible en esa sesión): overhead de contenedores por fila de ~192 B a ~56 B, y desaparece el pico transitorio de doble copia. Para 3M de filas, ~576 MB → ~168 MB solo en contenedores. Documentado con esa salvedad en `java_faroapp/OPTIMIZACION_RENDIMIENTO.md`.
+
+**Bug real aparte, encontrado en el mismo barrido:** `MainController#onTestAllConnections` mutaba `connectionStatus` (propiedad de JavaFX) DIRECTO desde el hilo de fondo en los caminos CONNECTED/FAILED — el TESTING de arriba sí usaba `Platform.runLater`, los otros dos no. Arreglado.
+
+**JVM:** agregadas `-XX:+UseG1GC -XX:+UseStringDeduplication` (pom + comando de jpackage del README). Los valores de texto repetidos entre filas (estado, categoría, sucursal) son el caso típico de una consulta a bodegas, y cada `getString()` del driver crea un `String` nuevo aunque el contenido sea idéntico.
+
+---
+
+## 2026-09-05 — Auditoría exhaustiva de bugs y rendimiento: 12 hallazgos
+
+Pedido: "análisis exhaustivo de este proyecto para identificar bug y fallas de rendimiento". Se leyeron las 51 clases de `src/main/java` completas. Resultado en `java_faroapp/AUDITORIA_BUGS_RENDIMIENTO.md`, con severidad, causa concreta y escenario de fallo de cada uno. Los tres de arriba:
+
+1. **[ALTA] El recorrido del árbol forzaba la carga de esquema de TODAS las bases y TODAS sus categorías.** `ConnectionTreeBuilder#collectDatabaseItems` hacía `for (child : item.getChildren())` sobre todos los nodos — y `getChildren()` es justo donde `DatabaseTreeItem`/`CategoryTreeItem` disparan su fetch perezoso. Como ese método se llama en cada tecla del buscador, cada cambio de pestaña y cada ejecución, una vez cacheada la estructura el recorrido armaba las 6 categorías y bajaba a ellas, disparando 4 fetches JDBC más por base. **Contradecía frontalmente el javadoc de `DatabaseTreeItem`**, que afirmaba que construir el árbol "nunca dispara un fetch por cada base".
+2. **[ALTA] "Probar conexión" congelaba la ventana** — `DriverManager.getConnection` directo en un handler `@FXML`, o sea en el hilo de JavaFX. Con un host caído, ventana sin responder hasta el timeout del driver (30 s o más), y el "Conectando…" nunca alcanzaba a pintarse.
+3. **[MEDIA-ALTA] Importar configuración no descartaba los pools viejos** — están indexados por id de base, y un archivo exportado conserva los ids: si una base cambió de host, la consulta siguiente corría contra el servidor ANTERIOR, en silencio.
+
+Los otros 9: autoguardado con I/O + DPAPI en el hilo de la UI; el flag "cambios sin guardar" materializando el documento completo en cada tecla (`textProperty` de RichTextFX); log de Diagnóstico sin tope con inserción O(n); `CredentialStore` sin sincronizar; autocompletado O(n²); búsqueda copiando el documento en cada F3; animación huérfana en celdas recicladas; el `setItems` doble al cambiar de tema; y `trustServerCertificate=true` fijo.
+
+---
+
+## 2026-09-07/08 — Los 12 corregidos, arranque sin conexiones, esquema 100% perezoso, certificado por base, y comparación de objetos entre bodegas
+
+### 1. Arranque sin conexiones — pedido explícito del usuario
+
+"Cuando inicia la app no quiero que cargue todas las BD, ya que veo que se llena de pool de conexiones si tengo muchas BD ya en la lista".
+
+El hallazgo #1 tenía **dos disparadores, no uno** — el segundo apareció al arreglar el primero:
+
+- `collectDatabaseItems` bajaba a los hijos de cada base. Arreglado cortando el recorrido en la fila de base (los hijos de una base son siempre nodos de esquema, nunca `CheckBoxTreeItem`, así que no se pierde nada).
+- **`CheckBoxTreeItem#setSelected` propaga su estado HACIA LOS HIJOS y para eso los recorre** — o sea que marcar una casilla disparaba el fetch igual. Verificado con un test real (`ConnectionTreeBuilderTest`), no supuesto. Arreglado con `setIndependent(true)` en `DatabaseTreeItem`. El javadoc viejo de `ConnectionTreeBuilder` decía que `setIndependent` no hacía falta razonando solo sobre la propagación hacia ARRIBA — razonamiento incompleto, corregido en el archivo.
+
+**Verificado con la app real y el log como evidencia:** del arranque hasta "Ventana principal mostrada", **0 pools y 0 fetches de esquema** con 6 bases registradas. Antes ese mismo arranque abría un pool por cada una.
+
+**Costo aceptado y documentado:** el punto de estado ya no se auto-verifica al arrancar; parte del valor guardado de la sesión anterior y se confirma/corrige cuando esa base se toca de verdad.
+
+### 2. Esquema 100% perezoso + animación de carga
+
+Pedido: "que cargue las tablas solo cuando le de a desplegar, también para los procedimientos, triggers, etc… quiero ver una animación de carga".
+
+- **Tablas y Vistas pasaron a ser perezosas** (eran las 2 únicas eager). Ahora las 6 categorías son `CategoryTreeItem`. Las dos salen del MISMO fetch (`fetchStructure` trae ambas), así que expandir una deja la otra instantánea.
+- **Expandir una base ya no consulta esquema** — dibuja las 6 categorías al instante y abre UNA conexión (`probeConnection`, hilo demonio propio) solo para confirmar el punto de estado, que es lo que el usuario pidió con esas palabras ("hasta que le dé clic a la flecha de desplegar la BD me haga la conexión").
+- **`SchemaTreeNode.Loading`/`Error`** (records nuevos) reemplazan los `TreeItem<String>` pelados — la celda les da un `ProgressIndicator` girando y un label rojo con tooltip, respectivamente.
+
+**El usuario reportó "no veo ninguna animación".** Medido: el spinner existe y es indeterminado (`visible=true, indeterminado=true`). No se ve porque contra los contenedores locales la carga tarda **22 ms** (`23:42:05.059 → .081` en el log real). Se le explicó y se le ofreció un mínimo de visibilidad de ~300 ms, **sin implementarlo** — hacer la app deliberadamente más lenta es decisión suya.
+
+**Verificado con el log real:** arranque sin nada → expandir BD = 1 pool, 0 queries → expandir categoría = ahí sí el fetch.
+
+### 3. Flecha de expandir: posición y tamaño
+
+Reportado con captura ("está muy arriba, debería estar más o menos en medio") y después ("se ven muy pequeñas, capaz habría que ajustar su tamaño dinámicamente así como lo hacemos con el tamaño de fuente").
+
+**Medido con una sonda, no estimado a ojo:** la flecha caía centrada en y=11.2 de una celda de 44px. `TreeCellSkin` la posiciona y no expone alineación → `-fx-translate-y: 11` (corrimiento visual, no toca layout ni área clicable). Después: 22.2 contra centro 22.0.
+
+**Tamaño:** de escala 0.85 (más chica que la de fábrica) a 1.25, y ahora sigue al `fontScaleDelta` en la misma proporción que el texto. Va en Java (`ConnectionTreeCell#applyDisclosureScale`, con un `IntSupplier` para leer el valor vivo) porque el mecanismo de escalado reescribe literales de `-fx-font-size` y un `-fx-scale-*` no es uno de ellos. Medido: 20px en normal, 27.7px en +5, 12.3px en −5, centrada en los tres.
+
+### 4. Certificado del servidor por base (hallazgo #12)
+
+`DatabaseEntry.trustServerCertificate` (default `true`), usado por `jdbcUrl()`; casilla en el diálogo de Agregar/editar, deshabilitada con PostgreSQL (esa URL no negocia TLS); persistida en `connections.json`. `encrypt=true` sigue fijo — desmarcar aprieta la VALIDACIÓN, nunca quita el cifrado. Un archivo viejo sin la llave cae al default `true`: ninguna conexión existente cambia de conducta.
+
+**Bug de legibilidad reportado con captura, y un bug real de fondo destapado midiendo el color efectivo:**
+
+- **Habilitada, el texto quedaba en `#333333`** — gris oscuro sobre fondo oscuro, invisible. `app.css` nunca había estilizado un `.check-box` fuera del árbol, así que caía al color derivado de Modena, pensado para fondo claro. Nadie lo había visto porque la casilla nace deshabilitada (PostgreSQL es el motor por defecto), pero habría desaparecido justo al elegir SQL Server, que es cuando la casilla sirve.
+- **Deshabilitada**, el `-fx-opacity: 0.4` de Modena se multiplica con la del nodo de texto interno, dejándola más tenue que la nota de al lado pese al mismo color.
+
+Arreglado con color explícito por token y opacidad 1 en el estado deshabilitado — que sea el COLOR y no un desvanecido el que comunique "inactivo". Verificado en los dos temas: oscuro `#F4F4F5`/`#A1A1AA`, claro `#0F172A`/`#475569`. **Confirmado por el usuario: "ya se ve ok".**
+
+### 5. Comparar un objeto de esquema entre bodegas (`SchemaComparisonService`, nuevo)
+
+Pedido: "si yo quiero sacar una función que está en todas las BD… tener la opción de extraer el script de esa función, su md5, y compararla con todas las demás versiones de otras bodegas… para verificar que la función es la misma en todas las bodegas y que no están usando versiones diferentes… y que me la exporte en csv como ya lo hacen las consultas masivas".
+
+- Clic derecho en cualquier objeto → **"Comparar en las bases marcadas…"**. Devuelve un `QueryResult` (mismo tipo que una corrida normal) para que caiga en Resultados y "Exportar CSV" funcione sin ningún camino nuevo.
+- Columnas: `Base de datos · Motor · Objeto · Tipo · Estado · Coincide · MD5 · Caracteres · Definición`.
+- **Nunca usa el caché de `SchemaIntrospector`** — comparar versiones solo tiene sentido leyendo lo que hay AHORA en cada servidor. Se extrajeron `SchemaIntrospector#definitionFrom`/`#columnsFrom` (package-private) para reusar la lectura de DDL sin duplicarla ni pasar por caché.
+- **MD5 normalizado**: unifica CRLF/LF y recorta espacio alrededor (ruido puro entre clientes Windows/Linux). Sangría interna, mayúsculas y comentarios SÍ cuentan — son texto realmente distinto en el servidor.
+- Para **tablas** compara el `CREATE TABLE` reconstruido desde columnas (ningún motor devuelve DDL de tabla listo): detecta columnas de más/menos o con otro tipo, no índices ni constraints.
+- Corre contra las bases MARCADAS (mismo criterio que Ejecutar) e incluye sola la base del objeto sobre el que se hizo clic derecho.
+
+**Fallo de diseño encontrado corriéndolo de verdad contra las 6 bases, que ningún test hubiera detectado:** la primera versión calculaba UNA mayoría global. Los 3 PostgreSQL daban un hash y los 3 SQL Server otro → empate 3-3 → "sin mayoría" para todas. Y no porque las tablas fueran distintas: **cada motor nombra los tipos diferente** (`character varying` contra `nvarchar`), así que comparar entre motores SIEMPRE iba a dar falsa alarma — lo contrario de lo que la función existe para hacer. Corregido a mayoría **por motor**, con "Motor" como columna visible y un veredicto aparte ("única de su motor") cuando hay una sola base de ese motor y no hay contra qué comparar. Re-verificado en vivo: las 6 salen "Sí".
+
+### 6. Los otros arreglos de la auditoría
+
+Prueba de conexión en hilo de fondo (con el botón deshabilitado mientras corre); `pool.closeAll()` al importar configuración; autoguardado con la escritura fuera del hilo de la UI (la captura sí se queda en el hilo de UI, con candado para no solapar dos guardados); `plainTextChanges()` en vez de `textProperty()` para el flag de "sin guardar"; tope de 500 entradas en el log de Diagnóstico; `ConcurrentHashMap` + `volatile` en `CredentialStore`; `LinkedHashSet` en el autocompletado; búsqueda con `regionMatches` sin copiar el documento; pulso detenido en celdas vacías; y el `setItems` doble eliminado de `applyCurrentTheme` (**confirmado por el usuario: "todo bien con el punto 11"** — cerrando de paso la duda abierta desde el 2026-08-26: ese bloque no aportaba nada, el margen fijo solo alcanza).
+
+### 7. Dos tropiezos reales del build, documentados en el README
+
+- **El compilado incremental de Maven ocultó errores de compilación reales, dos veces.** `mvn compile` decía `BUILD SUCCESS` reusando clases viejas; el error (un import faltante) solo apareció al borrar `target/classes/com/faro/app` y recompilar. Lección: "compiló" no es prueba si no se forzó la recompilación.
+- **`mvn clean` falla** con `Failed to delete ...\target\dist\Faro\Faro.exe` siempre que ya se armó el portable antes.
+
+El README ahora trae los comandos en cmd **y** en PowerShell (cambia la continuación de línea y la copia de archivos), más estos dos tropiezos con su salida.
+
+### Verificación de toda la ronda
+
+**89 tests en verde** (73 originales + 16 nuevos: árbol perezoso, certificado por base y su persistencia, MD5 de comparación). Los nuevos son todos lógica pura o contrato de estructura — se mantuvo el criterio de que la suite permanente no arranque JavaFX. Para lo visual/de hilos se usaron **sondas temporales** que arrancan el toolkit, miden (color efectivo, posición y tamaño de la flecha, estructura de hijos del árbol, comparación real contra las 6 bases) y **se borran después de correr** — están descritas acá porque el número medido es la evidencia, no la sonda.
+
+**Confirmado en vivo por el usuario:** arranque sin pools (con log), hallazgo #11, legibilidad de la casilla del certificado, y flechas alineadas.
+
+**Sin confirmar en vivo todavía:** la comparación desde el menú contextual real (se verificó el servicio de punta a punta con una sonda contra las 6 bases, pero nadie ha hecho clic en el ítem del menú); el efecto de desmarcar la casilla del certificado contra un SQL Server con certificado autofirmado; y los arreglos #2/#4/#5/#6/#10, que solo se confirman usándolos.

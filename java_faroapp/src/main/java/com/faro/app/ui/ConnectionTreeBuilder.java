@@ -94,11 +94,16 @@ public final class ConnectionTreeBuilder {
      * arma sus hijos ya filtrados y auto-expandidos, ver
      * {@code DatabaseTreeItem#categoryItems}. Si el alias ya calzaba (o no
      * hay filtro), se le pasa {@code ""} — comportamiento normal, expandir
-     * a mano para explorar el esquema completo. No hace falta
-     * {@code CheckBoxTreeItem#setIndependent(true)} — el padre de cada uno
-     * (serverItem/ungroupedHeader) es un {@code TreeItem<Object>} plano, NO
-     * un {@code CheckBoxTreeItem}, así que no hay casilla de servidor a la
-     * que propagar el estado en primer lugar.
+     * a mano para explorar el esquema completo.
+     *
+     * <p><b>Corrección (2026-09-07):</b> una versión anterior de este javadoc
+     * decía que no hacía falta {@code CheckBoxTreeItem#setIndependent(true)}
+     * porque el padre de cada base es un {@code TreeItem} plano (sin casilla a
+     * la que propagar hacia ARRIBA). Ese razonamiento estaba incompleto: la
+     * propagación también va hacia ABAJO, y para eso {@code CheckBoxTreeItem}
+     * recorre a sus hijos — que en {@link DatabaseTreeItem} es justo lo que
+     * dispara el fetch de esquema. Ahora sí se llama {@code setIndependent(true)}
+     * (en el constructor de {@code DatabaseTreeItem}, con el detalle completo).
      */
     private static TreeItem<Object> databaseItem(
             DatabaseEntry db, String filter, CredentialStore credentials, ConnectionPoolManager pool) {
@@ -121,9 +126,30 @@ public final class ConnectionTreeBuilder {
         return result;
     }
 
+    /**
+     * <b>Corta el recorrido en la fila de base — NO baja a sus hijos</b>
+     * (2026-09-07, bug real de rendimiento; ver
+     * {@code AUDITORIA_BUGS_RENDIMIENTO.md}, hallazgo #1). {@link DatabaseTreeItem}
+     * y {@link CategoryTreeItem} disparan su fetch JDBC dentro de
+     * {@code getChildren()} (patrón de árbol perezoso, ver sus javadocs), así que
+     * el {@code for (child : item.getChildren())} que este método hacía sobre
+     * TODOS los nodos forzaba la carga de esquema de CADA base registrada — y una
+     * vez que la estructura estaba en caché, también las 4 categorías perezosas
+     * (Funciones/Procedimientos/Triggers/Tipos) de cada una, con su propio fetch
+     * JDBC y su propio pool de HikariCP. Como este método se llama en cada tecla
+     * del buscador, cada cambio de pestaña de consulta y cada ejecución, eso era
+     * una ráfaga de consultas que nadie pidió, y anulaba por completo el diseño
+     * de "esquema progresivo" (2026-08-25) que existe justo para evitarlo.
+     *
+     * <p>Cortar acá no pierde nada: los hijos de una base son SIEMPRE nodos de
+     * esquema ({@code SchemaTreeNode.Category}/{@code Item}, {@code TreeItem}
+     * planos), nunca {@code CheckBoxTreeItem} — no hay ninguna casilla más abajo
+     * que este recorrido pudiera encontrar.
+     */
     private static void collectDatabaseItems(TreeItem<Object> item, List<CheckBoxTreeItem<Object>> out) {
         if (item instanceof CheckBoxTreeItem<Object> checkItem) {
             out.add(checkItem);
+            return;
         }
         for (TreeItem<Object> child : item.getChildren()) {
             collectDatabaseItems(child, out);

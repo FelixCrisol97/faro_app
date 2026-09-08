@@ -2,6 +2,7 @@
 
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
+<?import javafx.scene.control.CheckBox?>
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.PasswordField?>
@@ -10,6 +11,7 @@
 <?import javafx.scene.layout.GridPane?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
+<?import java.lang.String?>
 
 <!-- Sin stylesheets fijo — AddDatabaseDialog la agrega según el tema activo, ver Theme.java. -->
 <VBox styleClass="dialog-root" spacing="14"
@@ -64,10 +66,31 @@
 
         <Label text="Timeout de consulta (s)" styleClass="field-label" GridPane.rowIndex="9" GridPane.columnIndex="0"/>
         <TextField fx:id="queryTimeoutField" styleClass="text-field" GridPane.rowIndex="9" GridPane.columnIndex="1"/>
+
+        <!-- Certificado del servidor (2026-09-07, hallazgo #12 de
+             AUDITORIA_BUGS_RENDIMIENTO.md) — solo aplica a SQL Server; el controlador
+             lo deshabilita con PostgreSQL seleccionado. Marcada = comportamiento de
+             siempre (aceptar cualquier certificado); desmarcada = exigir uno válido.
+             Sin etiqueta en la columna izquierda a propósito: el texto de la casilla ya
+             dice qué hace, y la nota de abajo explica la consecuencia real. -->
+        <Label text="Certificado" styleClass="field-label" GridPane.rowIndex="10" GridPane.columnIndex="0"/>
+        <VBox spacing="2" GridPane.rowIndex="10" GridPane.columnIndex="1">
+            <CheckBox fx:id="trustCertificateCheck" styleClass="trust-cert-check"
+                      text="Confiar en el certificado del servidor"/>
+            <Label fx:id="trustCertificateHint" wrapText="true" maxWidth="Infinity"
+                   text="Solo SQL Server. Desmarcado exige un certificado válido: más seguro, pero falla si el servidor usa uno autofirmado.">
+                <styleClass>
+                    <String fx:value="muted"/>
+                    <String fx:value="trust-cert-hint"/>
+                </styleClass>
+            </Label>
+        </VBox>
     </GridPane>
 
     <VBox spacing="6">
-        <Button text="Probar conexión" styleClass="button-secondary" onAction="#onTestConnection"/>
+        <!-- fx:id agregado 2026-09-07 — el controlador deshabilita este botón mientras
+             la prueba corre en su hilo de fondo, ver AddDatabaseDialogController#onTestConnection. -->
+        <Button fx:id="testConnectionButton" text="Probar conexión" styleClass="button-secondary" onAction="#onTestConnection"/>
         <Label fx:id="testStatusLabel" styleClass="muted" wrapText="true" maxWidth="Infinity"/>
     </VBox>
 

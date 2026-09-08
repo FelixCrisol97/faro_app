@@ -9,15 +9,31 @@ import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 
 /**
- * Arma y repuebla la tabla de resultados. Usa
- * {@code TableView<ObservableList<Object>>} en vez de una clase de fila
- * fija porque un resultado real de SQL tiene columnas que cambian según la
- * consulta — no se pueden conocer en tiempo de compilación. {@link #create()}
- * arma una tabla vacía (sin datos de ejemplo, se quitaron a pedido del
- * usuario, 2026-08-22 — ver {@link com.faro.app.data.ConnectionRegistry}
- * para el mismo pedido aplicado al árbol de conexiones); {@link #populate}
- * reemplaza columnas y filas de una tabla ya existente con un resultado
- * real — ver {@code MainController#onRunQuery}.
+ * Arma y repuebla la tabla de resultados. Usa {@code TableView<Object[]>} en
+ * vez de una clase de fila fija porque un resultado real de SQL tiene
+ * columnas que cambian según la consulta — no se pueden conocer en tiempo de
+ * compilación. {@link #create()} arma una tabla vacía (sin datos de ejemplo,
+ * se quitaron a pedido del usuario, 2026-08-22 — ver
+ * {@link com.faro.app.data.ConnectionRegistry} para el mismo pedido aplicado
+ * al árbol de conexiones); {@link #populate} reemplaza columnas y filas de
+ * una tabla ya existente con un resultado real — ver
+ * {@code MainController#onRunQuery}.
+ *
+ * <p><b>Optimización de memoria (ver {@code OPTIMIZACION_RENDIMIENTO.md}):
+ * antes cada fila era {@code ObservableList<Object>}</b>, y {@link #populate}
+ * copiaba fila por fila en una lista nueva (
+ * {@code FXCollections.observableArrayList(row)} dentro de un {@code for}) —
+ * con un resultado grande de verdad (varias bodegas x cientos de miles de
+ * filas cada una) eso duplicaba en memoria TODO el resultado combinado
+ * durante la llamada (el original de {@code QueryResult} + la copia nueva
+ * que arma la tabla, ambos vivos a la vez), y cada fila pagaba el overhead
+ * de un {@code ObservableList} (listeners internos que esta tabla nunca usa
+ * — ninguna fila necesita notificar cambios de sus propias celdas) encima
+ * del de {@code ArrayList} normal. Ahora la fila es un {@code Object[]} llano
+ * (sin overhead de colección) y {@link #populate} envuelve la lista de filas
+ * que ya trae {@code QueryResult} DIRECTO con {@code FXCollections
+ * .observableList(...)} — un solo wrapper para toda la tabla, cero copias
+ * por fila.
  *
  * <p>Si se marcan bases de motores distintos con formas de resultado
  * distintas en una misma corrida, las columnas de la tabla salen de la
@@ -76,32 +92,30 @@ public final class ResultsTableFactory {
         return fontSize * 1.2 + CELL_VERTICAL_PADDING_PX + SAFETY_MARGIN_PX;
     }
 
-    public static TableView<ObservableList<Object>> create(int fontScaleDelta) {
-        TableView<ObservableList<Object>> table = new TableView<>();
+    public static TableView<Object[]> create(int fontScaleDelta) {
+        TableView<Object[]> table = new TableView<>();
         table.getStyleClass().add("results-table");
         table.setFixedCellSize(rowHeight(fontScaleDelta));
         return table;
     }
 
     public static void populate(
-            TableView<ObservableList<Object>> table, List<String> columnNames, List<List<Object>> rows) {
+            TableView<Object[]> table, List<String> columnNames, List<Object[]> rows) {
         table.getColumns().clear();
 
         for (int i = 0; i < columnNames.size(); i++) {
             final int columnIndex = i;
-            TableColumn<ObservableList<Object>, Object> column = new TableColumn<>(columnNames.get(i));
+            TableColumn<Object[], Object> column = new TableColumn<>(columnNames.get(i));
             column.setCellValueFactory(data -> {
-                List<Object> row = data.getValue();
-                Object value = columnIndex < row.size() ? row.get(columnIndex) : null;
+                Object[] row = data.getValue();
+                Object value = columnIndex < row.length ? row[columnIndex] : null;
                 return new SimpleObjectProperty<>(value);
             });
             table.getColumns().add(column);
         }
 
-        ObservableList<ObservableList<Object>> items = FXCollections.observableArrayList();
-        for (List<Object> row : rows) {
-            items.add(FXCollections.observableArrayList(row));
-        }
-        table.setItems(items);
+        // Un solo wrapper sobre la MISMA lista que ya trae QueryResult — no una
+        // ObservableList nueva por fila. Ver el javadoc de la clase.
+        table.setItems(FXCollections.observableList(rows));
     }
 }

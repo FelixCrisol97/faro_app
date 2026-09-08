@@ -14,7 +14,10 @@ import com.faro.app.model.ServerMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javafx.concurrent.Task;
 import javafx.fxml.FXML;
+import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.PasswordField;
@@ -54,6 +57,11 @@ public class AddDatabaseDialogController {
     @FXML private TextField poolSizeField;
     @FXML private TextField queryTimeoutField;
     @FXML private Label testStatusLabel;
+    /** Se deshabilita mientras la prueba de conexión corre en su hilo de fondo — ver {@link #onTestConnection()}. */
+    @FXML private Button testConnectionButton;
+    /** Ver {@link DatabaseEntry#trustServerCertificate()} — solo aplica a SQL Server, ver {@link #syncTrustCertificateAvailability}. */
+    @FXML private CheckBox trustCertificateCheck;
+    @FXML private Label trustCertificateHint;
 
     private Stage stage;
     private CredentialStore credentials;
@@ -70,6 +78,7 @@ public class AddDatabaseDialogController {
             if (engine != null && editing == null) {
                 portField.setText(String.valueOf(engine.defaultPort()));
             }
+            syncTrustCertificateAvailability();
         });
 
         modeCombo.setConverter(labelConverter(ServerMode::label));
@@ -80,6 +89,21 @@ public class AddDatabaseDialogController {
         // el loader ya invocó initialize() antes de que el factory alcance a
         // inyectar esas dependencias (startAdd() las necesita para los valores
         // por defecto de pool/timeout).
+    }
+
+    /**
+     * La casilla del certificado solo tiene efecto real en SQL Server — en
+     * PostgreSQL la URL que arma {@link DatabaseEntry#jdbcUrl()} ni siquiera
+     * negocia TLS (pgJDBC usa su propio {@code sslmode}, que este proyecto todavía
+     * no expone). Se deja VISIBLE pero deshabilitada en ese caso, en vez de
+     * ocultarla: esconder controles según el motor haría saltar el formulario
+     * completo al cambiar el combo, y una casilla apagada comunica mejor "esto
+     * existe, pero acá no aplica" que un hueco que aparece y desaparece.
+     */
+    private void syncTrustCertificateAvailability() {
+        boolean sqlServer = engineCombo.getValue() == DbEngine.SQL_SERVER;
+        trustCertificateCheck.setDisable(!sqlServer);
+        trustCertificateHint.setDisable(!sqlServer);
     }
 
     void attachStage(Stage stage) {
@@ -108,6 +132,11 @@ public class AddDatabaseDialogController {
         modeCombo.getSelectionModel().select(ServerMode.READ_ONLY);
         poolSizeField.setText(String.valueOf(preferences.defaultPoolSize()));
         queryTimeoutField.setText(String.valueOf(preferences.defaultQueryTimeoutSeconds()));
+        // Marcada por defecto — mismo comportamiento que tenían TODAS las conexiones
+        // antes de que esta casilla existiera; una base nueva contra un servidor con
+        // certificado autofirmado (lo común en servidores internos) no falla de entrada.
+        trustCertificateCheck.setSelected(true);
+        syncTrustCertificateAvailability();
         testStatusLabel.setText(null);
     }
 
@@ -130,6 +159,8 @@ public class AddDatabaseDialogController {
         modeCombo.getSelectionModel().select(entry.mode());
         poolSizeField.setText(String.valueOf(entry.poolSize()));
         queryTimeoutField.setText(String.valueOf(entry.queryTimeoutSeconds()));
+        trustCertificateCheck.setSelected(entry.trustServerCertificate());
+        syncTrustCertificateAvailability();
         testStatusLabel.setText(null);
     }
 
@@ -146,6 +177,10 @@ public class AddDatabaseDialogController {
         }
         DatabaseEntry probe = new DatabaseEntry(values.alias, values.host, values.port,
                 values.databaseName, engineCombo.getValue(), modeCombo.getValue());
+        // La prueba tiene que usar la MISMA casilla que se va a guardar — si no, probar
+        // con la casilla desmarcada conectaría igual (confiando en el certificado) y
+        // diría "Conectado", para después fallar de verdad al ejecutar una consulta.
+        probe.setTrustServerCertificate(trustCertificateCheck.isSelected());
         String user = userField.getText();
         String password = passwordField.getText();
         // Hallazgo en vivo del usuario (2026-08-25, bases reales de cliente): los campos
@@ -167,14 +202,51 @@ public class AddDatabaseDialogController {
         }
         log.info("Probando conexión — {} ({}, usuario={})", probe.jdbcUrl(), probe.engine(), user);
         setTestStatus("Conectando…", null);
-        try (Connection conn = DriverManager.getConnection(probe.jdbcUrl(), user, password)) {
-            String version = conn.getMetaData().getDatabaseProductVersion();
-            log.info("Prueba de conexión OK — {}", version.lines().findFirst().orElse(version));
-            setTestStatus("Conectado — " + version.lines().findFirst().orElse(version), "status-success");
-        } catch (SQLException e) {
-            log.warn("Prueba de conexión falló — {}: {}", probe.jdbcUrl(), e.getMessage());
-            setTestStatus("Error de conexión: " + e.getMessage(), "status-error");
-        }
+
+        // En un hilo de fondo, NO en el de JavaFX (2026-09-07, hallazgo #2 de
+        // AUDITORIA_BUGS_RENDIMIENTO.md). Antes esto llamaba DriverManager
+        // .getConnection(...) directo acá — y este método es un handler @FXML, o sea
+        // que corre en el hilo de la UI: con un host caído o un firewall que traga los
+        // paquetes, la ventana quedaba congelada (sin repintar, sin responder al mouse,
+        // "no responde" según Windows) hasta que el driver se rindiera — 30 s con
+        // mssql-jdbc, potencialmente más con el timeout de red del sistema en pgJDBC.
+        // Efecto colateral que lo delataba: el "Conectando…" de arriba NUNCA alcanzaba
+        // a verse, porque el hilo se bloqueaba antes del siguiente pulso de render.
+        // Todos los demás caminos de la app que abren conexiones ya usaban hilo de
+        // fondo (QueryExecutionService, DiscoveryService, SchemaIntrospector,
+        // MainController#onTestAllConnections); este era el único que no.
+        String resolvedUser = user;
+        String resolvedPassword = password;
+        Task<String> probeTask = new Task<>() {
+            @Override
+            protected String call() throws SQLException {
+                try (Connection conn = DriverManager.getConnection(probe.jdbcUrl(), resolvedUser, resolvedPassword)) {
+                    return conn.getMetaData().getDatabaseProductVersion();
+                }
+            }
+        };
+        // Sin esto, repetir el clic mientras la primera prueba sigue en curso arranca
+        // una segunda conexión en paralelo — con el botón ya deshabilitado no hay forma
+        // de que pase, y de paso es la señal visual de que algo está corriendo (antes
+        // no había ninguna, ver arriba).
+        testConnectionButton.setDisable(true);
+        probeTask.setOnSucceeded(event -> {
+            String version = probeTask.getValue();
+            String firstLine = version.lines().findFirst().orElse(version);
+            log.info("Prueba de conexión OK — {}", firstLine);
+            setTestStatus("Conectado — " + firstLine, "status-success");
+            testConnectionButton.setDisable(false);
+        });
+        probeTask.setOnFailed(event -> {
+            Throwable error = probeTask.getException();
+            log.warn("Prueba de conexión falló — {}: {}", probe.jdbcUrl(), error.getMessage());
+            setTestStatus("Error de conexión: " + error.getMessage(), "status-error");
+            testConnectionButton.setDisable(false);
+        });
+
+        Thread thread = new Thread(probeTask, "faro-test-connection");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     /**
@@ -230,6 +302,7 @@ public class AddDatabaseDialogController {
         entry.setMode(modeCombo.getValue());
         entry.setPoolSize(values.poolSize);
         entry.setQueryTimeoutSeconds(values.queryTimeout);
+        entry.setTrustServerCertificate(trustCertificateCheck.isSelected());
 
         if (isBlank(userField.getText())) {
             // Vaciar el usuario a propósito quita el override guardado (si había uno) — antes

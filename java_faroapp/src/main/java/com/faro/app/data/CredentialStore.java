@@ -1,9 +1,9 @@
 package com.faro.app.data;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Usuario/contraseña por base de datos — vive en memoria durante la sesión;
@@ -18,8 +18,17 @@ import java.util.Optional;
  */
 public final class CredentialStore {
 
-    private final Map<String, Credentials> byDatabaseId = new HashMap<>();
-    private Credentials defaultCredentials;
+    // ConcurrentHashMap + volatile (2026-09-07, hallazgo #7 de
+    // AUDITORIA_BUGS_RENDIMIENTO.md) — este almacén se ESCRIBE desde el hilo de JavaFX
+    // (diálogos de credenciales/editar base) y se LEE desde hilos de fondo:
+    // credentials.resolve(...) dentro de QueryExecutionService#runOne (uno por base, en
+    // paralelo) y en cada Task de SchemaIntrospector. Un HashMap sin sincronizar leído
+    // así es una carrera de datos por contrato, aunque en la práctica arrancar el hilo/
+    // encolar en el executor suele dar la barrera de memoria que la salva — el resto del
+    // proyecto sí es explícito con esto (ver los volatile comentados de DatabaseEntry),
+    // no había razón para que este fuera la excepción.
+    private final Map<String, Credentials> byDatabaseId = new ConcurrentHashMap<>();
+    private volatile Credentials defaultCredentials;
 
     public void put(String databaseId, String user, String password) {
         byDatabaseId.put(databaseId, new Credentials(user, password));

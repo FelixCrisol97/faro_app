@@ -3,6 +3,7 @@ package com.faro.app.ui;
 import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.IntSupplier;
 
 import com.faro.app.model.DatabaseEntry;
 import com.faro.app.model.Server;
@@ -22,6 +23,7 @@ import javafx.scene.control.CheckBoxTreeItem;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.Tooltip;
 import javafx.scene.control.TreeCell;
 import javafx.scene.input.MouseButton;
@@ -128,6 +130,19 @@ public class ConnectionTreeCell extends TreeCell<Object> {
     private final Label schemaCategoryCountLabel = new Label();
     private final HBox schemaCategoryRow;
 
+    // -- Fila de "cargando…" / error de esquema: construida una sola vez --
+    /**
+     * Animación real de carga (2026-09-07, pedido explícito del usuario) —
+     * {@code ProgressIndicator} indeterminado, que gira solo mientras esté
+     * visible; antes esta fila era texto pelado ("Cargando esquema…") y un fetch
+     * lento se veía igual que un árbol trabado. Se construye una sola vez y se
+     * reusa, como todo el resto de esta celda.
+     */
+    private final ProgressIndicator loadingSpinner = new ProgressIndicator();
+    private final Label loadingLabel = new Label();
+    private final HBox loadingRow;
+    private final Label schemaErrorLabel = new Label();
+
     // -- Fila de objeto de esquema (una tabla/vista/función/procedimiento/trigger): construida una sola vez --
     private final SVGPath schemaItemIcon = new SVGPath();
     private final Label schemaItemLabel = new Label();
@@ -139,6 +154,8 @@ public class ConnectionTreeCell extends TreeCell<Object> {
     private final MenuItem generateUpdateItem = new MenuItem("Generar UPDATE");
     private final MenuItem generateDeleteItem = new MenuItem("Generar DELETE");
     private final MenuItem generateCreateItem = new MenuItem("Generar script CREATE");
+    /** Comparar este objeto entre todas las bases marcadas — ver {@code SchemaComparisonService}. */
+    private final MenuItem compareItem = new MenuItem("Comparar en las bases marcadas…");
 
     // -- Menú contextual (clic derecho) de una fila de base — construido una sola vez --
     private final ContextMenu databaseContextMenu;
@@ -169,6 +186,15 @@ public class ConnectionTreeCell extends TreeCell<Object> {
     /** Pulso de opacidad mientras {@link DatabaseEntry#isInUse()} — ver {@link #refreshInUseAnimation}. */
     private final FadeTransition inUsePulse = new FadeTransition(Duration.millis(600), statusDot);
 
+    /**
+     * Tamaño de fuente de la interfaz vigente ahora mismo
+     * ({@code AppPreferences#fontScaleDelta}) — un {@link IntSupplier}, no un
+     * {@code int}, a propósito: la celda se construye una sola vez por fábrica y
+     * tiene que leer el valor ACTUAL en cada repintado, no el que había cuando
+     * se creó. Ver {@link #applyDisclosureScale()}.
+     */
+    private final IntSupplier fontScaleDelta;
+
     public ConnectionTreeCell(
             Consumer<DatabaseEntry> onEditRequested,
             Consumer<DatabaseEntry> onNewQueryRequested,
@@ -176,7 +202,15 @@ public class ConnectionTreeCell extends TreeCell<Object> {
             Consumer<DatabaseEntry> onDiscoverRequested,
             BiConsumer<SchemaTreeNode.Item, GenerateAction> onGenerateRequested,
             Consumer<DatabaseEntry> onModeToggleRequested,
-            Consumer<DatabaseEntry> onMoveToGroupRequested) {
+            Consumer<DatabaseEntry> onMoveToGroupRequested,
+            IntSupplier fontScaleDelta,
+            Consumer<SchemaTreeNode.Item> onCompareRequested) {
+        this.fontScaleDelta = fontScaleDelta;
+        compareItem.setOnAction(event -> {
+            if (schemaItemTarget != null) {
+                onCompareRequested.accept(schemaItemTarget);
+            }
+        });
         serverNameLabel.getStyleClass().add("tree-server-name");
         HBox.setHgrow(serverNameLabel, Priority.ALWAYS);
         serverCountLabel.getStyleClass().add("tree-count");
@@ -467,6 +501,21 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         schemaItemRow = new HBox(6, schemaItemIcon, schemaItemLabel);
         schemaItemRow.setAlignment(Pos.CENTER_LEFT);
         fixHeight(schemaItemRow);
+
+        // Spinner de carga real (2026-09-07) — tamaño explícito y chico: un
+        // ProgressIndicator sin tamaño fijo toma el default de Modena (bastante más
+        // grande que una fila del árbol) y desbordaría los 44px de alto.
+        loadingSpinner.setPrefSize(14, 14);
+        loadingSpinner.setMinSize(14, 14);
+        loadingSpinner.setMaxSize(14, 14);
+        loadingSpinner.getStyleClass().add("tree-loading-spinner");
+        loadingLabel.getStyleClass().add("tree-loading-label");
+        loadingRow = new HBox(7, loadingSpinner, loadingLabel);
+        loadingRow.setAlignment(Pos.CENTER_LEFT);
+        fixHeight(loadingRow);
+
+        schemaErrorLabel.getStyleClass().add("tree-schema-error");
+        schemaErrorLabel.setWrapText(false);
         // Menú "Generar…" — qué acciones aplican a cada fila depende de su tipo (ver
         // menuItemsFor(), llamado desde updateItem()): Tabla tiene las 5; Vista solo
         // SELECT+CREATE (no toda vista es escribible, "Generar UPDATE/INSERT/DELETE"
@@ -519,15 +568,66 @@ public class ConnectionTreeCell extends TreeCell<Object> {
     }
 
     /** Tabla: las 5. Vista: SELECT + CREATE (nunca INSERT/UPDATE/DELETE — no toda vista es escribible). Función/Procedimiento/Trigger/Tipo: solo CREATE (un SELECT/CALL o "instanciar" un tipo no tienen equivalente genérico seguro). */
+    /**
+     * {@link #compareItem} va en TODOS los tipos (2026-09-07) — a diferencia de
+     * "Generar…", comparar tiene sentido para cualquier objeto de esquema: el
+     * usuario quiere verificar que la misma función/tabla/trigger sea idéntica en
+     * todas las bodegas, sin importar de qué tipo sea.
+     */
     private List<MenuItem> menuItemsFor(Kind kind) {
         return switch (kind) {
-            case TABLES -> List.of(generateSelectItem, generateInsertItem, generateUpdateItem, generateDeleteItem, generateCreateItem);
-            case VIEWS -> List.of(generateSelectItem, generateCreateItem);
-            case FUNCTIONS, PROCEDURES, TRIGGERS, TYPES -> List.of(generateCreateItem);
+            case TABLES -> List.of(generateSelectItem, generateInsertItem, generateUpdateItem, generateDeleteItem,
+                    generateCreateItem, compareItem);
+            case VIEWS -> List.of(generateSelectItem, generateCreateItem, compareItem);
+            case FUNCTIONS, PROCEDURES, TRIGGERS, TYPES -> List.of(generateCreateItem, compareItem);
         };
     }
 
     /** {@code prefHeight == minHeight == maxHeight == ROW_HEIGHT}, para que no pueda haber mismatch con {@code fixedCellSize}. */
+    /**
+     * Tamaño base de la flecha de expandir, como múltiplo de la que trae Modena
+     * (2026-09-07, pedido del usuario: "se ven muy pequeñas"). La anterior estaba
+     * en 0.85 — más chica que la de fábrica — para que no compitiera con los
+     * íconos de la fila; 1.25 la deja claramente visible sin desbalancear la
+     * fila, que mide 44px.
+     */
+    private static final double DISCLOSURE_BASE_SCALE = 1.25;
+
+    /**
+     * Tamaño de fuente base de la interfaz, el que corresponde a
+     * {@code fontScaleDelta == 0} — es el mismo 13px que usa
+     * {@code ResultsTableFactory#BASE_FONT_SIZE_PX} para calcular la altura de
+     * fila del grid. La flecha crece/decrece en la MISMA proporción que el texto:
+     * con el slider en +5 el texto pasa de 13 a 18px (×1.38) y la flecha también.
+     */
+    private static final double BASE_FONT_SIZE_PX = 13;
+
+    /**
+     * Escala la flecha de expandir con el tamaño de fuente de la interfaz
+     * (2026-09-07, pedido del usuario: "capaz y habría que ajustar su tamaño
+     * dinámicamente así como lo hacemos con el tamaño de fuente de la app").
+     *
+     * <p>Va en Java y no en CSS porque el mecanismo de escalado de esta app
+     * reescribe literales de {@code -fx-font-size} en una copia de {@code app.css}
+     * (ver {@code Theme#scaledAppCssUri}) — un {@code -fx-scale-*} no es uno de
+     * ellos, y {@code -fx-font-size} no admite variables en JavaFX, así que no
+     * había forma de expresar esto en la hoja. El nodo de la flecha lo crea el
+     * {@code Skin} del {@code TreeCell}, puede no existir todavía en los primeros
+     * repintados — de ahí el chequeo de nulo, no es defensivo de más.
+     */
+    private void applyDisclosureScale() {
+        javafx.scene.Node disclosure = getDisclosureNode();
+        if (disclosure == null) {
+            return;
+        }
+        double scale = DISCLOSURE_BASE_SCALE
+                * Math.max(0.5, (BASE_FONT_SIZE_PX + fontScaleDelta.getAsInt()) / BASE_FONT_SIZE_PX);
+        if (disclosure.getScaleX() != scale) {
+            disclosure.setScaleX(scale);
+            disclosure.setScaleY(scale);
+        }
+    }
+
     private static void fixHeight(Region node) {
         node.setPrefHeight(ROW_HEIGHT);
         node.setMinHeight(ROW_HEIGHT);
@@ -537,9 +637,17 @@ public class ConnectionTreeCell extends TreeCell<Object> {
     @Override
     protected void updateItem(Object item, boolean empty) {
         super.updateItem(item, empty);
+        applyDisclosureScale();
 
         if (empty || item == null) {
             unbindCheckbox();
+            // Detener el pulso al quedar vacía (2026-09-07, hallazgo #10 de
+            // AUDITORIA_BUGS_RENDIMIENTO.md) — inUsePulse es INDEFINITE, así que una
+            // celda reciclada a vacía mientras su base seguía "en uso" dejaba la
+            // animación viva, interpolando en cada frame sobre un nodo que ya no se
+            // muestra. Solo se apagaba cuando inUse pasaba a false, cosa que esta celda
+            // ya no escucha una vez que dejó de representar esa base.
+            refreshInUseAnimation(null);
             editTarget = null;
             editTreeItem = null;
             schemaItemTarget = null;
@@ -577,6 +685,26 @@ public class ConnectionTreeCell extends TreeCell<Object> {
             schemaCategoryCountLabel.setText(
                     category.count() == SchemaTreeNode.UNKNOWN_COUNT ? "" : String.valueOf(category.count()));
             setGraphic(schemaCategoryRow);
+        } else if (item instanceof SchemaTreeNode.Loading loading) {
+            unbindCheckbox();
+            editTarget = null;
+            editTreeItem = null;
+            schemaItemTarget = null;
+            setContextMenu(null);
+            loadingLabel.setText(loading.label());
+            setGraphic(loadingRow);
+        } else if (item instanceof SchemaTreeNode.Error error) {
+            unbindCheckbox();
+            editTarget = null;
+            editTreeItem = null;
+            schemaItemTarget = null;
+            setContextMenu(null);
+            schemaErrorLabel.setText(error.message());
+            // Tooltip aparte porque el mensaje real de JDBC suele ser bastante más
+            // largo que el ancho del panel — la fila lo corta con "…", el tooltip
+            // deja leerlo completo (mismo criterio que alias/host en Ejecución).
+            Tooltip.install(schemaErrorLabel, new Tooltip(error.message()));
+            setGraphic(schemaErrorLabel);
         } else if (item instanceof SchemaTreeNode.Item schemaItem) {
             unbindCheckbox();
             editTarget = null;

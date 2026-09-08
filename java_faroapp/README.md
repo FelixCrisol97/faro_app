@@ -9,13 +9,23 @@ Este documento describe **qué hace la app hoy**, como referencia — no es un h
 - JDK 21+ (probado con JDK 25) y Maven.
 - Desarrollo y ejecución en **Windows nativo** — WSLg no renderiza ventana JavaFX en algunos entornos; no es un problema de Faro, pero el camino recomendado es Windows directo.
 
+Los comandos de abajo son iguales en cmd y en PowerShell **salvo** los que arman
+el ejecutable, donde cambia la continuación de línea y la copia de archivos — van
+las dos variantes.
+
 ```
-mvn javafx:run          # arranca la app
-mvn clean test           # corre los tests (JUnit 5, lógica pura sin JavaFX/BD)
+mvn compile javafx:run        # arranca la app
+mvn test                      # corre los tests (JUnit 5, lógica pura sin JavaFX/BD)
 mvn -Ppackage clean package   # arma un JAR único ejecutable (target/faro-app.jar)
 ```
 
+**`compile` antes de `javafx:run` no es de adorno:** el goal `javafx:run` arranca
+con lo que haya en `target/classes` y **no dispara la fase de compilación** — sin
+el `compile` adelante se corre la versión anterior del código sin ningún aviso.
+
 El perfil `package` no corre en el build normal — `mvn compile`/`mvn test`/`mvn javafx:run` no lo tocan. Para un `.exe`/carpeta portable de Windows con el runtime embebido:
+
+**cmd:**
 
 ```
 mkdir target\dist-input
@@ -23,8 +33,37 @@ copy target\faro-app.jar target\dist-input\
 jpackage --type app-image --input target\dist-input --dest target\dist ^
   --name Faro --main-jar faro-app.jar --main-class com.faro.app.Launcher ^
   --app-version 0.1.0 --icon ..\flutter_faroapp\windows\runner\resources\app_icon.ico ^
-  --java-options "-Xmx4g"
+  --java-options "-Xmx4g" --java-options "-XX:+UseG1GC" --java-options "-XX:+UseStringDeduplication"
 ```
+
+**PowerShell** — la continuación de línea es el acento invertido (`` ` ``), no el
+`^` de cmd, y no admite ni un espacio después; ante la duda, pega el `jpackage`
+completo en una sola línea:
+
+```powershell
+New-Item -ItemType Directory -Force target\dist-input
+Copy-Item target\faro-app.jar target\dist-input\
+jpackage --type app-image --input target\dist-input --dest target\dist `
+  --name Faro --main-jar faro-app.jar --main-class com.faro.app.Launcher `
+  --app-version 0.1.0 --icon ..\flutter_faroapp\windows\runner\resources\app_icon.ico `
+  --java-options "-Xmx4g" --java-options "-XX:+UseG1GC" --java-options "-XX:+UseStringDeduplication"
+```
+
+### Dos tropiezos reales del build, con su salida
+
+- **`mvn clean` falla con `Failed to delete ...\target\dist\Faro\Faro.exe`.** Pasa
+  siempre que ya se armó el portable antes: Maven no puede borrar esa carpeta (más
+  todavía si el `.exe` está corriendo). Cierra el `.exe` si está abierto y borra
+  `target\dist` a mano antes del clean — `rmdir /s /q target\dist` en cmd,
+  `Remove-Item -Recurse -Force target\dist` en PowerShell.
+- **El compilado incremental puede ocultar errores de compilación reales.**
+  Encontrado dos veces el 2026-09-07: `mvn compile` decía `BUILD SUCCESS`
+  reusando clases viejas, y el error (un import faltante) solo apareció al
+  forzar la recompilación. Si el comportamiento de la app no cuadra con el
+  código, este es el primer sospechoso — borra las clases y recompila:
+  `rmdir /s /q target\classes\com\faro\app` (cmd) o
+  `Remove-Item -Recurse -Force target\classes\com\faro\app` (PowerShell), y de
+  nuevo `mvn compile`.
 
 `--main-class com.faro.app.Launcher`, **no** `com.faro.app.Main` — `Main` extiende `javafx.application.Application`; un JAR sin módulos con esa clase como punto de entrada hace que la JVM rechace arrancar ("JavaFX runtime components are missing"). `Launcher` es una clase intermedia sin esa herencia que solo delega a `Main.main(...)` (ver su javadoc). `mvn javafx:run` no necesita esto — ese plugin arma su propio module-path.
 
@@ -51,14 +90,25 @@ Barra de menú completa (Archivo/Editar/Consulta/Conexiones/Ver/Herramientas/Ayu
 
 **Grupos** — "Conexiones → Nuevo grupo de conexiones…" crea un grupo vacío; clic derecho en una base → "Mover a grupo…" la mueve a un grupo existente, a "(Sin grupo)", o a uno nuevo (pide el nombre aparte).
 
-**Estado de conexión, sincronizado con conexiones reales, no un botón aparte** — el punto de color se actualiza solo (es una propiedad reactiva de `DatabaseEntry`) cada vez que la carga de esquema o una ejecución de consulta prueban esa base de verdad: verde si conecta, rojo si falla (sin confundir un fallo de conexión con un error de SQL sobre una conexión que sí abrió bien). Persiste entre sesiones (solo verde/rojo, nunca el estado transitorio "Probando…") — al abrir la app se re-verifica solo en cuanto la carga de esquema toca esa base, así que un color guardado desactualizado (ej. contraseña que cambió) se corrige solo en segundos. Mientras una base tiene una consulta corriendo, su punto pulsa (fundido de opacidad en bucle).
+**Estado de conexión, sincronizado con conexiones reales, no un botón aparte** — el punto de color se actualiza solo (es una propiedad reactiva de `DatabaseEntry`) cada vez que la carga de esquema o una ejecución de consulta prueban esa base de verdad: verde si conecta, rojo si falla (sin confundir un fallo de conexión con un error de SQL sobre una conexión que sí abrió bien). Persiste entre sesiones (solo verde/rojo, nunca el estado transitorio "Probando…"). Mientras una base tiene una consulta corriendo, su punto pulsa (fundido de opacidad en bucle).
 
-**Explorador de esquema por base** (`SchemaIntrospector`, `DatabaseTreeItem`, `CategoryTreeItem`) — expandir una base en el árbol carga su estructura real vía JDBC:
+**Nada se conecta al arrancar** (2026-09-07, a pedido explícito del usuario: "cuando inicia la app no quiero que cargue todas las BD, ya que veo que se llena de pool de conexiones si tengo muchas BD ya en la lista"). Abrir Faro solo dibuja el árbol — cero conexiones, cero pools, sin importar cuántas bases haya registradas. Una base solo se conecta cuando de verdad la usas: al expandirla en el árbol (carga de esquema), al correr una consulta contra ella, o con "Conexiones → Probar todas las conexiones". Consecuencia a tener presente: el punto de color arranca mostrando el estado guardado de la última sesión, y se confirma o se corrige recién cuando esa base se toca de verdad — un verde desactualizado (ej. contraseña que cambió desde entonces) sigue en verde hasta ese momento, no se corrige solo en segundos como antes.
 
-- **Tablas y Vistas** se cargan de inmediato al expandir la base.
-- **Funciones, Procedimientos, Triggers y Tipos** se cargan perezosos, uno por categoría — solo al expandir esa categoría específica, no de una sola vez. Cada categoría muestra su conteo real una vez cargada.
+**Explorador de esquema por base** (`SchemaIntrospector`, `DatabaseTreeItem`, `CategoryTreeItem`) — todo perezoso, nada se consulta antes de que lo pidas:
+
+- **Expandir una base** dibuja al instante sus 6 categorías y abre **una** conexión para confirmar su punto de estado — no consulta ningún esquema todavía.
+- **Las 6 categorías se cargan una por una**, solo al expandir esa categoría específica (2026-09-07: antes Tablas y Vistas eran la excepción, se traían de un jalón al abrir la base). Cada una muestra su conteo real una vez cargada. Tablas y Vistas comparten un solo fetch, así que expandir una deja la otra instantánea.
+- Mientras una categoría carga, su fila muestra un **indicador de carga girando**, no un texto quieto — para distinguir "está trabajando" de "se trabó".
 - Expandir una tabla/vista/tipo trae sus columnas (nombre + tipo) bajo demanda.
 - Clic derecho sobre cualquier objeto → "Generar script CREATE" trae la definición real (`CREATE TABLE`/`CREATE VIEW`/`CREATE FUNCTION`/etc.) en una pestaña de consulta nueva.
+
+**Comparar un objeto entre bodegas** (clic derecho sobre cualquier objeto → "Comparar en las bases marcadas…", `SchemaComparisonService`) — extrae el script real de ese objeto en cada base marcada, le saca MD5, y marca cuáles difieren. Sirve para lo que motivó la función: verificar que la misma función/tabla/trigger sea idéntica en todas las bodegas y que ninguna se haya quedado con una versión vieja, sin escribir ninguna consulta ni revisarlas a mano.
+
+- Resultado: una fila por base con `Base de datos · Motor · Objeto · Tipo · Estado · Coincide · MD5 · Caracteres · Definición`. Cae en la pestaña Resultados como cualquier corrida, así que **"Exportar CSV" funciona igual** — incluido el script completo de cada versión.
+- **La comparación se hace por motor, no entre todos.** PostgreSQL y SQL Server nombran los tipos distinto (`character varying` contra `nvarchar`), así que el DDL del mismo objeto nunca coincide entre motores; mezclarlos daría falsa alarma siempre. Cada base se compara solo contra las de su mismo motor.
+- El MD5 normaliza finales de línea (CRLF/LF) y espacio al principio/final — ruido que no cambia nada. Todo lo demás (sangría interna, mayúsculas, comentarios) sí cuenta como diferencia: es texto realmente distinto en el servidor.
+- Para **tablas** compara el `CREATE TABLE` reconstruido desde columnas reales (ningún motor devuelve DDL de tabla listo), así que detecta columnas de más/de menos o con otro tipo — no índices ni constraints.
+- Necesita al menos 2 bases marcadas; la base del objeto sobre el que hiciste clic derecho se incluye sola aunque no esté marcada.
 - **Desambiguación de nombres repetidos**: PostgreSQL permite triggers con el mismo nombre en tablas distintas y funciones/procedimientos sobrecargados por firma — ambos casos se detectan y se muestran calificados (`tabla.trigger`, `función(tipo_arg)`) en vez de aparecer como filas idénticas indistinguibles.
 - **Tipos personalizados** filtra correctamente los tipos compuestos reales de PostgreSQL (`CREATE TYPE ... AS (...)`) sin mezclar el tipo-fila automático que cada tabla/vista tiene internamente.
 - Un mismo fetch de esquema alimenta también el autocompletado de tablas/columnas del editor SQL — no son dos sistemas separados.
@@ -94,7 +144,9 @@ Barra de menú completa (Archivo/Editar/Consulta/Conexiones/Ver/Herramientas/Ayu
 
 ## Diálogos
 
-- **Agregar/editar base de datos** — un formulario para las dos operaciones, prueba de conexión inline (con respaldo a credenciales por defecto si el campo de usuario está vacío), motor/modo/tamaño de pool/timeout.
+- **Agregar/editar base de datos** — un formulario para las dos operaciones, prueba de conexión inline (con respaldo a credenciales por defecto si el campo de usuario está vacío; corre en segundo plano, la ventana nunca se congela esperando a un host caído), motor/modo/tamaño de pool/timeout, y la casilla **"Confiar en el certificado del servidor"** (ver abajo).
+
+**Certificado del servidor (solo SQL Server)** — el tráfico a SQL Server siempre va cifrado (`encrypt=true`, sin opción de apagarlo). Lo que la casilla controla es si además se **verifica** que el servidor sea realmente quien dice ser: marcada (el default, y lo que hacían todas las conexiones antes de que la casilla existiera) acepta cualquier certificado; desmarcada exige uno que la máquina reconozca como válido — más seguro, pero la conexión falla si el servidor usa un certificado autofirmado, que es lo normal en servidores internos. Se guarda por base en `connections.json`; una base de una configuración anterior (sin ese campo en el archivo) se comporta igual que siempre, marcada. En PostgreSQL la casilla queda deshabilitada: esa URL no negocia TLS por su cuenta (pgJDBC usa su propio `sslmode`, todavía no expuesto en Faro).
 - **Credenciales por defecto** — usuario/contraseña de sesión, usado cuando una base no tiene su propio override guardado. Resolución: override por base → default de sesión → vacío.
 - **Descubrir bases de datos** — dado un host + usuario/contraseña, prueba conexión TCP a los puertos 5432/1433 y, si responden, hace login JDBC real para listar las bases visibles con ese usuario. Un host por búsqueda, no un rango de IPs.
 - **Importar CSV a una tabla** — parser real (maneja comillas y comas dentro de campos), `INSERT` por lotes de 500 en una sola transacción. Sin inferencia de tipo propia (todo va como texto, apoyado en la conversión implícita del driver) ni soporte de saltos de línea dentro de un campo entre comillas.

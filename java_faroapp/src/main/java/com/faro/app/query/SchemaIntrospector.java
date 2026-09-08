@@ -578,37 +578,10 @@ public final class SchemaIntrospector {
                 if (creds.isEmpty()) {
                     throw new IllegalStateException("Sin usuario/contraseña guardados para " + db.alias());
                 }
-                String schema = db.engine().defaultSchema();
-                String raw;
+                String script;
                 try (Connection conn = pool.getConnection(db, creds.get())) {
-                    // TYPES nunca pasa por OBJECT_DEFINITION()/pg_get_*def — ninguno de los
-                    // 2 motores trata un tipo como un objeto "programable" con texto fuente
-                    // guardado; hay que reconstruir el CREATE TYPE a mano por catálogo (ver
-                    // fetchTypeDefinition).
-                    raw = kind == SchemaTreeNode.Kind.TYPES
-                            ? fetchTypeDefinition(conn, db.engine(), schema, objectName)
-                            : db.engine() == DbEngine.SQL_SERVER
-                                    ? fetchSqlServerDefinition(conn, schema, objectName)
-                                    : fetchPostgresDefinition(conn, schema, objectName, kind, parentTable);
+                    script = definitionFrom(conn, db, kind, objectName, parentTable);
                 }
-                // Bug real de revisión de código (2026-08-25): sin este chequeo, un objeto
-                // que ya no existe (renombrado/borrado entre listar el árbol y pedir el
-                // script) o — específico de SQL Server — OBJECT_DEFINITION() devolviendo NULL
-                // porque el login no tiene permiso VIEW DEFINITION (la app soporta
-                // explícitamente credenciales de solo lectura, un caso realista) terminaban en
-                // un script vacío/nulo que se guardaba como si hubiera sido un éxito, sin
-                // ningún error visible para el usuario.
-                if (raw == null || raw.isBlank()) {
-                    throw new SQLException("No se encontró la definición de '" + objectName
-                            + "' — puede que ya no exista, o que la conexión no tenga permiso para verla.");
-                }
-                // pg_get_viewdef solo trae el SELECT, sin el encabezado CREATE VIEW — los
-                // demás casos (funciones/procedimientos/triggers en Postgres, todo en SQL
-                // Server vía OBJECT_DEFINITION) ya regresan un script completo listo para
-                // correr.
-                String script = (db.engine() == DbEngine.POSTGRES && kind == SchemaTreeNode.Kind.VIEWS)
-                        ? "CREATE OR REPLACE VIEW " + schema + "." + objectName + " AS\n" + raw
-                        : raw;
                 if (currentGeneration(db.id()) == startGeneration) {
                     definitionCache.computeIfAbsent(db.id(), k -> new ConcurrentHashMap<>())
                             .put(definitionCacheKey(kind, objectName), script);
@@ -619,6 +592,84 @@ public final class SchemaIntrospector {
                 return script;
             }
         };
+    }
+
+    /**
+     * El DDL real de un objeto sobre una conexión YA abierta — extraído de
+     * {@link #fetchDefinition} (2026-09-07) para que
+     * {@link SchemaComparisonService} pueda pedir la misma definición contra
+     * varias bases sin duplicar esta lógica ni pasar por el caché (comparar
+     * versiones entre bodegas necesita leer lo que hay AHORA en cada servidor,
+     * no lo que se cacheó en algún momento de la sesión).
+     *
+     * <p>Package-private a propósito: es un detalle de implementación compartido
+     * entre estas dos clases del paquete {@code query}, no API pública.
+     */
+    static String definitionFrom(
+            Connection conn, DatabaseEntry db, SchemaTreeNode.Kind kind, String objectName, String parentTable)
+            throws SQLException {
+        String schema = db.engine().defaultSchema();
+        // TYPES nunca pasa por OBJECT_DEFINITION()/pg_get_*def — ninguno de los
+        // 2 motores trata un tipo como un objeto "programable" con texto fuente
+        // guardado; hay que reconstruir el CREATE TYPE a mano por catálogo (ver
+        // fetchTypeDefinition).
+        String raw = kind == SchemaTreeNode.Kind.TYPES
+                ? fetchTypeDefinition(conn, db.engine(), schema, objectName)
+                : db.engine() == DbEngine.SQL_SERVER
+                        ? fetchSqlServerDefinition(conn, schema, objectName)
+                        : fetchPostgresDefinition(conn, schema, objectName, kind, parentTable);
+        // Bug real de revisión de código (2026-08-25): sin este chequeo, un objeto
+        // que ya no existe (renombrado/borrado entre listar el árbol y pedir el
+        // script) o — específico de SQL Server — OBJECT_DEFINITION() devolviendo NULL
+        // porque el login no tiene permiso VIEW DEFINITION (la app soporta
+        // explícitamente credenciales de solo lectura, un caso realista) terminaban en
+        // un script vacío/nulo que se guardaba como si hubiera sido un éxito, sin
+        // ningún error visible para el usuario.
+        if (raw == null || raw.isBlank()) {
+            throw new SQLException("No se encontró la definición de '" + objectName
+                    + "' — puede que ya no exista, o que la conexión no tenga permiso para verla.");
+        }
+        // pg_get_viewdef solo trae el SELECT, sin el encabezado CREATE VIEW — los
+        // demás casos (funciones/procedimientos/triggers en Postgres, todo en SQL
+        // Server vía OBJECT_DEFINITION) ya regresan un script completo listo para
+        // correr.
+        return (db.engine() == DbEngine.POSTGRES && kind == SchemaTreeNode.Kind.VIEWS)
+                ? "CREATE OR REPLACE VIEW " + schema + "." + objectName + " AS\n" + raw
+                : raw;
+    }
+
+    /**
+     * Columnas con tipo/PK sobre una conexión YA abierta — mismo motivo que
+     * {@link #definitionFrom} (una tabla no tiene DDL que el motor devuelva, hay
+     * que reconstruirlo desde sus columnas, ver
+     * {@code SqlScriptGenerator#generateCreateTableScript}).
+     */
+    static List<ColumnMetadata> columnsFrom(Connection conn, DatabaseEntry db, String tableName) throws SQLException {
+        String schema = db.engine().defaultSchema();
+        String query = switch (db.engine()) {
+            case POSTGRES -> POSTGRES_COLUMNS_QUERY;
+            case SQL_SERVER -> SQL_SERVER_COLUMNS_QUERY;
+        };
+        List<ColumnMetadata> columns = new ArrayList<>();
+        try (PreparedStatement statement = conn.prepareStatement(query)) {
+            statement.setString(1, schema);
+            statement.setString(2, tableName);
+            statement.setString(3, schema);
+            statement.setString(4, tableName);
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    columns.add(new ColumnMetadata(
+                            rs.getString("column_name"),
+                            rs.getString("data_type"),
+                            "YES".equalsIgnoreCase(rs.getString("is_nullable")),
+                            rs.getBoolean("is_primary_key"),
+                            rs.getObject("char_len", Integer.class),
+                            rs.getObject("num_precision", Integer.class),
+                            rs.getObject("num_scale", Integer.class)));
+                }
+            }
+        }
+        return columns;
     }
 
     private static String fetchSqlServerDefinition(Connection conn, String schema, String objectName) throws SQLException {

@@ -78,6 +78,24 @@ public class DatabaseEntry {
     private final BooleanProperty inUse = new SimpleBooleanProperty(false);
     private volatile int poolSize = 4;
     private volatile int queryTimeoutSeconds = 30;
+    /**
+     * Solo aplica a SQL Server (2026-09-07, hallazgo #12 de
+     * {@code AUDITORIA_BUGS_RENDIMIENTO.md}) — ver {@link #jdbcUrl()}.
+     *
+     * <p>{@code true} (el default, y lo que hacían TODAS las conexiones antes de
+     * que este campo existiera) significa aceptar el certificado que presente el
+     * servidor sin verificarlo: el tráfico va cifrado igual, pero se apaga la
+     * comprobación de que el servidor es realmente quien dice ser — alguien
+     * ubicado en la red entre Faro y el servidor podría hacerse pasar por él y
+     * leer usuario/contraseña/resultados. {@code false} exige un certificado que
+     * la máquina reconozca como válido; con un certificado autofirmado (lo más
+     * común en servidores internos) la conexión simplemente falla.
+     *
+     * <p>Por eso el default es {@code true} y no {@code false}: cambiarlo de golpe
+     * rompería las conexiones existentes. Se apaga por base, a mano, en las que sí
+     * tengan un certificado bueno.
+     */
+    private volatile boolean trustServerCertificate = true;
 
     public DatabaseEntry(String alias, String host, int port, String databaseName,
                           DbEngine engine, ServerMode mode) {
@@ -201,12 +219,32 @@ public class DatabaseEntry {
         this.queryTimeoutSeconds = queryTimeoutSeconds;
     }
 
-    /** {@code jdbc:postgresql://host:port/db} / {@code jdbc:sqlserver://host:port;databaseName=db}. */
+    /** Ver el javadoc del campo {@link #trustServerCertificate} — solo tiene efecto en SQL Server. */
+    public boolean trustServerCertificate() {
+        return trustServerCertificate;
+    }
+
+    public void setTrustServerCertificate(boolean trustServerCertificate) {
+        this.trustServerCertificate = trustServerCertificate;
+    }
+
+    /**
+     * {@code jdbc:postgresql://host:port/db} /
+     * {@code jdbc:sqlserver://host:port;databaseName=db}.
+     *
+     * <p>{@code encrypt=true} siempre en SQL Server (el tráfico va cifrado sin
+     * excepción); {@code trustServerCertificate} sale de
+     * {@link #trustServerCertificate()}, configurable por base desde el diálogo
+     * de Agregar/editar — antes estaba fijo en {@code true} para todas, sin forma
+     * de apretarlo ni siquiera contra un servidor con certificado válido. En
+     * PostgreSQL el campo no se usa: la URL no negocia TLS por su cuenta (pgJDBC
+     * tiene su propio {@code sslmode}, que este proyecto no expone todavía).
+     */
     public String jdbcUrl() {
         return switch (engine) {
             case POSTGRES -> "jdbc:postgresql://" + host + ":" + port + "/" + databaseName;
             case SQL_SERVER -> "jdbc:sqlserver://" + host + ":" + port + ";databaseName=" + databaseName
-                    + ";encrypt=true;trustServerCertificate=true";
+                    + ";encrypt=true;trustServerCertificate=" + trustServerCertificate;
         };
     }
 

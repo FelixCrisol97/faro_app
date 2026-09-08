@@ -1,5 +1,6 @@
 package com.faro.app.ui;
 
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -8,7 +9,6 @@ import com.faro.app.data.CredentialStore;
 import com.faro.app.model.DatabaseEntry;
 import com.faro.app.query.ConnectionPoolManager;
 import com.faro.app.query.SchemaIntrospector;
-import com.faro.app.query.SchemaIntrospector.SchemaStructure;
 import com.faro.app.ui.SchemaTreeNode.Kind;
 
 import javafx.application.Platform;
@@ -29,6 +29,17 @@ import javafx.scene.control.TreeItem;
  * (que pasa seguido, ver {@code MainController#refreshTree}, cada tecla del
  * buscador lo reconstruye completo) nunca dispara un fetch JDBC por cada
  * base que tenga, solo las que el usuario de verdad expande.
+ *
+ * <p><b>Eso último es cierto desde el 2026-09-07, no antes</b> (hallazgo #1 de
+ * {@code AUDITORIA_BUGS_RENDIMIENTO.md}): había DOS caminos que pedían
+ * {@code getChildren()} sin que nadie expandiera nada — el recorrido de
+ * {@code ConnectionTreeBuilder#collectDatabaseItems} (que se llama en cada
+ * tecla del buscador, cada cambio de pestaña y cada ejecución) y la
+ * propagación hacia abajo de {@code CheckBoxTreeItem} al marcar la casilla.
+ * Los dos están cerrados ahora (ver ese método y {@code setIndependent(true)}
+ * en el constructor de acá); el efecto real era abrir un pool de HikariCP por
+ * cada base registrada apenas arrancaba la app, cosa que el usuario reportó en
+ * vivo ("se llena de pool de conexiones si tengo muchas BD ya en la lista").
  *
  * <p>El fetch en sí (y su caché, compartido con el autocompletado) vive en
  * {@link SchemaIntrospector} — esta clase solo decide CUÁNDO pedirlo y
@@ -52,6 +63,17 @@ final class DatabaseTreeItem extends CheckBoxTreeItem<Object> {
         this.db = db;
         this.credentials = credentials;
         this.pool = pool;
+        // setIndependent(true) — 2026-09-07, segunda mitad del arreglo del hallazgo #1
+        // (ver AUDITORIA_BUGS_RENDIMIENTO.md y ConnectionTreeBuilder#collectDatabaseItems).
+        // Un CheckBoxTreeItem NO independiente propaga su estado HACIA LOS HIJOS al
+        // marcarse, y para eso los recorre — o sea que marcar una casilla disparaba la
+        // carga perezosa de esquema de esa base (fetch JDBC + pool nuevo) igual que el
+        // recorrido del árbol. Verificado de verdad, no supuesto: ver
+        // ConnectionTreeBuilderTest#marcarUnaCasillaNoIndependientePideLosHijos.
+        // Independiente no cambia nada visible acá — los hijos de esta fila son nodos de
+        // esquema sin casilla (no hay estado que propagarles), y su padre es un TreeItem
+        // plano (no hay casilla de grupo que se pinte "a medias").
+        setIndependent(true);
         this.schemaFilter = schemaFilter == null ? "" : schemaFilter;
         if (!this.schemaFilter.isEmpty()) {
             setExpanded(true);
@@ -79,39 +101,53 @@ final class DatabaseTreeItem extends CheckBoxTreeItem<Object> {
         requestSchema();
     }
 
+    /**
+     * <b>Expandir una base ya NO consulta el esquema</b> (2026-09-07, pedido
+     * explícito del usuario: "que cargue las tablas solo cuando le de a
+     * desplegar, también para los procedimientos, triggers, etc"). Antes esto
+     * disparaba {@code fetchStructure} —tablas y vistas de un jalón— apenas se
+     * abría la fila; ahora las 6 categorías se dibujan al instante y cada una
+     * pide lo suyo cuando el usuario la expande a ella (ver
+     * {@link CategoryTreeItem}).
+     *
+     * <p>Lo único que sí se hace acá es <b>abrir una conexión de verdad</b> para
+     * confirmar el punto de estado de esta base — el usuario lo pidió con esas
+     * palabras ("hasta que yo le de clic a la flecha de desplegar la BD me haga
+     * la conexión"), y es lo que mantiene vivo el verde/rojo del árbol ahora que
+     * ya no hay ninguna carga automática al arrancar la app. Es UNA conexión, de
+     * la base que se acaba de abrir, no de todas.
+     */
     private void requestSchema() {
-        Optional<SchemaStructure> cached = SchemaIntrospector.cached(db.id());
-        if (cached.isPresent()) {
-            super.getChildren().setAll(categoryItems());
+        super.getChildren().setAll(categoryItems());
+        probeConnection();
+    }
+
+    /**
+     * Abre y cierra una conexión del pool solo para saber si esta base responde
+     * — ver {@link #requestSchema()}. En un hilo demonio propio: es JDBC, nunca
+     * puede correr en el hilo de JavaFX (mismo criterio que el resto de la app),
+     * y el resultado vuelve por {@code Platform.runLater} porque
+     * {@code connectionStatus} es una propiedad de JavaFX.
+     *
+     * <p>No muestra ningún error en el árbol si falla: el punto rojo YA es la
+     * señal, y las categorías siguen ahí para que el usuario reintente
+     * expandiendo cualquiera (que sí mostrará el error real de ese fetch).
+     */
+    private void probeConnection() {
+        Optional<CredentialStore.Credentials> creds = credentials.resolve(db.id());
+        if (creds.isEmpty()) {
+            Platform.runLater(() -> db.setConnectionStatus(DatabaseEntry.ConnectionStatus.FAILED));
             return;
         }
-        super.getChildren().setAll(List.of(new TreeItem<>("Cargando esquema…")));
-        // db.setConnectionStatus(...) en los 2 callbacks (2026-08-28, pedido explícito
-        // del usuario: "ya implementaste que tenga un pool de conexiones en cuanto
-        // inicia la app, entonces estos círculos de conexión deberían estar
-        // sincronizados") — esta carga de esquema YA prueba una conexión real (el
-        // primer fetch de cada base, disparado solo/automático al arrancar la app vía
-        // ConnectionTreeBuilder recorriendo el árbol, no algo nuevo de hoy), así que es
-        // una fuente real de "esta base sí/no responde" sin necesitar un botón de
-        // "Probar conexión" aparte. Ambos wrapeados en Platform.runLater (ya lo estaban
-        // por otra razón) — DatabaseEntry#connectionStatus es una propiedad de JavaFX
-        // desde hoy, solo se puede mutar en el hilo de la UI.
-        SchemaIntrospector.loadInBackground(db, credentials, pool,
-                structure -> Platform.runLater(() -> {
-                    db.setConnectionStatus(DatabaseEntry.ConnectionStatus.CONNECTED);
-                    super.getChildren().setAll(categoryItems());
-                }),
-                // Hallazgo en vivo del usuario (2026-08-25, bases reales de cliente): sin esto
-                // la fila se quedaba en "Cargando esquema…" para siempre si el fetch fallaba
-                // (credenciales vencidas, red, permisos) — parecía un bloqueo, el único rastro
-                // real quedaba en el log. childrenRequested ya sigue en true, así que expandir
-                // de nuevo esta fila no reintenta solo; "Recargar esquema" del menú contextual
-                // (ya existente) sí vuelve a pedirlo.
-                error -> Platform.runLater(() -> {
-                    db.setConnectionStatus(DatabaseEntry.ConnectionStatus.FAILED);
-                    super.getChildren().setAll(
-                            List.of(new TreeItem<>("Error al cargar esquema: " + shortCause(error))));
-                }));
+        Thread thread = new Thread(() -> {
+            try (var connection = pool.getConnection(db, creds.get())) {
+                Platform.runLater(() -> db.setConnectionStatus(DatabaseEntry.ConnectionStatus.CONNECTED));
+            } catch (SQLException | RuntimeException e) {
+                Platform.runLater(() -> db.setConnectionStatus(DatabaseEntry.ConnectionStatus.FAILED));
+            }
+        }, "faro-connection-probe");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     /** Primera línea del mensaje real (los de JDBC pueden traer varias) — o el nombre de la clase si no hay mensaje. Package-private a propósito — {@link CategoryTreeItem} la reusa para su propio estado de error. */
@@ -124,30 +160,31 @@ final class DatabaseTreeItem extends CheckBoxTreeItem<Object> {
     }
 
     /**
-     * Las 6 categorías — se llama solo después de que la estructura
-     * (Tablas/Vistas) YA está en {@link SchemaIntrospector#cached}, así que
-     * leerla acá nunca dispara un fetch por sí sola.
+     * Las 6 categorías, TODAS perezosas — no consulta nada, solo dibuja las
+     * filas; cada {@link CategoryTreeItem} pide lo suyo cuando el usuario la
+     * expande a ella.
      *
-     * <p><b>Esquema progresivo (2026-08-25):</b> en el recorrido normal (sin
-     * {@link #schemaFilter}), Tablas/Vistas se arman de inmediato (ya están
-     * cargadas); Funciones/Procedimientos/Triggers/Tipos se arman como
-     * {@link CategoryTreeItem} — perezoso, cada una pide su propio fetch
-     * solo cuando el usuario la expande, no antes. En modo búsqueda por
-     * esquema ({@link #schemaFilter} no vacío) se sigue exactamente el
-     * comportamiento de siempre, ver {@link #filteredCategoryItems}.
+     * <p><b>2026-09-07:</b> Tablas y Vistas eran las 2 excepciones — se armaban
+     * "eager" con los nombres que {@code fetchStructure} ya había traído al
+     * expandir la base. Ahora son {@link CategoryTreeItem} como las otras 4
+     * (pedido explícito del usuario), así que este método ya no lee ninguna
+     * caché ni necesita que haya un fetch previo. Si esa estructura YA está en
+     * caché (porque el usuario expandió Tablas o Vistas antes), expandir
+     * cualquiera de las dos sigue siendo instantáneo — ver
+     * {@code CategoryTreeItem#requestStructureCategory}.
+     *
+     * <p>En modo búsqueda por esquema ({@link #schemaFilter} no vacío) se sigue
+     * exactamente el comportamiento de siempre, ver
+     * {@link #filteredCategoryItems}.
      */
     private List<TreeItem<Object>> categoryItems() {
         if (!schemaFilter.isEmpty()) {
             return filteredCategoryItems();
         }
-        SchemaStructure structure = SchemaIntrospector.cached(db.id()).orElseThrow();
         List<TreeItem<Object>> categories = new java.util.ArrayList<>();
-        categories.add(eagerCategory(Kind.TABLES, structure.tableNames(), name -> null));
-        categories.add(eagerCategory(Kind.VIEWS, structure.viewNames(), name -> null));
-        categories.add(new CategoryTreeItem(db, Kind.FUNCTIONS, credentials, pool));
-        categories.add(new CategoryTreeItem(db, Kind.PROCEDURES, credentials, pool));
-        categories.add(new CategoryTreeItem(db, Kind.TRIGGERS, credentials, pool));
-        categories.add(new CategoryTreeItem(db, Kind.TYPES, credentials, pool));
+        for (Kind kind : Kind.values()) {
+            categories.add(new CategoryTreeItem(db, kind, credentials, pool));
+        }
         return categories;
     }
 
