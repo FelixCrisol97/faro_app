@@ -3422,7 +3422,14 @@ Confirmado contra la documentación oficial de pgJDBC, no de memoria. El cursor 
 
 Consecuencia: en una consulta de 500,000 filas pgJDBC **materializa el resultado completo dentro del driver** antes de retornar; recién entonces el bucle lo copia a los `Object[]`. Al final del bucle el resultado vive **dos veces**. Es el escenario del `OutOfMemoryError` ya reportado, y la causa que quedaba sin tocar tras haber quitado las otras dos copias. La preferencia "fetch 500" es hoy **decorativa en ~15 de las 19 bases** del usuario.
 
-**No implementado**: desactivar el autocommit cambia la semántica transaccional (un script con `INSERT`/`UPDATE` necesitaría `commit()` explícito y `rollback()` en el error) y hay que confirmar que HikariCP restaura el `autoCommit` al devolver la conexión.
+**No implementado al escribir esto**: desactivar el autocommit cambia la semántica transaccional (un script con `INSERT`/`UPDATE` necesitaría `commit()` explícito y `rollback()` en el error) y hay que confirmar que HikariCP restaura el `autoCommit` al devolver la conexión.
+
+> **Cerrado el 2026-09-14 — ver la entrada de ese día.** Las dos dudas se
+> resolvieron: HikariCP sí lo restaura (`DIRTY_BIT_AUTOCOMMIT` →
+> `resetConnectionState`, verificado), y la semántica transaccional no se toca
+> porque el cursor se activa **solo** cuando todas las sentencias son de solo
+> lectura — o sea, cuando no hay nada que confirmar. Un script que escribe sigue
+> en autocommit, igual que antes. Es el hallazgo **A13**.
 
 ### Verificación de toda la sesión
 
@@ -3658,7 +3665,9 @@ guardó en un directorio aislado. Comprobado después: `connections.json` y
 `java.version=25.0.4.1`, las 3 fuentes cargadas, "Ventana principal mostrada" y un
 cierre limpio.
 
-### 2026-09-15 — Revisión de la documentación antes del push, y lo que encontró
+---
+
+## 2026-09-15 — Revisión de la documentación antes del push, y lo que encontró
 
 Pedido: *"verifica que esté todo documentado a lo más actual"*. No fue un trámite —
 salieron tres cosas, una de ellas un hallazgo real:
@@ -3699,3 +3708,50 @@ están**: son un registro de lo que había ese día, no una afirmación sobre el
 el portable (viene con Windows 10/11, es lo que se usó de verdad), con el número de
 entradas esperado —386, de las cuales 380 bajo `runtime/`— porque contarlas es más
 confiable que mirar el tamaño del archivo.
+
+**Comiteado y subido:** `3e94f19` a `origin/main` — el arco completo del
+2026-09-08 al 09-15, que llevaba siete días de trabajo sin comitear (47 archivos,
++3,895/−406). `.vscode/settings.json` se dejó **fuera** a propósito: solo tiene una
+ruta absoluta de esta máquina apuntando al CMake de `flutter_faroapp`.
+
+### Segunda pasada sobre esta misma bitácora — cuatro huecos, uno de ellos serio
+
+El usuario pidió verificar otra vez, *"a detalle que todo esté íntegro sin vacíos"*.
+La primera pasada había mirado el README y el análisis; esta miró **este archivo**, y
+encontró cuatro cosas:
+
+**1. La entrada del 09-15 estaba colgada como `###` dentro de la del 09-14.** Todos
+los demás días tienen su propio `##`, y así es como se navega este archivo — quien
+recorra el índice de encabezados no habría visto nunca que el 09-15 existe.
+Promovida a `##` con su separador.
+
+**2. El pendiente de `fetchSize` seguía marcado "No implementado" en la entrada del
+09-12**, que es donde se diagnosticó. El 09-14 lo cerró, pero leyendo solo esa
+entrada el hallazgo parecía abierto. Corregido **editando la línea original en su
+lugar**, que es como este archivo cerró antes el pendiente del spinner (commit
+`951cb3d`) — no agregando una nota suelta en otro lado.
+
+**3. El commit y el push no estaban registrados** (es esta misma sección).
+
+**4. El punto 4 de los "Puntos obligatorios" está en contradicción con lo que este
+archivo registra, y nadie lo había reconciliado.** El punto dice, textual: *"Nunca
+correr la app (`flutter run`, `mvn javafx:run`, **el `.exe` empaquetado**, etc.) —
+eso lo hace el usuario, siempre."* Y sin embargo la bitácora registra el `.exe`
+arrancado por el asistente al menos **tres veces** —2026-08-27, 2026-09-11 y
+2026-09-14— las tres presentadas como un acierto de verificación, ninguna
+reconociendo que contradice la regla.
+
+No se resuelve por cuenta propia: **la regla es del usuario y solo él puede
+cambiarla.** Queda planteada la disyuntiva para que la decida:
+
+- **O la regla gana**, y verificar el empaquetado se limita a lo que se puede
+  comprobar sin arrancar nada (contenido del jar, entradas del zip, integridad del
+  `runtime/`) — que es casi todo, salvo justamente el fallo que el README documenta
+  (`"Failed to find JVM in '...\runtime' directory."`), que solo aparece al arrancar.
+- **O se le escribe una excepción explícita y angosta**: arrancar el artefacto
+  empaquetado *solo* para verificar que un zip recién armado abre, nunca para
+  verificar UI ni estilos, que es lo que el punto 4 de verdad quiere evitar.
+
+Mientras tanto se dejó registrado el cuidado que sí se tomó el 2026-09-14: la copia
+extraída se arrancó con `-Duser.home=<temporal>` para que no tocara el `~/.faro/`
+real del usuario, cosa que en la ronda del 09-11 **sí** había pasado.
