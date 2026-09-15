@@ -253,6 +253,52 @@
     -fx-text-fill: -token-text-muted;
 }
 
+/* ---- Resultados del escaneo de "Descubrir bases de datos" ----
+   Las casillas del escaneo no tenían NINGUNA regla propia (igual que le pasaba a
+   .trust-cert-check antes del 2026-09-07), así que caían al color derivado de
+   Modena, pensado para fondo claro — ilegible en tema oscuro. Mismo arreglo de
+   entonces y por el mismo motivo: color explícito por token del tema, y opacidad 1
+   en el estado deshabilitado para que sea el COLOR, y no un desvanecido de 0.4 que
+   se multiplica con el del nodo de texto interno, el que comunique "inactivo". */
+/* El ScrollPane de resultados NUNCA tuvo regla de fondo (2026-09-11, reportado en
+   vivo: "en modo oscuro… no se ve nada de la lista, está todo blanco"). Se usaba la
+   clase en el FXML pero no existía acá, así que se quedaba con el fondo claro de
+   Modena en los DOS temas. Mientras las casillas tampoco tenían color propio el
+   resultado era feo pero legible (texto oscuro de Modena sobre ese blanco); al
+   ponerles -token-text el 2026-09-10 pasaron a ser casi blancas en tema oscuro —
+   blanco sobre blanco. El arreglo de fondo es lo que faltaba desde el principio.
+
+   Un ScrollPane necesita las dos reglas: Modena pinta su viewport con -fx-background,
+   una propiedad distinta de -fx-background-color, así que sin dejar el viewport
+   transparente el fondo de aquí abajo no se llega a ver. */
+.discover-results-scroll {
+    -fx-background-color: -token-surface-alt;
+    -fx-background-radius: 8;
+    -fx-border-color: -token-border;
+    -fx-border-radius: 8;
+    -fx-padding: 4;
+}
+.discover-results-scroll > .viewport {
+    -fx-background-color: transparent;
+}
+.discover-results-scroll .check-box {
+    -fx-text-fill: -token-text;
+}
+
+/* Base ya registrada (2026-09-10) — se muestra igual que las demás pero apagada y
+   sin poder marcarse, para que se vea que el escaneo SÍ la encontró y que no hace
+   falta volver a agregarla. Ver DiscoverDialogController#onSearch.
+
+   Escopado con .discover-results-scroll delante (2026-09-11): sin eso perdía por
+   especificidad contra la regla `.discover-results-scroll .check-box` de arriba (dos
+   selectores de clase contra uno), y las filas "ya agregada" salían del MISMO color
+   que las seleccionables — medido con sonda, no a ojo: las dos daban #F4F4F5 en tema
+   oscuro. Con el prefijo esta regla gana y el color vuelve a comunicar el estado. */
+.discover-results-scroll .discover-already-added:disabled {
+    -fx-opacity: 1;
+    -fx-text-fill: -token-text-muted;
+}
+
 /* ---- Riel de íconos (Conexiones/Historial/Favoritos/Preferencias) — contra
    faro-java-prototipo.html con "Mapa JavaFX" activado. ---- */
 .icon-rail {
@@ -653,8 +699,16 @@
 .sql-editor .selection {
     -fx-fill: -token-editor-selection;
 }
+/* -token-editor-keyword, no -token-accent-base directo (2026-09-10). Para los 6
+   acentos de color valen lo mismo, así que no cambia nada; el token separado existe
+   por el acento "negro", donde el acento coincide con -token-text (el color del
+   texto normal del editor) y —como TODO el texto del editor va en negrita— las
+   palabras reservadas quedaban indistinguibles del resto. Era el único de los 4
+   colores de sintaxis atado al acento: cadenas/números/comentarios ya tenían tokens
+   propios, que es justo por lo que esos tres sí se seguían viendo. Ver
+   AccentPalette.Tokens#editorKeyword. */
 .sql-editor .keyword {
-    -fx-fill: -token-accent-base; /* .tok-kw */
+    -fx-fill: -token-editor-keyword; /* .tok-kw */
     -fx-font-weight: bold;
 }
 .sql-editor .string {
@@ -769,6 +823,34 @@
 .query-tabs .tab:selected .tab-label {
     -fx-text-fill: -token-text;
     -fx-font-weight: bold;
+}
+
+/* ---- Encabezado de 2 líneas de una pestaña de consulta (2026-09-10) ----
+   El título de la pestaña dejó de ser texto y pasó a ser un `graphic` con dos
+   Label (ver MainController#buildTabHeader), así que las reglas de .tab-label de
+   arriba ya no lo alcanzan: estas son sus equivalentes, con el mismo cambio de
+   color/peso al seleccionar para que la pestaña activa se siga distinguiendo igual.
+
+   La segunda línea usa el mismo tamaño y la misma familia monoespaciada que
+   .tree-db-host (la IP debajo del alias en el árbol) a propósito: es el mismo tipo
+   de dato secundario, y reusar ese lenguaje visual lo hace legible sin explicación.
+   En la pestaña activa va en color de acento porque ES el dato que el usuario venía
+   a buscar — contra qué base va a correr "Ejecutar". */
+.query-tabs .query-tab-name {
+    -fx-text-fill: -token-text-muted;
+    -fx-font-size: 12.5px;
+}
+.query-tabs .tab:selected .query-tab-name {
+    -fx-text-fill: -token-text;
+    -fx-font-weight: bold;
+}
+.query-tabs .query-tab-database {
+    -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace;
+    -fx-font-size: 9.5px;
+    -fx-text-fill: -token-text-muted;
+}
+.query-tabs .tab:selected .query-tab-database {
+    -fx-text-fill: -token-accent-base;
 }
 .query-tabs .tab-close-button {
     -fx-background-color: -token-gray-icon;
@@ -1044,8 +1126,15 @@
     -fx-stroke-line-cap: round;
     -fx-stroke-line-join: round;
 }
+/* -token-accent-on, no `white` fijo (2026-09-10, reportado en vivo: "en modo oscuro
+   se pierde el color del icono del botón de ejecutar"). fillIcon() se usa en UN solo
+   lugar en toda la app —el triángulo de PLAY del botón "Ejecutar", ver el javadoc de
+   Icons— y ese botón tiene el acento de fondo, así que el ícono necesita el mismo
+   color de texto que la etiqueta de al lado. Con el acento negro en tema oscuro el
+   fondo es #FAFAFA y el triángulo blanco desaparecía: exactamente el mismo defecto
+   que ya se corrigió para el texto de .button. */
 .icon-fill {
-    -fx-fill: white;
+    -fx-fill: -token-accent-on;
     -fx-stroke: transparent;
 }
 .button-icon .icon-stroke {
@@ -1055,10 +1144,15 @@
     -fx-stroke: -token-accent-base;
 }
 
-/* Botón — radio 9px (--radius-control), acento indigo (--accent-base) */
+/* Botón — radio 9px (--radius-control), fondo del acento activo.
+   -token-accent-on, no `white` fijo (2026-09-10): el texto blanco asumía que TODO
+   acento es oscuro, cosa que solo vale para los de tema claro. En tema oscuro los
+   acentos son a propósito versiones más CLARAS, y con el acento "negro" —blanco en
+   tema oscuro— el texto habría quedado blanco sobre blanco. Cada acento declara
+   ahora su propio color de texto legible, ver AccentPalette.Tokens#onAccent. */
 .button {
     -fx-background-color: -token-accent-base;
-    -fx-text-fill: white;
+    -fx-text-fill: -token-accent-on;
     -fx-background-radius: 9px;
     -fx-padding: 6 14 6 14;
     -fx-font-weight: bold;
@@ -1066,7 +1160,9 @@
     -fx-cursor: hand;
 }
 .run-button-label {
-    -fx-text-fill: white;
+    /* Va dentro de .button (fondo del acento) — mismo motivo que allá para no usar
+       `white` fijo. */
+    -fx-text-fill: -token-accent-on;
     -fx-font-weight: bold;
 }
 /* Bug real encontrado en vivo: cancelButtonGraphic() reusaba
@@ -1080,7 +1176,8 @@
     -fx-font-weight: bold;
 }
 .run-button-shortcut {
-    -fx-text-fill: white;
+    /* El "F5" atenuado, también sobre el fondo del acento. */
+    -fx-text-fill: -token-accent-on;
     -fx-opacity: 0.8;
     -fx-font-family: "JetBrains Mono", "JetBrainsMono", "Consolas", monospace; /* --font-mono */
     -fx-font-size: 10.5px;
@@ -1220,6 +1317,20 @@
 }
 .pref-accent-swatch-selected {
     -fx-border-color: -token-text;
+}
+/* Contorno del círculo de muestra (2026-09-12) — ver
+   PreferencesDialogController#buildAccentSwatches. El acento "negro" usa #18181B como
+   muestra, que es el MISMO -token-surface del tema oscuro: sin contorno el círculo
+   desaparecía contra el fondo del diálogo (1.00:1). Va en todos, no solo en negro,
+   para cubrir cualquier acento futuro cercano al fondo de alguno de los dos temas. */
+.pref-accent-dot {
+    /* -token-text-muted y no -token-border: medido, el borde (#3F3F46) contra el fondo
+       oscuro del diálogo (#18181B) da 1.70:1 — para un anillo de 1px eso es demasiado
+       tenue para rescatar al swatch negro, que es justo el caso que esto resuelve.
+       -token-text-muted da 6.8:1 y sigue siendo claramente más apagado que el anillo
+       de SELECCIONADO (-token-text), así que los dos estados no se confunden. */
+    -fx-stroke: -token-text-muted;
+    -fx-stroke-width: 1;
 }
 /* Resultado de una acción con éxito/error real (ej. "Probar conexión") —
    .muted por sí sola no distingue "todavía no se sabe"/"funcionó"/"falló". */

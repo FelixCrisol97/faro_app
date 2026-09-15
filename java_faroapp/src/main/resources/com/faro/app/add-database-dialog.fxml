@@ -85,6 +85,22 @@
                 </styleClass>
             </Label>
         </VBox>
+
+        <!-- Codificación del cliente (2026-09-10) — solo PostgreSQL; el controlador la
+             deshabilita con SQL Server seleccionado. Vacía = "Automática (UTF-8)", el
+             comportamiento de siempre. Ver DatabaseEntry#clientEncoding para el error
+             real que esto resuelve. -->
+        <Label text="Codificación" styleClass="field-label" GridPane.rowIndex="11" GridPane.columnIndex="0"/>
+        <VBox spacing="2" GridPane.rowIndex="11" GridPane.columnIndex="1">
+            <ComboBox fx:id="clientEncodingCombo" maxWidth="Infinity"/>
+            <Label fx:id="clientEncodingHint" wrapText="true" maxWidth="Infinity"
+                   text="Solo PostgreSQL. Déjala en automática salvo que el esquema falle con &quot;invalid byte sequence for encoding UTF8&quot;: ahí la base guarda texto en otra codificación (normalmente LATIN1 o WIN1252).">
+                <styleClass>
+                    <String fx:value="muted"/>
+                    <String fx:value="trust-cert-hint"/>
+                </styleClass>
+            </Label>
+        </VBox>
     </GridPane>
 
     <VBox spacing="6">

@@ -12,9 +12,12 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -25,6 +28,7 @@ import java.util.TimerTask;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.fxmisc.flowless.VirtualizedScrollPane;
@@ -56,6 +60,7 @@ import com.faro.app.query.SchemaIntrospector;
 import com.faro.app.query.SqlFormatter;
 import com.faro.app.query.SqlScriptGenerator;
 import com.faro.app.ui.AddDatabaseDialog;
+import com.faro.app.ui.ConnectionTreeActions;
 import com.faro.app.ui.ConnectionTreeBuilder;
 import com.faro.app.ui.ConnectionTreeCell;
 import com.faro.app.ui.CredentialsDialog;
@@ -71,6 +76,7 @@ import com.faro.app.ui.SqlEditorFactory;
 import com.faro.app.ui.Theme;
 
 import javafx.animation.Animation;
+import javafx.animation.PauseTransition;
 import javafx.animation.Interpolator;
 import javafx.animation.RotateTransition;
 import javafx.application.Platform;
@@ -87,9 +93,11 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.CheckBoxTreeItem;
 import javafx.scene.control.ChoiceDialog;
 import javafx.scene.control.Dialog;
+import javafx.scene.control.IndexedCell;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
@@ -100,7 +108,9 @@ import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextInputDialog;
 import javafx.scene.control.ToggleButton;
+import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeView;
+import javafx.scene.control.skin.VirtualFlow;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.ScrollEvent;
@@ -324,6 +334,14 @@ public class MainController {
     /** Candado del autoguardado en segundo plano — ver {@link #autosave()}. */
     private final AtomicBoolean autosaveInProgress = new AtomicBoolean(false);
 
+    /**
+     * Espera tras la última tecla del buscador de bases antes de reconstruir el árbol
+     * — ver el comentario en {@link #initialize()}. 200 ms: suficiente para agrupar el
+     * tecleo normal, lo bastante corto como para que se sienta inmediato.
+     */
+    private final PauseTransition filterDebounce =
+            new PauseTransition(Duration.millis(200));
+
     private static final long AUTOSAVE_INTERVAL_MILLIS = 120_000;
     /** Pool activo/total y memoria SÍ cambian en cualquier momento (no solo al terminar una ejecución/exportación, que es cuando refreshStatusBar() ya se llamaba) — hallazgo real del usuario probando en vivo: "lo veo todo estático no veo que cambie". 2.5s de por medio: suficiente para sentirse en vivo, demasiado espaciado como para que leer HikariCP/Runtime en cada tick importe de verdad. */
     private static final long STATUS_BAR_REFRESH_INTERVAL_MILLIS = 2500;
@@ -333,13 +351,60 @@ public class MainController {
         logger.info("MainController.initialize() — arrancando.");
         registry = loadOrCreateRegistry();
         loadCredentials();
-        connectionTree.setCellFactory(tree ->
-                new ConnectionTreeCell(this::openEditDialog, this::onNewQueryForDatabase, this::confirmAndDeleteDatabase,
-                        this::onDiscoverForDatabase, this::onGenerateScript, this::onToggleDatabaseMode,
-                        this::onMoveDatabaseToGroup, preferences::fontScaleDelta, this::onCompareObject));
+        // Un solo objeto con todas las acciones (2026-09-11) — ver ConnectionTreeActions
+        // para por qué, en vez de 14 parámetros posicionales del mismo tipo.
+        ConnectionTreeActions treeActions = new ConnectionTreeActions(
+                this::openEditDialog,
+                this::onNewQueryForDatabase,
+                this::confirmAndDeleteDatabase,
+                this::onDiscoverForDatabase,
+                this::onToggleDatabaseMode,
+                this::onMoveDatabaseToGroup,
+                this::onMoveDatabaseInOrder,
+                this::onGenerateScript,
+                this::onCompareObject,
+                this::onRenameGroup,
+                this::onSetGroupSelection,
+                this::onMoveGroupInOrder,
+                this::onSortGroupDatabases);
+        connectionTree.setCellFactory(tree -> new ConnectionTreeCell(treeActions, preferences::fontScaleDelta));
+        // Ya no viene fijo en el FXML (2026-09-14, hallazgo A9) — se calcula igual que el
+        // del grid de resultados y se reaplica al mover el slider, ver applyCurrentTheme.
+        connectionTree.setFixedCellSize(ConnectionTreeCell.rowHeight(preferences.fontScaleDelta()));
+        // Alt+↑/Alt+↓ mueve la fila seleccionada (grupo o base) — el mismo camino que el
+        // menú contextual, para no tener que abrirlo en cada paso cuando hay que mover
+        // algo varias posiciones. Alt y no ↑/↓ a secas: esas ya navegan el árbol.
+        connectionTree.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if (!event.isAltDown()) {
+                return;
+            }
+            int delta = switch (event.getCode()) {
+                case UP -> -1;
+                case DOWN -> 1;
+                default -> 0;
+            };
+            TreeItem<Object> selected = connectionTree.getSelectionModel().getSelectedItem();
+            if (delta == 0 || selected == null) {
+                return;
+            }
+            if (selected.getValue() instanceof Server server) {
+                onMoveGroupInOrder(server, delta);
+                event.consume();
+            } else if (selected.getValue() instanceof DatabaseEntry db) {
+                onMoveDatabaseInOrder(db, delta);
+                event.consume();
+            }
+        });
+        // Debounce (2026-09-10, hallazgo B2 de ANALISIS_OPTIMIZACION_ESTRUCTURA.md) —
+        // antes cada tecla reconstruía el árbol ENTERO de inmediato: tirar todos los
+        // TreeItem, rearmarlos, recorrerlos y rehacer los bindings de selección. Escribir
+        // "bodega norte" eran 12 reconstrucciones completas para llegar al mismo
+        // resultado que da la última. PauseTransition se reinicia con cada tecla, así que
+        // solo corre cuando el usuario de verdad para de escribir.
+        filterDebounce.setOnFinished(event -> refreshTreeFromFilter());
         connectionFilterField.textProperty().addListener((obs, oldText, newText) -> {
             connectionFilterText = newText;
-            refreshTree();
+            filterDebounce.playFromStart();
         });
         refreshTree();
         startAutosave();
@@ -356,6 +421,10 @@ public class MainController {
             if (newTab != null && newTab.getUserData() instanceof QueryTabState newState) {
                 applySelectedDatabaseIds(newState.selectedDatabaseIds);
             }
+            // Cambian DOS encabezados a la vez (la pestaña que se deja pasa a mostrar su
+            // selección guardada, la que se activa pasa a seguir el árbol en vivo), así
+            // que se repintan todos en vez de rastrear cuáles.
+            refreshAllTabHeaders();
         });
 
         // Restaura las pestañas de la sesión anterior (2026-08-28, pedido explícito
@@ -420,7 +489,7 @@ public class MainController {
                 Label time = new Label(entry.time().format(DateTimeFormatter.ofPattern("HH:mm:ss")));
                 time.getStyleClass().add("log-timestamp");
                 Label level = new Label(entry.level().name());
-                level.getStyleClass().add("log-level-" + entry.level().name().toLowerCase());
+                level.getStyleClass().add("log-level-" + entry.level().name().toLowerCase(Locale.ROOT));
                 Label message = new Label(entry.message());
                 message.getStyleClass().add("log-message");
                 HBox row = new HBox(8, time, level, message);
@@ -545,6 +614,11 @@ public class MainController {
         // no le alcanza (texto de filas contiguas superpuesto, reportado con captura
         // 2026-08-26).
         resultsTable.setFixedCellSize(ResultsTableFactory.rowHeight(preferences.fontScaleDelta()));
+        // Lo mismo para el árbol (2026-09-14, hallazgo A9) — su fila de base tiene DOS
+        // líneas de texto que crecen con el slider, y hasta ahora el alto estaba fijo en
+        // 44px, así que en el extremo del slider el contenido dejaba de caber. Mismo modo
+        // de falla que ya se corrigió para el grid el 2026-08-26.
+        connectionTree.setFixedCellSize(ConnectionTreeCell.rowHeight(preferences.fontScaleDelta()));
         // La flecha de expandir del árbol también sigue al tamaño de fuente de la
         // interfaz (2026-09-07, ver ConnectionTreeCell#applyDisclosureScale) — su escala
         // se aplica en updateItem(), así que hay que forzar el repintado de las celdas
@@ -648,25 +722,41 @@ public class MainController {
     // ---- Pestañas de consulta ----
 
     /** Estado de una pestaña de consulta — su editor, el archivo asociado (si ya se guardó/abrió) y si tiene cambios sin guardar. Guardado como userData del Tab. */
-    /**
-     * {@code selectedDatabaseIds} (2026-08-28) — hallazgo real del usuario: antes de
-     * esto, cuál base estaba MARCADA en el árbol era un solo estado global compartido
-     * por TODAS las pestañas de consulta a la vez (las casillas del árbol, leídas
-     * directo por {@link #onRunQuery}). Abrir una pestaña nueva para una base, y
-     * después otra para una base distinta, dejaba la primera pestaña apuntando a la
-     * base equivocada al volver a ella — "de nada me sirve cambiar entre ventanas si
-     * no mantienen la BD que yo abrí en una ventana aparte". Ahora cada pestaña
-     * guarda su propio conjunto de ids de bases marcadas; cambiar de pestaña
-     * (ver el listener en {@link #initialize()}) guarda el estado de la pestaña que
-     * se deja y aplica el de la que se activa sobre las casillas reales del árbol —
-     * la pestaña activa sigue siendo la única fuente visual (un solo árbol), pero ya
-     * no se pisan entre sí.
-     */
     private static final class QueryTabState {
         final CodeArea codeArea;
         File file;
         boolean dirty;
+        /**
+         * Bases marcadas en el árbol para ESTA pestaña (2026-08-28) — hallazgo real del
+         * usuario: antes, cuál base estaba marcada era un solo estado global compartido
+         * por TODAS las pestañas de consulta a la vez (las casillas del árbol, leídas
+         * directo por {@link #onRunQuery}). Abrir una pestaña nueva para una base, y
+         * después otra para una base distinta, dejaba la primera pestaña apuntando a la
+         * base equivocada al volver a ella — "de nada me sirve cambiar entre ventanas si
+         * no mantienen la BD que yo abrí en una ventana aparte". Ahora cada pestaña
+         * guarda su propio conjunto de ids de bases marcadas; cambiar de pestaña
+         * (ver el listener en {@link #initialize()}) guarda el estado de la pestaña que
+         * se deja y aplica el de la que se activa sobre las casillas reales del árbol —
+         * la pestaña activa sigue siendo la única fuente visual (un solo árbol), pero ya
+         * no se pisan entre sí.
+         */
         Set<String> selectedDatabaseIds = new LinkedHashSet<>();
+        /**
+         * Nombre de la pestaña SIN el punto de "cambios sin guardar" — "Consulta N", o
+         * el nombre del archivo si se guardó/abrió uno.
+         *
+         * <p>Antes el nombre vivía en {@code tab.getText()} y el punto se concatenaba
+         * encima ({@code setText("● " + getText())}), lo que obligaba a deshacerlo con
+         * {@code replace("● ", "")} en dos sitios para recuperar el nombre real — frágil
+         * (un nombre de archivo que empezara con "● " se habría roto) y además imposible
+         * de combinar con un encabezado de 2 líneas. Ahora el nombre es un dato y el
+         * encabezado se pinta a partir de él, ver {@link #refreshTabHeader}.
+         */
+        String baseName = "";
+        /** Primera línea del encabezado — nombre + punto de cambios sin guardar. */
+        Label nameLabel;
+        /** Segunda línea — qué base(s) va a usar "Ejecutar" en esta pestaña. Ver {@link #describeSelection}. */
+        Label databaseLabel;
 
         QueryTabState(CodeArea codeArea) {
             this.codeArea = codeArea;
@@ -754,9 +844,16 @@ public class MainController {
                 ? new LinkedHashSet<>(initialSelectedDatabaseIds)
                 : capturedSelectedDatabaseIds();
 
-        Tab tab = new Tab(file != null ? file.getName() : "Consulta " + (++queryTabCounter));
+        Tab tab = new Tab();
+        state.baseName = file != null ? file.getName() : "Consulta " + (++queryTabCounter);
         tab.setContent(new VirtualizedScrollPane<>(codeArea));
         tab.setUserData(state);
+        // Encabezado de 2 líneas (2026-09-10, pedido del usuario: la pestaña no decía
+        // contra qué base iba a correr, y el único aviso —"su casilla ya quedó
+        // marcada"— vivía en la barra de estado de ABAJO, donde nadie está mirando
+        // mientras escribe SQL arriba).
+        tab.setGraphic(buildTabHeader(state));
+        refreshTabHeader(tab);
 
         // Agregado DESPUÉS de replaceText() de arriba — si no, cargar el
         // texto inicial (ej. un archivo abierto) marcaría la pestaña como
@@ -776,7 +873,7 @@ public class MainController {
         codeArea.plainTextChanges().subscribe(change -> {
             if (!state.dirty) {
                 state.dirty = true;
-                tab.setText("● " + tab.getText());
+                refreshTabHeader(tab);
             }
         });
 
@@ -793,6 +890,106 @@ public class MainController {
         queryTabPane.getTabs().add(tab);
         queryTabPane.getSelectionModel().select(tab);
         return tab;
+    }
+
+    /**
+     * Encabezado de 2 líneas de una pestaña de consulta: el nombre arriba y, debajo
+     * y en chico, contra qué base(s) va a correr "Ejecutar".
+     *
+     * <p>Se eligió 2 líneas y no "Consulta 1 · bodega" en una sola para que las
+     * pestañas no se alarguen: con varias abiertas, un nombre de base largo (los
+     * reales del usuario son del tipo {@code bodegamuebles.30001}) empujaría la barra
+     * hasta necesitar sus flechas de scroll. La barra queda más alta, no más ancha.
+     */
+    private Node buildTabHeader(QueryTabState state) {
+        Label name = new Label();
+        name.getStyleClass().add("query-tab-name");
+        Label database = new Label();
+        database.getStyleClass().add("query-tab-database");
+        state.nameLabel = name;
+        state.databaseLabel = database;
+        VBox header = new VBox(0, name, database);
+        header.setAlignment(Pos.CENTER_LEFT);
+        return header;
+    }
+
+    /**
+     * Repinta las 2 líneas del encabezado de {@code tab}.
+     *
+     * <p>Para la pestaña ACTIVA la segunda línea sale de las casillas reales del
+     * árbol, no de {@code state.selectedDatabaseIds} — ese campo solo se actualiza al
+     * CAMBIAR de pestaña (ver el listener de {@link #initialize()}), así que usarlo
+     * acá dejaría la línea desactualizada justo en el caso que importa: el usuario
+     * marcando y desmarcando bases para la consulta que está escribiendo ahora.
+     */
+    private void refreshTabHeader(Tab tab) {
+        if (!(tab.getUserData() instanceof QueryTabState state) || state.nameLabel == null) {
+            return;
+        }
+        state.nameLabel.setText((state.dirty ? "● " : "") + state.baseName);
+        boolean isActive = queryTabPane.getSelectionModel().getSelectedItem() == tab;
+        if (isActive && connectionTree.getRoot() != null) {
+            // Directo desde el árbol, sin pasar por ids (2026-09-12): antes esto hacía
+            // capturedSelectedDatabaseIds() —recorrido del árbol + un LinkedHashSet— y
+            // después describeSelection buscaba el alias recorriendo registry.allDatabases(),
+            // que además construye una lista nueva con TODAS las bases. Dos recorridos y
+            // dos colecciones por cada casilla que se marca o desmarca; con "Todas" sobre
+            // decenas de bases eso se multiplica por cada una. Acá el alias ya viene en el
+            // objeto, no hay nada que buscar.
+            state.databaseLabel.setText(describeSelection(selectedDatabases()));
+        } else {
+            state.databaseLabel.setText(describeSelectionByIds(state.selectedDatabaseIds));
+        }
+    }
+
+    /** Repinta el encabezado de TODAS las pestañas — al cambiar de pestaña cambian dos (la que se deja y la que se activa), y es más simple y barato recorrerlas que rastrear cuáles. */
+    private void refreshAllTabHeaders() {
+        for (Tab tab : queryTabPane.getTabs()) {
+            refreshTabHeader(tab);
+        }
+    }
+
+    /** Igual que {@link #refreshAllTabHeaders()} pero solo para la activa — lo que se llama al marcar/desmarcar una casilla del árbol, donde las demás pestañas no cambian. */
+    private void refreshActiveTabHeader() {
+        Tab active = queryTabPane.getSelectionModel().getSelectedItem();
+        if (active != null) {
+            refreshTabHeader(active);
+        }
+    }
+
+    /**
+     * Segunda línea del encabezado: el alias de la base cuando hay exactamente una
+     * marcada, el conteo cuando hay varias, y un aviso explícito cuando no hay
+     * ninguna — ese último caso es el que antes solo se descubría al presionar
+     * "Ejecutar" y recibir "Selecciona al menos una base de datos" abajo.
+     */
+    private String describeSelection(List<DatabaseEntry> selected) {
+        if (selected.isEmpty()) {
+            return "sin base seleccionada";
+        }
+        return selected.size() > 1 ? selected.size() + " bases" : selected.get(0).alias();
+    }
+
+    /**
+     * Igual que {@link #describeSelection}, pero partiendo de ids guardados — es lo
+     * único que tiene una pestaña que NO está activa: su selección vive como ids desde
+     * la última vez que se la dejó, no como objetos del árbol de ahora.
+     */
+    private String describeSelectionByIds(Set<String> ids) {
+        if (ids.isEmpty()) {
+            return "sin base seleccionada";
+        }
+        if (ids.size() > 1) {
+            return ids.size() + " bases";
+        }
+        String id = ids.iterator().next();
+        return registry.allDatabases().stream()
+                .filter(db -> db.id().equals(id))
+                .map(DatabaseEntry::alias)
+                .findFirst()
+                // Una base que ya no existe (se borró mientras la pestaña la tenía
+                // guardada) — no se inventa un nombre ni se deja la línea en blanco.
+                .orElse("base no encontrada");
     }
 
     /**
@@ -823,7 +1020,7 @@ public class MainController {
     private boolean confirmSaveOrDiscard(Tab tab, QueryTabState state) {
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
         alert.setTitle("Cambios sin guardar");
-        alert.setHeaderText("La pestaña \"" + tab.getText().replace("● ", "") + "\" tiene cambios sin guardar.");
+        alert.setHeaderText("La pestaña \"" + state.baseName + "\" tiene cambios sin guardar.");
         alert.setContentText("¿Qué quieres hacer antes de cerrarla?");
         ButtonType saveType = new ButtonType("Guardar", ButtonBar.ButtonData.OK_DONE);
         ButtonType discardType = new ButtonType("Descartar cambios");
@@ -968,7 +1165,7 @@ public class MainController {
      * {@code from} inclusive, igual que {@code lastIndexOf}. Devuelve -1 si no hay
      * ninguna coincidencia en esa dirección.
      */
-    private static int indexOfIgnoreCase(String haystack, String needle, int from, boolean forward) {
+    static int indexOfIgnoreCase(String haystack, String needle, int from, boolean forward) {
         int lastPossibleStart = haystack.length() - needle.length();
         if (needle.isEmpty() || lastPossibleStart < 0) {
             return -1;
@@ -1018,11 +1215,7 @@ public class MainController {
         if (state == null) {
             return;
         }
-        List<DatabaseEntry> selected = ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot())
-            .stream()
-            .filter(CheckBoxTreeItem::isSelected)
-            .map(item -> (DatabaseEntry) item.getValue())
-            .toList();
+        List<DatabaseEntry> selected = selectedDatabases();
         DatabaseEntry activeDb = selected.isEmpty() ? null : selected.get(0);
         SqlAutocomplete.show(state.codeArea, activeDb, credentials, pool);
     }
@@ -1035,6 +1228,10 @@ public class MainController {
             .ifPresent(entry -> {
                 registry.ungroupedDatabases().add(entry);
                 refreshTree();
+                // Dejarla a la vista y seleccionada — antes el árbol se reconstruía y
+                // volvía al tope, así que con muchas bases registradas la recién creada
+                // quedaba fuera de pantalla sin ninguna pista de dónde había caído.
+                revealDatabase(entry);
                 log("Base agregada: " + entry.alias());
             });
     }
@@ -1069,16 +1266,18 @@ public class MainController {
     @FXML
     private void onDiscoverDatabases() {
         List<DatabaseEntry> found =
-                DiscoverDialog.show(connectionTree.getScene().getWindow(), credentials, preferences);
+                DiscoverDialog.show(connectionTree.getScene().getWindow(), credentials, preferences, registry.allDatabases());
         if (!found.isEmpty()) {
             registry.ungroupedDatabases().addAll(found);
             refreshTree();
+            // Misma razón que en onAddDatabase — dejar a la vista la última agregada en
+            // vez de mandar el árbol de vuelta al tope.
+            revealDatabase(found.get(found.size() - 1));
             statusLabel.setText(found.size() + " base(s) agregada(s) desde el escaneo.");
             log(found.size() + " base(s) agregada(s) desde el escaneo de bases de datos.");
         }
     }
 
-    /** "Descubrir bases en esta IP…" del menú contextual de una fila (ver {@link ConnectionTreeCell}) — mismo diálogo que {@link #onDiscoverDatabases()}, precargado con el host de esa base para no tener que retiparlo. */
     /**
      * Clic en el candado del árbol (2026-08-28, pedido explícito del usuario: "que
      * ese mismo icono sirva para intercambiar entre esas 2 opciones") — alterna
@@ -1119,11 +1318,8 @@ public class MainController {
         }
         choices.add(NEW_GROUP_CHOICE);
 
-        String currentGroup = registry.servers().stream()
-                .filter(server -> server.databases().contains(db))
-                .map(Server::name)
-                .findFirst()
-                .orElse(UNGROUPED_CHOICE);
+        Server owner = registry.groupOf(db);
+        String currentGroup = owner == null ? UNGROUPED_CHOICE : owner.name();
 
         ChoiceDialog<String> dialog = new ChoiceDialog<>(currentGroup, choices);
         dialog.setTitle("Mover a grupo");
@@ -1176,6 +1372,148 @@ public class MainController {
         log(db.alias() + ": movida al grupo \"" + label + "\".");
     }
 
+    // ---- Acciones de grupo del árbol (2026-09-11, pedido del usuario: marcar/
+    // desmarcar por grupo, renombrar, y cambiar el orden de grupos y bases) ----
+
+    /**
+     * Marca o desmarca todas las bases de un grupo — {@code server} nulo = las sueltas
+     * ("Sin grupo"). Antes solo existía el botón "Todas" de la barra, que es GLOBAL:
+     * con varios grupos registrados no había forma de marcar uno solo sin ir base por
+     * base.
+     *
+     * <p>Se tocan las casillas de los {@code TreeItem} hijos directamente, no la
+     * propagación de {@code CheckBoxTreeItem} — esa está deshabilitada a propósito
+     * ({@code setIndependent(true)}, hallazgo #1 de
+     * {@code AUDITORIA_BUGS_RENDIMIENTO.md}) justamente porque recorría los hijos de
+     * cada base y disparaba su carga de esquema. Pedirle los hijos a una fila de GRUPO
+     * es gratis (son {@code TreeItem} planos, ya creados); lo que nunca hay que hacer
+     * es pedírselos a una fila de base.
+     */
+    private void onSetGroupSelection(Server server, boolean selected) {
+        TreeItem<Object> groupItem = findGroupItem(server);
+        if (groupItem == null) {
+            return;
+        }
+        int touched = 0;
+        for (TreeItem<Object> child : groupItem.getChildren()) {
+            if (child instanceof CheckBoxTreeItem<Object> checkItem) {
+                checkItem.setSelected(selected);
+                touched++;
+            }
+        }
+        String label = server == null ? "Sin grupo" : server.name();
+        statusLabel.setText((selected ? "Marcadas " : "Desmarcadas ") + touched + " base(s) de " + label + ".");
+    }
+
+    /** La fila del árbol que representa a {@code server}, o la de "Sin grupo" si es nulo. {@code null} si ese grupo no está visible ahora mismo (ej. filtrado por el buscador). */
+    private TreeItem<Object> findGroupItem(Server server) {
+        TreeItem<Object> root = connectionTree.getRoot();
+        if (root == null) {
+            return null;
+        }
+        for (TreeItem<Object> group : root.getChildren()) {
+            Object value = group.getValue();
+            if (server == null
+                    ? ConnectionTreeBuilder.UNGROUPED_HEADER.equals(value)
+                    : value == server) {
+                return group;
+            }
+        }
+        return null;
+    }
+
+    /** "Renombrar grupo…" — antes no existía ninguna forma de cambiarle el nombre a un grupo una vez creado. */
+    private void onRenameGroup(Server server) {
+        if (server == null) {
+            return;
+        }
+        TextInputDialog dialog = new TextInputDialog(server.name());
+        dialog.setTitle("Renombrar grupo");
+        dialog.setHeaderText(null);
+        dialog.setContentText("Nombre del grupo:");
+        dialog.initOwner(connectionTree.getScene().getWindow());
+        applyThemeToAlert(dialog);
+        Optional<String> name = dialog.showAndWait();
+        if (name.isEmpty() || name.get().isBlank() || name.get().trim().equals(server.name())) {
+            return;
+        }
+        String previous = server.name();
+        server.setName(name.get().trim());
+        refreshTree();
+        statusLabel.setText("Grupo renombrado: " + server.name());
+        log("Grupo \"" + previous + "\" renombrado a \"" + server.name() + "\".");
+    }
+
+    /**
+     * Sube ({@code delta} -1) o baja (+1) un grupo entre los demás. El orden del árbol
+     * ES el orden de la lista del registro, y ese orden se persiste en
+     * {@code connections.json} — así que mover acá alcanza, no hay ningún campo de
+     * posición aparte que mantener.
+     */
+    private void onMoveGroupInOrder(Server server, int delta) {
+        if (server == null || reorderBlockedByFilter()) {
+            return;
+        }
+        if (registry.moveServer(server, delta)) {
+            refreshTree();
+            revealGroup(server);
+        }
+    }
+
+    /** Igual que {@link #onMoveGroupInOrder} pero para una base, dentro de su propio grupo — ver {@code ConnectionRegistry#moveDatabase}. */
+    private void onMoveDatabaseInOrder(DatabaseEntry db, int delta) {
+        if (reorderBlockedByFilter()) {
+            return;
+        }
+        if (registry.moveDatabase(db, delta)) {
+            refreshTree();
+            revealDatabase(db);
+        }
+    }
+
+    /**
+     * Reordenar con el buscador activo no se permite (2026-09-12).
+     *
+     * <p>Mover opera sobre la lista REAL del registro, no sobre lo que el filtro deja a
+     * la vista. Con un filtro puesto, "Subir" puede intercambiar la fila con una
+     * oculta: el registro cambia de verdad pero en pantalla **no pasa nada**, porque
+     * las dos filas involucradas no están las dos visibles. El usuario presiona otra
+     * vez, vuelve a "no pasar nada", y el orden guardado se va desordenando sin que lo
+     * vea.
+     *
+     * <p>Se bloquea con un aviso en vez de intentar mover "entre los visibles": eso
+     * significaría reordenar la lista real de una forma que depende del filtro que
+     * había puesto en ese momento, que es bastante más difícil de predecir que no
+     * dejar hacerlo.
+     */
+    private boolean reorderBlockedByFilter() {
+        if (connectionFilterText == null || connectionFilterText.isBlank()) {
+            return false;
+        }
+        statusLabel.setText("Limpia el buscador para cambiar el orden — con un filtro puesto, mover afectaría filas que no estás viendo.");
+        return true;
+    }
+
+    /** "Ordenar A-Z" — las bases de un grupo, o las sueltas si {@code server} es nulo. */
+    private void onSortGroupDatabases(Server server) {
+        registry.sortDatabasesByAlias(server);
+        refreshTree();
+        statusLabel.setText("Bases ordenadas A-Z en " + (server == null ? "Sin grupo" : server.name()) + ".");
+    }
+
+    /** Deja visible la fila de un grupo tras moverlo — mismo criterio que {@link #revealDatabase}: después de mover algo, verlo donde quedó. */
+    private void revealGroup(Server server) {
+        TreeItem<Object> groupItem = findGroupItem(server);
+        if (groupItem == null) {
+            return;
+        }
+        int row = connectionTree.getRow(groupItem);
+        if (row >= 0) {
+            connectionTree.getSelectionModel().select(row);
+            Platform.runLater(() -> connectionTree.scrollTo(row));
+        }
+    }
+
     /**
      * "Conexiones → Nuevo grupo de conexiones…" — crea un {@link Server}
      * vacío, listo para que "Mover a grupo…" (ver
@@ -1203,12 +1541,22 @@ public class MainController {
 
     private void onDiscoverForDatabase(DatabaseEntry db) {
         List<DatabaseEntry> found =
-                DiscoverDialog.show(connectionTree.getScene().getWindow(), credentials, preferences, db.host());
+                DiscoverDialog.show(connectionTree.getScene().getWindow(), credentials, preferences, registry.allDatabases(), db.host());
         if (!found.isEmpty()) {
-            registry.ungroupedDatabases().addAll(found);
+            // Al MISMO grupo que la base desde la que se escaneó (2026-09-11, pregunta del
+            // usuario) — antes caían siempre en "Sin grupo" aunque el escaneo hubiera
+            // salido de una base agrupada, y había que moverlas una por una después. Son
+            // bases del mismo servidor, así que heredar su grupo es lo esperable. Si la
+            // base de origen está suelta, las nuevas también.
+            registry.addAllNextTo(db, found);
+            Server group = registry.groupOf(db);
             refreshTree();
-            statusLabel.setText(found.size() + " base(s) agregada(s) desde el escaneo.");
-            log(found.size() + " base(s) agregada(s) desde el escaneo de " + db.host() + ".");
+            // Misma razón que en onAddDatabase — dejar a la vista la última agregada en
+            // vez de mandar el árbol de vuelta al tope.
+            revealDatabase(found.get(found.size() - 1));
+            String where = group == null ? "Sin grupo" : group.name();
+            statusLabel.setText(found.size() + " base(s) agregada(s) en " + where + ".");
+            log(found.size() + " base(s) agregada(s) desde el escaneo de " + db.host() + " — en " + where + ".");
         }
     }
 
@@ -1323,7 +1671,7 @@ public class MainController {
                         db.setConnectionStatus(DatabaseEntry.ConnectionStatus.TESTING);
                         connectionTree.refresh();
                     });
-                    try (Connection conn = DriverManager.getConnection(
+                    try (Connection _ = DriverManager.getConnection(
                             db.jdbcUrl(), creds.get().user(), creds.get().password())) {
                         // Bug real (hallazgo de esta ronda de optimización): a diferencia del
                         // TESTING de arriba, CONNECTED/FAILED se mutaban DIRECTO desde este hilo
@@ -1418,8 +1766,9 @@ public class MainController {
     private void writeScriptTo(Tab tab, QueryTabState state, File file) {
         try {
             Files.writeString(file.toPath(), state.codeArea.getText());
-            tab.setText(file.getName());
+            state.baseName = file.getName();
             state.dirty = false;
+            refreshTabHeader(tab);
             statusLabel.setText("Guardado: " + file.getName());
             log("Script guardado en " + file.getName());
         } catch (IOException e) {
@@ -1481,19 +1830,29 @@ public class MainController {
             @Override
             protected Void call() throws IOException {
                 try (BufferedWriter writer = Files.newBufferedWriter(file.toPath())) {
-                    writer.write(String.join(",", headers));
+                    StringBuilder line = new StringBuilder();
+                    // Los encabezados también van escapados (2026-09-10, hallazgo A10) —
+                    // antes se unían con String.join sin escapar, así que un alias con coma
+                    // (SELECT total AS "importe, IVA") partía la línea de encabezado en dos
+                    // columnas y desalineaba el archivo entero.
+                    for (String header : headers) {
+                        if (line.length() > 0) {
+                            line.append(',');
+                        }
+                        appendCsvEscaped(line, header);
+                    }
+                    writer.write(line.toString());
                     writer.newLine();
+
                     int written = 0;
                     int total = rows.size();
-                    StringBuilder line = new StringBuilder();
                     for (Object[] row : rows) {
                         line.setLength(0);
                         for (int i = 0; i < row.length; i++) {
                             if (i > 0) {
                                 line.append(',');
                             }
-                            Object value = row[i];
-                            line.append(csvEscape(value == null ? "" : value.toString()));
+                            appendCsvEscaped(line, row[i]);
                         }
                         writer.write(line.toString());
                         writer.newLine();
@@ -1534,11 +1893,43 @@ public class MainController {
         thread.start();
     }
 
-    private static String csvEscape(String value) {
-        if (value.contains(",") || value.contains("\"") || value.contains("\n")) {
-            return "\"" + value.replace("\"", "\"\"") + "\"";
+    /**
+     * Escribe {@code value} escapado como campo CSV directo sobre {@code out}, sin
+     * crear ninguna cadena intermedia.
+     *
+     * <p><b>Por qué no devuelve un {@code String}</b> (2026-09-10, hallazgo B6 de
+     * {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}): el {@code csvEscape} anterior sí lo
+     * hacía, y en el caso que necesita comillas armaba DOS cadenas más por celda (el
+     * {@code replace} y la concatenación). Para el resultado combinado que este
+     * proyecto maneja de verdad —3 millones de filas × 10 columnas— eso son decenas de
+     * millones de cadenas temporales que mueren de inmediato, y justo cuando el heap ya
+     * está ocupado con el resultado completo cargado. Acá el caso común (sin caracteres
+     * especiales) no asigna NADA: se copia al buffer que ya existe.
+     *
+     * <p>{@code null} se escribe como campo vacío, igual que antes. {@code \r} entra en
+     * la condición (hallazgo A10) — antes solo se miraban {@code ,}, {@code "} y
+     * {@code \n}, así que un valor con retorno de carro suelto (pasa con datos venidos
+     * de sistemas viejos) rompía la fila sin comillas que la protegieran.
+     */
+    static void appendCsvEscaped(StringBuilder out, Object value) {
+        if (value == null) {
+            return;
         }
-        return value;
+        String text = value.toString();
+        if (text.indexOf(',') < 0 && text.indexOf('"') < 0
+                && text.indexOf('\n') < 0 && text.indexOf('\r') < 0) {
+            out.append(text);
+            return;
+        }
+        out.append('"');
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '"') {
+                out.append('"');
+            }
+            out.append(c);
+        }
+        out.append('"');
     }
 
     /** Muestra/oculta el spinner de "Exportando…" de la barra de estado, igual que faro-java-prototipo.html — antes solo había texto plano, sin ninguna señal de que algo seguía en curso. */
@@ -1639,14 +2030,9 @@ public class MainController {
             statusLabel.setText("Escribe una consulta primero.");
             return;
         }
-        String activeTabTitle = queryTabPane.getSelectionModel().getSelectedItem().getText();
-        lastExecutionTabLabel = activeTabTitle.startsWith("● ") ? activeTabTitle.substring(2) : activeTabTitle;
+        lastExecutionTabLabel = state.baseName;
 
-        List<DatabaseEntry> selected = ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot())
-            .stream()
-            .filter(CheckBoxTreeItem::isSelected)
-            .map(item -> (DatabaseEntry) item.getValue())
-            .toList();
+        List<DatabaseEntry> selected = selectedDatabases();
         if (selected.isEmpty()) {
             statusLabel.setText("Selecciona al menos una base de datos.");
             return;
@@ -1744,6 +2130,15 @@ public class MainController {
             resetRunButton();
         });
         task.setOnFailed(e -> {
+            // Red de seguridad del punto "en uso" (2026-09-10, hallazgo A11) — se apaga
+            // desde el listener de estado de cada base, o sea SOLO si esa base llegó a
+            // reportar algo distinto de RUNNING. Si el Task muere entero antes (una
+            // interrupción que cancela las tareas pendientes sin llegar a correrlas, un
+            // Error de la JVM), esas bases se quedarían pulsando en el árbol para siempre,
+            // sin ninguna consulta detrás, hasta reiniciar la app. No tengo un disparador
+            // reproducible hoy —runOne captura SQLException y RuntimeException, que cubren
+            // casi todo— pero el costo de cerrarlo es esta línea.
+            selected.forEach(db -> db.setInUse(false));
             resetRunButton();
             // Traza completa (con stack) solo al archivo — el mensaje corto ya va al usuario
             // vía log()/Diagnóstico, pero para depurar un fallo catastrófico real del Task
@@ -1770,12 +2165,20 @@ public class MainController {
             executionSummaryLabel.setText("Sin ejecuciones todavía.");
             return;
         }
-        long succeeded = currentExecutionRows.stream()
-                .filter(s -> s.stateProperty().get() == ExecutionStatus.State.SUCCEEDED).count();
-        long failed = currentExecutionRows.stream()
-                .filter(s -> s.stateProperty().get() == ExecutionStatus.State.FAILED).count();
-        long cancelled = currentExecutionRows.stream()
-                .filter(s -> s.stateProperty().get() == ExecutionStatus.State.CANCELLED).count();
+        // Una sola pasada, no tres (2026-09-10, hallazgo B8) — este método lo dispara el
+        // listener de estado de CADA base, o sea N veces por corrida, y cada llamada
+        // recorría la lista completa tres veces para contar tres estados.
+        int succeeded = 0;
+        int failed = 0;
+        int cancelled = 0;
+        for (ExecutionStatus status : currentExecutionRows) {
+            switch (status.stateProperty().get()) {
+                case SUCCEEDED -> succeeded++;
+                case FAILED -> failed++;
+                case CANCELLED -> cancelled++;
+                case RUNNING -> { }
+            }
+        }
         StringBuilder summary = new StringBuilder(
                 lastExecutionTabLabel + " · " + lastExecutionStartTime + " · " + currentExecutionRows.size()
                         + " base(s) · " + succeeded + " correcta(s)");
@@ -1789,21 +2192,47 @@ public class MainController {
         setTabBadge(executionTab, "Ejecución", currentExecutionRows.size());
     }
 
-    /** Nombre + contador tipo pill directo en la pestaña — "Resultados 1,240", contra faro-java-prototipo.html. 0 no muestra pill (nada que contar todavía). */
+    /**
+     * Los nodos del badge de cada pestaña de resultados, creados UNA vez — ver
+     * {@link #setTabBadge}.
+     */
+    private record TabBadge(Label count, HBox graphic) {
+    }
+
+    private final Map<Tab, TabBadge> tabBadges = new HashMap<>();
+
+    /**
+     * Nombre + contador tipo pill directo en la pestaña — "Resultados 1,240", contra
+     * faro-java-prototipo.html. 0 no muestra pill (nada que contar todavía).
+     *
+     * <p><b>Los nodos se reusan</b> (2026-09-10, hallazgo B5 de
+     * {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}): antes este método creaba dos
+     * {@code Label} y un {@code HBox} NUEVOS y reemplazaba el gráfico de la pestaña en
+     * cada llamada. Y {@link #log(LogLevel, String)} lo llama con CADA línea que entra
+     * a Diagnóstico — una corrida contra 20 bodegas con errores deja 20 líneas de
+     * golpe, o sea 20 reconstrucciones del gráfico con 3 nodos nuevos, resolución de
+     * clases de estilo y una pasada de layout de la barra de pestañas cada una.
+     * {@link #updateExecutionSummary()} lo llamaba igual por cada cambio de estado.
+     * Ahora solo cambia el texto del contador.
+     */
     private void setTabBadge(Tab tab, String name, int count) {
-        Label nameLabel = new Label(name);
-        nameLabel.getStyleClass().add("tab-name");
-        HBox graphic;
-        if (count > 0) {
-            Label badge = new Label(String.valueOf(count));
-            badge.getStyleClass().add("tab-badge");
-            graphic = new HBox(6, nameLabel, badge);
-        } else {
-            graphic = new HBox(nameLabel);
-        }
-        graphic.setAlignment(Pos.CENTER_LEFT);
-        tab.setText(null);
-        tab.setGraphic(graphic);
+        TabBadge badge = tabBadges.computeIfAbsent(tab, t -> {
+            Label nameLabel = new Label(name);
+            nameLabel.getStyleClass().add("tab-name");
+            Label countLabel = new Label();
+            countLabel.getStyleClass().add("tab-badge");
+            HBox graphic = new HBox(6, nameLabel, countLabel);
+            graphic.setAlignment(Pos.CENTER_LEFT);
+            t.setText(null);
+            t.setGraphic(graphic);
+            return new TabBadge(countLabel, graphic);
+        });
+        badge.count().setText(String.valueOf(count));
+        // visible+managed, no quitarlo de la lista de hijos: con managed=false el HBox
+        // ni siquiera le reserva espacio, así que se ve igual que cuando no estaba, sin
+        // tocar el grafo de escena.
+        badge.count().setVisible(count > 0);
+        badge.count().setManaged(count > 0);
     }
 
     /**
@@ -1834,11 +2263,25 @@ public class MainController {
         }
     }
 
-    /** Texto de una sola línea para la celda del historial — el SQL guardado en sí conserva sus saltos de línea reales, esto es solo para mostrarlo compacto. */
-    private static String summarize(String sql) {
-        String oneLine = sql.replace('\n', ' ').replace('\r', ' ').trim();
+    /**
+     * Texto de una sola línea para la celda del historial — el SQL guardado en sí
+     * conserva sus saltos de línea reales, esto es solo para mostrarlo compacto.
+     *
+     * <p>Colapsa RUNS de espacio en blanco, no reemplaza carácter por carácter
+     * (2026-09-14, encontrado al escribir su primer test): antes hacía
+     * {@code replace('\n',' ').replace('\r',' ')}, así que un salto de línea de Windows
+     * (CRLF) producía DOS espacios — y un script abierto de un archivo .sql los tiene
+     * en cada línea, con lo que la vista previa del historial salía con huecos dobles
+     * por todos lados. De paso también colapsa la sangría, que es ruido puro en una
+     * vista de una sola línea.
+     */
+    static String summarize(String sql) {
+        String oneLine = WHITESPACE_RUN.matcher(sql).replaceAll(" ").trim();
         return oneLine.length() > 80 ? oneLine.substring(0, 80) + "…" : oneLine;
     }
+
+    /** Compilado una vez — {@link #summarize} corre por cada celda visible del historial. */
+    private static final Pattern WHITESPACE_RUN = Pattern.compile("\\s+");
 
     // ---- Favoritos ----
 
@@ -1954,11 +2397,7 @@ public class MainController {
             statusLabel.setText("Escribe una consulta primero.");
             return;
         }
-        List<DatabaseEntry> selected = ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot())
-            .stream()
-            .filter(CheckBoxTreeItem::isSelected)
-            .map(item -> (DatabaseEntry) item.getValue())
-            .toList();
+        List<DatabaseEntry> selected = selectedDatabases();
         if (selected.isEmpty()) {
             statusLabel.setText("Selecciona al menos una base de datos.");
             return;
@@ -1991,12 +2430,58 @@ public class MainController {
 
     // ---- Importar/Exportar configuración ----
 
+    /**
+     * Pregunta si la exportación debe llevar las credenciales — {@code empty} si el
+     * usuario canceló, {@code true}/{@code false} con su respuesta si siguió
+     * adelante. La casilla nace DESMARCADA a propósito: incluir contraseñas legibles
+     * tiene que ser un acto deliberado de cada exportación, no algo que se herede de
+     * la vez anterior.
+     *
+     * <p>La advertencia se muestra siempre, aunque la casilla esté apagada, para que
+     * quien la marque sepa exactamente qué está produciendo antes de elegir dónde
+     * guardar el archivo.
+     */
+    private Optional<Boolean> askIncludeCredentials() {
+        CheckBox includeCheck = new CheckBox("Incluir usuarios y contraseñas");
+        Label warning = new Label(
+                "Si la marcas, las contraseñas quedan LEGIBLES dentro del archivo .json: "
+                        + "cualquiera que lo abra las puede leer. Guárdalo como guardarías una "
+                        + "contraseña — no por correo ni en una carpeta compartida.\n\n"
+                        + "Sirve para no volver a capturarlas al montar Faro en otro equipo. "
+                        + "Tu connections.json de siempre no cambia: ahí las credenciales siguen "
+                        + "cifradas y aparte.");
+        warning.setWrapText(true);
+        warning.setMaxWidth(420);
+        warning.getStyleClass().add("muted");
+        VBox content = new VBox(10, includeCheck, warning);
+
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle("Exportar configuración");
+        alert.setHeaderText("¿Qué incluye el archivo exportado?");
+        alert.getDialogPane().setContent(content);
+        ButtonType exportType = new ButtonType("Exportar", ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancelType = new ButtonType("Cancelar", ButtonBar.ButtonData.CANCEL_CLOSE);
+        alert.getButtonTypes().setAll(exportType, cancelType);
+        alert.initOwner(connectionTree.getScene().getWindow());
+        applyThemeToAlert(alert);
+
+        return alert.showAndWait()
+                .filter(choice -> choice == exportType)
+                .map(choice -> includeCheck.isSelected());
+    }
+
     @FXML
     private void onExportConfig() {
+        Optional<Boolean> includeCredentials = askIncludeCredentials();
+        if (includeCredentials.isEmpty()) {
+            return;
+        }
+        boolean withCredentials = includeCredentials.get();
+
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Exportar configuración");
         chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("JSON", "*.json"));
-        chooser.setInitialFileName("faro-config.json");
+        chooser.setInitialFileName(withCredentials ? "faro-config-con-credenciales.json" : "faro-config.json");
         File file = chooser.showSaveDialog(connectionTree.getScene().getWindow());
         if (file == null) {
             return;
@@ -2004,9 +2489,14 @@ public class MainController {
         try {
             // List.of() a propósito — las pestañas abiertas nunca van en un archivo
             // exportado, ver el javadoc de SavedQueryTab.
-            ConnectionRegistryStore.save(registry, preferences, favorites, List.of(), file.toPath());
+            ConnectionRegistryStore.save(registry, preferences, favorites, List.of(), file.toPath(),
+                    withCredentials ? credentials : null);
             statusLabel.setText("Configuración exportada: " + file.getName());
-            log("Configuración exportada a " + file.getName() + " (sin credenciales, a propósito).");
+            log(withCredentials ? LogLevel.WARN : LogLevel.INFO,
+                    "Configuración exportada a " + file.getName()
+                            + (withCredentials
+                                    ? " — CON usuarios y contraseñas en texto legible. Trátalo como un archivo con secretos."
+                                    : " (sin credenciales)."));
         } catch (IOException e) {
             logger.warn("No se pudo exportar la configuración a {}", file.getAbsolutePath(), e);
             statusLabel.setText("Error al exportar configuración: " + e.getMessage());
@@ -2037,10 +2527,25 @@ public class MainController {
             // reemplaza el registro ENTERO, así que no hay forma de saber cuáles ids
             // siguen siendo "la misma base" de verdad.
             pool.closeAll();
+            // Y lo mismo con el esquema cacheado (2026-09-08, hallazgo A4 de
+            // ANALISIS_OPTIMIZACION_ESTRUCTURA.md) — las cachés de SchemaIntrospector
+            // están indexadas por id de base EXACTAMENTE igual que los pools de arriba,
+            // así que el párrafo anterior se les aplica palabra por palabra: con los ids
+            // conservados en el archivo importado, una base que cambió de servidor
+            // seguía mostrando en el árbol las tablas del servidor ANTERIOR, el
+            // autocompletado las sugería, y "Generar SELECT" armaba SQL sobre columnas
+            // de otra base — sin ningún error visible. El arreglo del hallazgo #3 cubrió
+            // los pools y dejó esta capa afuera.
+            SchemaIntrospector.invalidateAll();
             // .registry() nada más — un archivo importado nunca trae pestañas (ver
             // onExportConfig), así que no hay nada que restaurar en las pestañas ya
             // abiertas de esta sesión.
-            registry = ConnectionRegistryStore.load(file.toPath(), preferences, favorites).registry();
+            // `credentials` (2026-09-10) — si el archivo se exportó con la casilla de
+            // credenciales marcada, sus usuarios/contraseñas entran a la sesión acá; un
+            // archivo sin esa sección (cualquiera de antes de esa fecha) no las toca.
+            // Ese es el punto de la feature: montar Faro en un equipo nuevo sin
+            // recapturar 50 contraseñas a mano.
+            registry = ConnectionRegistryStore.load(file.toPath(), preferences, favorites, credentials).registry();
             refreshTree();
             refreshFavorites();
             statusLabel.setText("Configuración importada: " + file.getName());
@@ -2112,6 +2617,13 @@ public class MainController {
         registry.removeDatabase(entry);
         credentials.remove(entry.id());
         pool.evict(entry.id());
+        // Cuarta limpieza, que faltaba (2026-09-08, hallazgo A4 de
+        // ANALISIS_OPTIMIZACION_ESTRUCTURA.md) — el esquema cacheado de esta base
+        // (estructura, columnas por tabla, definiciones DDL completas de sus
+        // funciones/procedimientos) se quedaba en los mapas estáticos de
+        // SchemaIntrospector hasta cerrar la app, sin que nadie lo pudiera alcanzar
+        // ya. Fuga silenciosa, y peor si un id se reusara.
+        SchemaIntrospector.invalidate(entry.id());
         refreshTree();
         log("Base eliminada: " + entry.alias());
     }
@@ -2130,11 +2642,29 @@ public class MainController {
         log("Nueva consulta abierta para " + db.alias() + " (casilla marcada automáticamente).");
     }
 
-    /** Ids de las bases marcadas AHORA MISMO en el árbol — lo que la pestaña activa "ve". Usado para que una pestaña nueva herede la selección de la que se está dejando (ver {@link #addQueryTab}) y para guardar el estado de una pestaña justo antes de dejarla (ver el listener de cambio de pestaña en {@link #initialize()}). */
-    private Set<String> capturedSelectedDatabaseIds() {
+    /**
+     * Las bases marcadas AHORA MISMO en el árbol, en orden de árbol.
+     *
+     * <p>Existía copiada palabra por palabra en cuatro sitios
+     * ({@code onAutocomplete}, {@code onRunQuery}, {@code onExplainPlan},
+     * {@code onCompareObject}) — cuatro copias del mismo {@code stream} con el mismo
+     * cast sin chequear (2026-09-12, hallazgo C4.2 de
+     * {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}). El cast es una suposición del
+     * diseño que el javadoc de {@code SchemaTreeNode} documenta —los nodos de esquema
+     * NUNCA son {@code CheckBoxTreeItem}— y tenerla repetida significaba cuatro sitios
+     * que tocar si esa suposición cambiara.
+     */
+    private List<DatabaseEntry> selectedDatabases() {
         return ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot()).stream()
                 .filter(CheckBoxTreeItem::isSelected)
-                .map(item -> ((DatabaseEntry) item.getValue()).id())
+                .map(item -> (DatabaseEntry) item.getValue())
+                .toList();
+    }
+
+    /** Ids de las bases marcadas AHORA MISMO en el árbol — lo que la pestaña activa "ve". Usado para que una pestaña nueva herede la selección de la que se está dejando (ver {@link #addQueryTab}) y para guardar el estado de una pestaña justo antes de dejarla (ver el listener de cambio de pestaña en {@link #initialize()}). */
+    private Set<String> capturedSelectedDatabaseIds() {
+        return selectedDatabases().stream()
+                .map(DatabaseEntry::id)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
@@ -2190,11 +2720,7 @@ public class MainController {
      * incluido "Exportar CSV", que funciona sin ningún camino nuevo.
      */
     private void onCompareObject(SchemaTreeNode.Item item) {
-        List<DatabaseEntry> selected = new ArrayList<>(ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot())
-                .stream()
-                .filter(CheckBoxTreeItem::isSelected)
-                .map(treeItem -> (DatabaseEntry) treeItem.getValue())
-                .toList());
+        List<DatabaseEntry> selected = new ArrayList<>(selectedDatabases());
         if (selected.stream().noneMatch(db -> db.id().equals(item.database().id()))) {
             selected.add(0, item.database());
         }
@@ -2413,16 +2939,49 @@ public class MainController {
      * se hubiera notado en cada letra.
      */
     private void refreshTree() {
-        Set<String> selectedIds = connectionTree.getRoot() == null
+        rebuildTree(true);
+    }
+
+    /**
+     * Rebuild disparado por el buscador de bases — igual que {@link #refreshTree()}
+     * salvo que NO reabre las filas de base que estaban expandidas. Ver
+     * {@link #rebuildTree(boolean)} para el motivo (cada tecla pasa por acá).
+     */
+    private void refreshTreeFromFilter() {
+        rebuildTree(false);
+    }
+
+    /**
+     * {@code restoreExpandedDatabases} — si además de los grupos hay que volver a
+     * abrir las filas de BASE que estaban expandidas.
+     *
+     * <p>Es {@code false} solo para el buscador, y por una razón concreta: expandir
+     * una fila de base dispara su carga perezosa de esquema y una conexión de prueba
+     * ({@code DatabaseTreeItem#requestSchema}). Restaurarlas en cada tecla del
+     * buscador sería exactamente el hallazgo #1 de
+     * {@code AUDITORIA_BUGS_RENDIMIENTO.md} otra vez ("se llena de pool de conexiones
+     * si tengo muchas BD"). Para todos los demás caminos (agregar/editar/borrar una
+     * base, moverla de grupo, descubrir, importar) sí se restauran: son acciones
+     * puntuales del usuario, no una ráfaga por pulsación.
+     */
+    private void rebuildTree(boolean restoreExpandedDatabases) {
+        TreeItem<Object> oldRoot = connectionTree.getRoot();
+        Set<String> selectedIds = oldRoot == null
                 ? Set.of()
-                : Set.copyOf(ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot()).stream()
+                : Set.copyOf(ConnectionTreeBuilder.collectDatabaseItems(oldRoot).stream()
                         .filter(CheckBoxTreeItem::isSelected)
                         .map(item -> ((DatabaseEntry) item.getValue()).id())
                         .toList());
+        Set<Object> expandedGroups = capturedExpandedGroups();
+        Set<String> expandedDatabaseIds = restoreExpandedDatabases ? capturedExpandedDatabaseIds() : Set.of();
+        int firstRow = firstVisibleRow();
 
-        connectionTree.setRoot(ConnectionTreeBuilder.buildRoot(registry, connectionFilterText, credentials, pool));
-        bindSelectedCount();
-        bindSelectAllButtonText();
+        // oldRoot == null ⇒ primer armado (arranque): se le pasa null para que abra
+        // todos los grupos, el comportamiento de siempre. De ahí en adelante manda lo
+        // que el usuario haya dejado abierto o cerrado a mano.
+        connectionTree.setRoot(ConnectionTreeBuilder.buildRoot(
+                registry, connectionFilterText, credentials, pool, oldRoot == null ? null : expandedGroups));
+        bindSelectionDependentUi();
 
         if (!selectedIds.isEmpty()) {
             for (CheckBoxTreeItem<Object> item : ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot())) {
@@ -2431,9 +2990,145 @@ public class MainController {
                 }
             }
         }
+        applyExpandedDatabaseIds(expandedDatabaseIds);
+        restoreScrollTo(firstRow);
     }
 
-    private void bindSelectedCount() {
+    /**
+     * Valores de las filas de AGRUPACIÓN abiertas ahora mismo — un {@link Server}, o
+     * la cadena {@code "Sin grupo"} del encabezado (ver
+     * {@link ConnectionTreeBuilder#UNGROUPED_HEADER}). Se recorre solo el primer
+     * nivel: {@code root.getChildren()} son los grupos, y pedirle los hijos a un
+     * grupo es gratis (son {@code TreeItem} planos, no los perezosos).
+     */
+    private Set<Object> capturedExpandedGroups() {
+        Set<Object> expanded = new HashSet<>();
+        TreeItem<Object> root = connectionTree.getRoot();
+        if (root == null) {
+            return expanded;
+        }
+        for (TreeItem<Object> group : root.getChildren()) {
+            if (group.isExpanded()) {
+                expanded.add(group.getValue());
+            }
+        }
+        return expanded;
+    }
+
+    /** Ids de las filas de BASE abiertas ahora mismo — solo se LEE {@code isExpanded()}, nunca {@code getChildren()} sobre ellas (eso dispararía su fetch de esquema). */
+    private Set<String> capturedExpandedDatabaseIds() {
+        Set<String> ids = new LinkedHashSet<>();
+        TreeItem<Object> root = connectionTree.getRoot();
+        if (root == null) {
+            return ids;
+        }
+        for (TreeItem<Object> group : root.getChildren()) {
+            for (TreeItem<Object> dbItem : group.getChildren()) {
+                if (dbItem.isExpanded() && dbItem.getValue() instanceof DatabaseEntry db) {
+                    ids.add(db.id());
+                }
+            }
+        }
+        return ids;
+    }
+
+    /** Contraparte de {@link #capturedExpandedDatabaseIds()} — {@code setExpanded(true)} acá SÍ dispara la carga perezosa de esa base, que es justo lo que se quiere: el usuario la tenía abierta. */
+    private void applyExpandedDatabaseIds(Set<String> ids) {
+        if (ids.isEmpty() || connectionTree.getRoot() == null) {
+            return;
+        }
+        for (TreeItem<Object> group : connectionTree.getRoot().getChildren()) {
+            for (TreeItem<Object> dbItem : group.getChildren()) {
+                if (dbItem.getValue() instanceof DatabaseEntry db && ids.contains(db.id())) {
+                    dbItem.setExpanded(true);
+                }
+            }
+        }
+    }
+
+    /**
+     * Índice de la primera fila visible del árbol, para poder dejar el scroll donde
+     * estaba después de reconstruirlo — {@code TreeView} no expone esto, hay que
+     * preguntarle al {@code VirtualFlow} de su skin. Devuelve -1 si todavía no hay
+     * skin (antes del primer layout) o si el árbol está vacío; en ese caso
+     * {@link #restoreScrollTo(int)} simplemente no hace nada, que es el
+     * comportamiento de siempre.
+     */
+    private int firstVisibleRow() {
+        if (connectionTree.lookup(".virtual-flow") instanceof VirtualFlow<?> flow) {
+            IndexedCell<?> firstCell = flow.getFirstVisibleCell();
+            if (firstCell != null) {
+                return firstCell.getIndex();
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Devuelve el scroll a donde estaba (2026-09-10, reporte del usuario: "estoy
+     * probando las conexiones de una nueva bd y le doy a ok, me lleva hasta el inicio
+     * de la primera BD"). {@code setRoot} deja siempre el árbol arriba del todo, y con
+     * ~50 bases registradas eso significa perder el lugar en cada cambio.
+     *
+     * <p>{@code Platform.runLater} porque {@code scrollTo} necesita que el árbol nuevo
+     * ya haya pasado por un layout — llamarlo en el mismo pulso no tiene efecto.
+     * Mejor esfuerzo: si no se pudo leer la fila (ver {@link #firstVisibleRow()}), no
+     * se toca nada.
+     */
+    private void restoreScrollTo(int row) {
+        if (row <= 0) {
+            return;
+        }
+        Platform.runLater(() -> connectionTree.scrollTo(row));
+    }
+
+    /**
+     * Deja la fila de {@code db} visible y seleccionada — se llama después de
+     * AGREGAR una base (a mano o por descubrimiento). Sin esto, el usuario acaba de
+     * crear una base y el árbol la deja fuera de pantalla, sin ninguna señal de dónde
+     * quedó: hay que ir a buscarla entre las 50 que ya había. Expande el grupo que la
+     * contiene aunque estuviera cerrado — acaba de meter algo ahí, esconderlo no
+     * ayudaría.
+     */
+    private void revealDatabase(DatabaseEntry db) {
+        TreeItem<Object> root = connectionTree.getRoot();
+        if (root == null) {
+            return;
+        }
+        for (TreeItem<Object> group : root.getChildren()) {
+            for (TreeItem<Object> dbItem : group.getChildren()) {
+                if (dbItem.getValue() == db) {
+                    group.setExpanded(true);
+                    int row = connectionTree.getRow(dbItem);
+                    if (row >= 0) {
+                        connectionTree.getSelectionModel().select(row);
+                        Platform.runLater(() -> connectionTree.scrollTo(row));
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    /**
+     * Todo lo que depende de "qué bases están marcadas", con UN SOLO recorrido del
+     * árbol: el contador "N bases seleccionadas", el texto del botón
+     * Todas/Ninguna, y la segunda línea del encabezado de la pestaña activa.
+     *
+     * <p>Antes eran dos métodos gemelos ({@code bindSelectedCount} y
+     * {@code bindSelectAllButtonText}), idénticos salvo la propiedad destino y la
+     * lambda, cada uno con su propio recorrido completo y su propio
+     * {@code Observable[]} — o sea dos recorridos donde alcanza uno, en un método que
+     * corre en cada reconstrucción del árbol, incluida cada tecla del buscador
+     * (hallazgos B2 y C4 de {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}). Unificarlos
+     * era además el requisito para colgar acá el tercer consumidor sin sumar un
+     * recorrido más.
+     *
+     * <p>El texto del botón "Todas" reactivo viene de un hallazgo del usuario ("el
+     * texto no cambia entre todas y ninguna") y reacciona tanto al clic del botón
+     * como a marcar/desmarcar bases a mano.
+     */
+    private void bindSelectionDependentUi() {
         List<CheckBoxTreeItem<Object>> databaseItems =
             ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot());
         Observable[] selectedProperties = databaseItems.stream()
@@ -2444,27 +3139,20 @@ public class MainController {
             long selected = databaseItems.stream().filter(CheckBoxTreeItem::isSelected).count();
             return selected == 1 ? "1 base seleccionada" : selected + " bases seleccionadas";
         }, selectedProperties));
-    }
-
-    /**
-     * Texto del botón "Todas" reactivo — antes se quedaba fijo en "Todas"
-     * sin importar el estado real (hallazgo real del usuario: "el texto no
-     * cambia entre todas y ninguna"). Mismo patrón de {@code Bindings} que
-     * {@link #bindSelectedCount()}, sobre los mismos {@code selectedProperty()}
-     * — reacciona tanto a un clic del botón como a marcar/desmarcar bases a
-     * mano una por una.
-     */
-    private void bindSelectAllButtonText() {
-        List<CheckBoxTreeItem<Object>> databaseItems =
-            ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot());
-        Observable[] selectedProperties = databaseItems.stream()
-            .map(CheckBoxTreeItem::selectedProperty)
-            .toArray(Observable[]::new);
 
         selectAllDatabasesButton.textProperty().bind(Bindings.createStringBinding(() -> {
             boolean allSelected = !databaseItems.isEmpty() && databaseItems.stream().allMatch(CheckBoxTreeItem::isSelected);
             return allSelected ? "Ninguna" : "Todas";
         }, selectedProperties));
+
+        // Listener suelto y no un binding: el encabezado no es una propiedad de texto
+        // que se pueda atar (son dos Label dentro de un VBox, y además el valor depende
+        // de CUÁL pestaña está activa). Los listeners mueren con estos TreeItem, que se
+        // tiran enteros en la próxima reconstrucción del árbol — no se acumulan.
+        for (Observable selectedProperty : selectedProperties) {
+            selectedProperty.addListener(observable -> refreshActiveTabHeader());
+        }
+        refreshActiveTabHeader();
     }
 
     /**
@@ -2594,16 +3282,51 @@ public class MainController {
     }
 
     /**
-     * Cierra los pools de HikariCP y guarda conexiones/preferencias/
-     * credenciales en disco — llamado desde {@code Main#stop()} al cerrar
-     * la ventana. Las credenciales van a un archivo aparte y cifrado, ver
-     * {@link CredentialVaultStore}.
+     * Espera (acotado) a que termine el autoguardado en segundo plano antes de que
+     * {@link #shutdown()} escriba los mismos archivos (2026-09-10, hallazgo A3 de
+     * {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}).
+     *
+     * <p>{@code autosaveTimer.cancel()} impide ticks FUTUROS pero no espera al que ya
+     * está corriendo en {@code faro-autosave-write}. Sin esta espera, ese hilo y el de
+     * JavaFX podían estar escribiendo {@code connections.json} y
+     * {@code credentials.dat} <b>al mismo tiempo</b>. Con la escritura atómica de
+     * {@code ConnectionRegistryStore#writeAtomically} el archivo ya no queda a medias
+     * aunque pase, pero seguiría siendo una carrera por cuál de los dos guardados gana
+     * — y el de {@code shutdown()} es el que tiene el estado bueno (captura las
+     * pestañas justo antes de cerrar). Esperar lo vuelve determinista.
+     *
+     * <p>Tope de 5 s: si el autoguardado se quedara trabado (disco de red que no
+     * responde), cerrar la app igual es mejor que dejarla colgada — la escritura
+     * atómica garantiza que el archivo en disco sigue siendo válido en cualquier caso.
+     */
+    private void awaitAutosave() {
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (autosaveInProgress.get() && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        if (autosaveInProgress.get()) {
+            logger.warn("Cierre: el autoguardado en segundo plano no terminó en 5 s — se guarda igual por encima.");
+        }
+    }
+
+    /**
+     * Cierra los pools de HikariCP y guarda conexiones/preferencias/credenciales en
+     * disco — llamado desde {@code Main#stop()} al cerrar la ventana. Las credenciales
+     * van a un archivo aparte y cifrado, ver {@link CredentialVaultStore}.
      */
     void shutdown() {
         logger.info("MainController.shutdown() — guardando y cerrando pools.");
         autosaveTimer.cancel();
         statusBarTimer.cancel();
-        pool.closeAll();
+        awaitAutosave();
+        // closeAllAndWait, no closeAll — la JVM sale enseguida y los hilos de cierre en
+        // segundo plano son demonio; acá sí hay que esperarlos. Ver su javadoc.
+        pool.closeAllAndWait();
         try {
             ConnectionRegistryStore.save(
                     registry, preferences, favorites, capturedQueryTabsForSave(), ConnectionRegistryStore.DEFAULT_FILE);

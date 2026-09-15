@@ -2,8 +2,10 @@ package com.faro.app.data;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Map;
 
 import com.google.gson.JsonObject;
@@ -65,7 +67,19 @@ public final class CredentialVaultStore {
         if (file.getParent() != null) {
             Files.createDirectories(file.getParent());
         }
-        Files.write(file, encrypted);
+        // Temporal + move, igual que ConnectionRegistryStore#writeAtomically y por el
+        // mismo motivo (2026-09-10, hallazgo A3) — acá pesa todavía más: este archivo
+        // guarda las credenciales de TODAS las bases, y si se corta a la mitad no se
+        // puede descifrar nada, hay que recapturarlas una por una. Se escribe en cada
+        // autoguardado (cada 2 minutos) y al cerrar, que son justo los momentos en que
+        // el proceso puede morir a mitad de camino.
+        Path temp = file.resolveSibling(file.getFileName() + ".tmp");
+        Files.write(temp, encrypted);
+        try {
+            Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
+        }
         // Nunca se loguea el usuario/contraseña en sí — solo cuántas entradas se
         // guardaron, para trazabilidad sin filtrar secretos al archivo de log.
         log.info("Credenciales guardadas (cifradas, DPAPI) en {} — {} entrada(s), default={}",

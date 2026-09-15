@@ -1,9 +1,11 @@
 package com.faro.app.ui;
 
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 
 import com.faro.app.data.CredentialStore;
 import com.faro.app.model.DatabaseEntry;
@@ -12,6 +14,7 @@ import com.faro.app.query.SchemaIntrospector;
 import com.faro.app.ui.SchemaTreeNode.Kind;
 
 import javafx.application.Platform;
+import javafx.collections.ObservableList;
 import javafx.scene.control.CheckBoxTreeItem;
 import javafx.scene.control.TreeItem;
 
@@ -54,10 +57,6 @@ final class DatabaseTreeItem extends CheckBoxTreeItem<Object> {
     private final String schemaFilter;
     private boolean childrenRequested;
 
-    DatabaseTreeItem(DatabaseEntry db, CredentialStore credentials, ConnectionPoolManager pool) {
-        this(db, credentials, pool, "");
-    }
-
     DatabaseTreeItem(DatabaseEntry db, CredentialStore credentials, ConnectionPoolManager pool, String schemaFilter) {
         super(db);
         this.db = db;
@@ -86,7 +85,7 @@ final class DatabaseTreeItem extends CheckBoxTreeItem<Object> {
     }
 
     @Override
-    public javafx.collections.ObservableList<TreeItem<Object>> getChildren() {
+    public ObservableList<TreeItem<Object>> getChildren() {
         if (!childrenRequested) {
             childrenRequested = true;
             requestSchema();
@@ -140,7 +139,7 @@ final class DatabaseTreeItem extends CheckBoxTreeItem<Object> {
             return;
         }
         Thread thread = new Thread(() -> {
-            try (var connection = pool.getConnection(db, creds.get())) {
+            try (var _ = pool.getConnection(db, creds.get())) {
                 Platform.runLater(() -> db.setConnectionStatus(DatabaseEntry.ConnectionStatus.CONNECTED));
             } catch (SQLException | RuntimeException e) {
                 Platform.runLater(() -> db.setConnectionStatus(DatabaseEntry.ConnectionStatus.FAILED));
@@ -156,7 +155,26 @@ final class DatabaseTreeItem extends CheckBoxTreeItem<Object> {
         if (message == null || message.isBlank()) {
             return error.getClass().getSimpleName();
         }
-        return message.lines().findFirst().orElse(message);
+        String firstLine = message.lines().findFirst().orElse(message);
+        return firstLine + encodingHintFor(firstLine);
+    }
+
+    /**
+     * Pista accionable para el error de codificación más común de PostgreSQL
+     * (2026-09-10, reportado en vivo: {@code ERROR: invalid byte sequence for
+     * encoding "UTF8": 0xe9 0x73 0x20} al expandir Tablas/Vistas).
+     *
+     * <p>El mensaje crudo del servidor es correcto pero no dice qué hacer, y el byte
+     * que nombra no le dice nada a nadie que no conozca las tablas de codificación.
+     * Como Faro ahora tiene la opción concreta que lo resuelve
+     * ({@code DatabaseEntry#clientEncoding}), el error apunta directo a ella en vez
+     * de dejar al usuario con un callejón sin salida. Devuelve cadena vacía para
+     * cualquier otro error — no se toca nada más.
+     */
+    private static String encodingHintFor(String message) {
+        return message.contains("invalid byte sequence for encoding")
+                ? " — el texto de esta base no es UTF-8 válido. Editar base → Codificación (prueba LATIN1 o WIN1252)."
+                : "";
     }
 
     /**
@@ -181,14 +199,14 @@ final class DatabaseTreeItem extends CheckBoxTreeItem<Object> {
         if (!schemaFilter.isEmpty()) {
             return filteredCategoryItems();
         }
-        List<TreeItem<Object>> categories = new java.util.ArrayList<>();
+        List<TreeItem<Object>> categories = new ArrayList<>();
         for (Kind kind : Kind.values()) {
             categories.add(new CategoryTreeItem(db, kind, credentials, pool));
         }
         return categories;
     }
 
-    private TreeItem<Object> eagerCategory(Kind kind, List<String> names, java.util.function.Function<String, String> parentTableLookup) {
+    private TreeItem<Object> eagerCategory(Kind kind, List<String> names, Function<String, String> parentTableLookup) {
         TreeItem<Object> categoryItem = new TreeItem<>(new SchemaTreeNode.Category(db, kind, names.size()));
         categoryItem.getChildren().setAll(itemNodes(db, kind, names, parentTableLookup));
         return categoryItem;
@@ -206,7 +224,7 @@ final class DatabaseTreeItem extends CheckBoxTreeItem<Object> {
      */
     private List<TreeItem<Object>> filteredCategoryItems() {
         Map<Kind, List<String>> byKind = SchemaTreeNode.filterSchema(SchemaIntrospector.cachedNamesByKind(db.id()), schemaFilter);
-        List<TreeItem<Object>> categories = new java.util.ArrayList<>();
+        List<TreeItem<Object>> categories = new ArrayList<>();
         for (Kind kind : Kind.values()) {
             List<String> names = byKind.getOrDefault(kind, List.of());
             if (names.isEmpty()) {
@@ -216,7 +234,7 @@ final class DatabaseTreeItem extends CheckBoxTreeItem<Object> {
                 // esté en 0, para que el conteo real quede a la vista).
                 continue;
             }
-            java.util.function.Function<String, String> parentTableLookup = kind == Kind.TRIGGERS
+            Function<String, String> parentTableLookup = kind == Kind.TRIGGERS
                     ? name -> SchemaIntrospector.cachedTriggerParentTable(db.id(), name).orElse(null)
                     : name -> null;
             TreeItem<Object> categoryItem = eagerCategory(kind, names, parentTableLookup);
@@ -228,8 +246,8 @@ final class DatabaseTreeItem extends CheckBoxTreeItem<Object> {
 
     /** Convierte nombres reales en hijos {@code TreeItem<SchemaTreeNode.Item>} — reusado por {@link #eagerCategory} y por {@link CategoryTreeItem} al terminar su propia carga perezosa. {@code parentTableLookup} solo se consulta para {@code Kind#TRIGGERS} (ver {@code SchemaTreeNode.Item#parentTable}). */
     static List<TreeItem<Object>> itemNodes(
-            DatabaseEntry db, Kind kind, List<String> names, java.util.function.Function<String, String> parentTableLookup) {
-        List<TreeItem<Object>> items = new java.util.ArrayList<>();
+            DatabaseEntry db, Kind kind, List<String> names, Function<String, String> parentTableLookup) {
+        List<TreeItem<Object>> items = new ArrayList<>();
         for (String name : names) {
             String parentTable = kind == Kind.TRIGGERS ? parentTableLookup.apply(name) : null;
             items.add(new TreeItem<>(new SchemaTreeNode.Item(db, kind, name, parentTable)));

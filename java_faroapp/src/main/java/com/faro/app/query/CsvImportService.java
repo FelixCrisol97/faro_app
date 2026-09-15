@@ -1,5 +1,6 @@
 package com.faro.app.query;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -55,7 +56,19 @@ public final class CsvImportService {
                 log.info("Importando CSV '{}' a '{}'.'{}'", file.getFileName(), database.alias(), tableName);
                 validateIdentifier(tableName);
 
-                List<List<String>> rows = CsvParser.parse(file);
+                CsvParser.Result parsed = CsvParser.parse(file);
+                List<List<String>> rows = parsed.rows();
+                // La codificación va al log SIEMPRE, no solo cuando no es UTF-8: si algún
+                // día los acentos salen raros dentro de la tabla, lo primero que hay que
+                // saber es con qué se leyó el archivo (2026-09-14, hallazgo A8).
+                log.info("'{}' leído como {} — {} línea(s).",
+                        file.getFileName(), parsed.charset().displayName(), rows.size());
+                if (!parsed.charset().equals(StandardCharsets.UTF_8)) {
+                    // Visible en el diálogo, no solo en el log: si el archivo no era UTF-8 y
+                    // se leyó con otra cosa, el usuario tiene que enterarse ANTES de ver los
+                    // acentos raros dentro de su tabla. Ver CsvImportDialogController.
+                    updateMessage("leído como " + parsed.charset().displayName() + ", no era UTF-8");
+                }
                 if (rows.size() < 2) {
                     log.warn("Import abortado — '{}' tiene {} línea(s), se necesitan al menos 2 (encabezado + 1 fila).",
                             file.getFileName(), rows.size());

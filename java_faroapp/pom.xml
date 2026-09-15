@@ -112,10 +112,30 @@
 
   <build>
     <plugins>
+      <!-- -Xlint (2026-09-14, hallazgo C9 de ANALISIS_OPTIMIZACION_ESTRUCTURA.md) — el
+           build no tenía NINGUNA herramienta de análisis estático, ni siquiera las
+           advertencias que javac ya sabe dar de fábrica. Es gratis y sin dependencias
+           nuevas.
+
+           Las dos categorías desactivadas, con su motivo concreto:
+             - serial: pide serialVersionUID en todo lo Serializable. Ninguna clase de
+               este proyecto se serializa (la persistencia es JSON explícito, ver
+               ConnectionRegistryStore); serían decenas de advertencias sin ningún
+               defecto real detrás.
+             - this-escape: avisa de llamadas a métodos sobrescribibles desde un
+               constructor. Es inherente a extender TreeCell/ListCell de JavaFX, que
+               es justo lo que hacen ConnectionTreeCell y ExecutionTableFactory por
+               diseño — no hay forma de evitarlo sin dejar de usar el patrón de celda
+               de JavaFX. -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.13.0</version>
+        <configuration>
+          <compilerArgs>
+            <arg>-Xlint:all,-serial,-this-escape</arg>
+          </compilerArgs>
+        </configuration>
       </plugin>
 
       <!-- `mvn javafx:run` — arranca la app sin empaquetar; el runtime de
@@ -135,6 +155,13 @@
            solo virtualiza qué se RENDERIZA). 4g es un margen explícito, no
            una solución mágica — si algún equipo real tiene menos RAM
            disponible, bajar este número.
+
+           2026-09-14: la tercera copia de ese mismo resultado también se
+           eliminó — pgJDBC materializaba el ResultSet COMPLETO porque el
+           cursor exige autoCommit=false y nunca se desactivaba (ver
+           QueryExecutionService#shouldUseCursor). El margen de 4g se deja
+           igual: sigue haciendo falta para tener el resultado cargado en
+           la tabla, que es lo que de verdad ocupa.
 
            -XX:+UseG1GC -XX:+UseStringDeduplication (ver
            OPTIMIZACION_RENDIMIENTO.md) — G1 ya es el recolector por

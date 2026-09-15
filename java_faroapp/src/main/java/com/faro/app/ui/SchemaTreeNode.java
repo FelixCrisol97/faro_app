@@ -1,8 +1,9 @@
 package com.faro.app.ui;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
-import java.util.Locale;
+import java.util.Map;
 
 import com.faro.app.model.DatabaseEntry;
 
@@ -92,16 +93,16 @@ public final class SchemaTreeNode {
      * conocido (solo busca en categorías ya expandidas al menos una vez, con
      * esquema en caché — ver {@code SchemaIntrospector#cachedNamesByKind}).
      */
-    public static java.util.Map<Kind, List<String>> filterSchema(java.util.Map<Kind, List<String>> namesByKind, String filter) {
-        String needle = filter == null ? "" : filter.trim().toLowerCase(Locale.ROOT);
+    public static Map<Kind, List<String>> filterSchema(Map<Kind, List<String>> namesByKind, String filter) {
+        String needle = filter == null ? "" : filter.trim();
         if (needle.isEmpty()) {
             return namesByKind;
         }
-        java.util.Map<Kind, List<String>> filtered = new java.util.EnumMap<>(Kind.class);
+        Map<Kind, List<String>> filtered = new EnumMap<>(Kind.class);
         for (Kind kind : Kind.values()) {
             List<String> matching = new ArrayList<>();
             for (String name : namesByKind.getOrDefault(kind, List.of())) {
-                if (name.toLowerCase(Locale.ROOT).contains(needle)) {
+                if (containsIgnoreCase(name, needle)) {
                     matching.add(name);
                 }
             }
@@ -110,8 +111,58 @@ public final class SchemaTreeNode {
         return filtered;
     }
 
-    /** {@code true} si {@code filter} calza al menos un nombre de {@code namesByKind} (cualquier categoría) — para decidir si una base entra a la lista solo por su esquema, no por su alias. */
-    public static boolean matchesAnyName(java.util.Map<Kind, List<String>> namesByKind, String filter) {
-        return filterSchema(namesByKind, filter).values().stream().anyMatch(names -> !names.isEmpty());
+    /**
+     * {@code true} si {@code filter} calza al menos un nombre de
+     * {@code namesByKind} (cualquier categoría) — para decidir si una base entra a
+     * la lista solo por su esquema, no por su alias.
+     *
+     * <p><b>Sale en la PRIMERA coincidencia</b> (2026-09-08, hallazgo B2 de
+     * {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}). Antes esto era
+     * {@code filterSchema(...).values().stream().anyMatch(names -> !names.isEmpty())}:
+     * construía el mapa filtrado COMPLETO —un {@code ArrayList} por categoría, más
+     * un {@code toLowerCase} por cada nombre de cada categoría— y recién entonces
+     * preguntaba si alguna lista había quedado no vacía. Como
+     * {@code ConnectionTreeBuilder#matches} llama acá una vez por base y por cada
+     * TECLA del buscador, con bases DEV grandes (~3,000 tablas) y varias decenas de
+     * bodegas registradas eso eran cientos de miles de cadenas temporales por
+     * palabra escrita, en el hilo de la UI.
+     */
+    public static boolean matchesAnyName(Map<Kind, List<String>> namesByKind, String filter) {
+        String needle = filter == null ? "" : filter.trim();
+        for (List<String> names : namesByKind.values()) {
+            if (needle.isEmpty()) {
+                // Filtro vacío: mismo criterio exacto que antes — no es "el mapa tiene
+                // categorías", es "alguna categoría tiene al menos un nombre" (un mapa con
+                // las 6 categorías vacías daba false y tiene que seguir dándolo).
+                if (!names.isEmpty()) {
+                    return true;
+                }
+                continue;
+            }
+            for (String name : names) {
+                if (containsIgnoreCase(name, needle)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * {@code contains} insensible a mayúsculas SIN copiar el texto —
+     * {@code String#regionMatches(true, ...)} compara en el lugar en vez de
+     * materializar una versión en minúsculas de cada nombre solo para descartarla
+     * enseguida. Misma técnica que {@code MainController#indexOfIgnoreCase}, que
+     * salió del hallazgo #9 de {@code AUDITORIA_BUGS_RENDIMIENTO.md} — es el mismo
+     * problema ("no copies para comparar") en otro archivo.
+     */
+    static boolean containsIgnoreCase(String haystack, String needle) {
+        int lastPossibleStart = haystack.length() - needle.length();
+        for (int i = 0; i <= lastPossibleStart; i++) {
+            if (haystack.regionMatches(true, i, needle, 0, needle.length())) {
+                return true;
+            }
+        }
+        return false;
     }
 }

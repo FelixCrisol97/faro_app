@@ -69,4 +69,66 @@ class SchemaTreeNodeTest {
         assertTrue(SchemaTreeNode.matchesAnyName(sampleInfo(), "estado_pedido"));
         assertFalse(SchemaTreeNode.matchesAnyName(sampleInfo(), "zzz_no_existe"));
     }
+
+    // ---- Cortocircuito de matchesAnyName (2026-09-08, hallazgo B2 de
+    // ANALISIS_OPTIMIZACION_ESTRUCTURA.md) ----
+    //
+    // El método pasó de "armar el mapa filtrado completo y después preguntar si algo
+    // quedó" a "salir en la primera coincidencia". Estos tests fijan que la SEMÁNTICA
+    // no cambió — que es lo único que hace segura esa reescritura.
+
+    private static Map<Kind, List<String>> emptyInfo() {
+        return Map.of(
+                Kind.TABLES, List.of(),
+                Kind.VIEWS, List.of(),
+                Kind.FUNCTIONS, List.of(),
+                Kind.PROCEDURES, List.of(),
+                Kind.TRIGGERS, List.of(),
+                Kind.TYPES, List.of());
+    }
+
+    /**
+     * El caso que más fácil se rompía al reescribir: con filtro vacío la respuesta NO
+     * es "el mapa tiene categorías" sino "alguna categoría tiene al menos un nombre".
+     * Un mapa con las 6 categorías presentes pero vacías (una base expandida que
+     * todavía no cargó nada) tiene que dar {@code false}, igual que antes.
+     */
+    @Test
+    void matchesAnyNameWithEmptyFilterIsFalseWhenEveryCategoryIsEmpty() {
+        assertFalse(SchemaTreeNode.matchesAnyName(emptyInfo(), ""));
+        assertFalse(SchemaTreeNode.matchesAnyName(emptyInfo(), "   "));
+        assertFalse(SchemaTreeNode.matchesAnyName(emptyInfo(), null));
+        assertFalse(SchemaTreeNode.matchesAnyName(Map.of(), ""));
+    }
+
+    @Test
+    void matchesAnyNameWithEmptyFilterIsTrueWhenSomeCategoryHasNames() {
+        assertTrue(SchemaTreeNode.matchesAnyName(sampleInfo(), ""));
+        assertTrue(SchemaTreeNode.matchesAnyName(Map.of(Kind.TABLES, List.of("productos")), ""));
+    }
+
+    @Test
+    void matchesAnyNameIsCaseInsensitiveAndMatchesInTheMiddle() {
+        assertTrue(SchemaTreeNode.matchesAnyName(sampleInfo(), "AUDITORIA"));
+        assertTrue(SchemaTreeNode.matchesAnyName(sampleInfo(), "Ventas"));
+        assertTrue(SchemaTreeNode.matchesAnyName(sampleInfo(), "tenc"));
+    }
+
+    /** Se recorta igual que antes — el buscador del árbol manda el texto crudo del campo. */
+    @Test
+    void matchesAnyNameTrimsTheFilter() {
+        assertTrue(SchemaTreeNode.matchesAnyName(sampleInfo(), "  produc  "));
+    }
+
+    @Test
+    void containsIgnoreCaseMatchesAnywhereWithoutCopying() {
+        assertTrue(SchemaTreeNode.containsIgnoreCase("productos", "produc"));
+        assertTrue(SchemaTreeNode.containsIgnoreCase("productos", "DUCT"));
+        assertTrue(SchemaTreeNode.containsIgnoreCase("productos", "productos"));
+        assertTrue(SchemaTreeNode.containsIgnoreCase("productos", ""));
+        assertFalse(SchemaTreeNode.containsIgnoreCase("productos", "zzz"));
+        // Aguja más larga que el texto — sin esto sería un IndexOutOfBounds, no un false.
+        assertFalse(SchemaTreeNode.containsIgnoreCase("ab", "abcdef"));
+        assertFalse(SchemaTreeNode.containsIgnoreCase("", "a"));
+    }
 }

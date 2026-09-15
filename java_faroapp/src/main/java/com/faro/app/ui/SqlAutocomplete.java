@@ -66,7 +66,26 @@ public final class SqlAutocomplete {
     /** El popup actual, si hay uno mostrándose — para poder cerrarlo si se pide otro antes de que el usuario elija algo. */
     private static ContextMenu activeMenu;
 
+    /** Cuántas sugerencias como máximo — ver el comentario en {@link #show}. */
+    private static final int MAX_SUGGESTIONS = 50;
+
     private SqlAutocomplete() {
+    }
+
+    /**
+     * {@code name.startsWith(prefix)} insensible a mayúsculas SIN copiar el nombre
+     * (2026-09-10, hallazgo B9). Antes era
+     * {@code name.toUpperCase(Locale.ROOT).startsWith(prefixUpper)}, que asigna una
+     * cadena nueva por cada nombre de tabla/vista/columna del esquema y en cada
+     * invocación de Ctrl+Espacio — con miles de tablas, miles de cadenas que mueren de
+     * inmediato, en el hilo de la UI y justo antes de mostrar el popup.
+     *
+     * <p>{@code regionMatches(true, ...)} compara en el lugar. Misma técnica que
+     * {@code MainController#indexOfIgnoreCase} y {@code SchemaTreeNode#containsIgnoreCase}
+     * — es el mismo problema ("no copies para comparar") en el tercer archivo.
+     */
+    private static boolean startsWithIgnoreCase(String name, String prefix) {
+        return name.regionMatches(true, 0, prefix, 0, prefix.length());
     }
 
     public static void show(CodeArea codeArea, DatabaseEntry activeDb, CredentialStore credentials, ConnectionPoolManager pool) {
@@ -93,9 +112,14 @@ public final class SqlAutocomplete {
         // nombre del esquema: cuadrático. Contra una base DEV real de cliente (miles de
         // tablas) y un prefijo corto de una o dos letras —justo cuando el autocompletado
         // más sirve— eso es medio millón de comparaciones en el hilo de la UI antes de
-        // que el popup aparezca. El Set mantiene el orden de inserción igual que la
-        // lista (importa: primero palabras clave, después tablas, después columnas) y
-        // deja el contains en O(1); la deduplicación ahora es implícita.
+        // que el popup aparezca. El Set deja el contains en O(1) y la deduplicación
+        // queda implícita.
+        //
+        // (Corrección 2026-09-10, hallazgo B9: una versión anterior de este comentario
+        // justificaba el LinkedHashSet además por conservar el orden de inserción
+        // "primero palabras clave, después tablas, después columnas". Eso no es cierto
+        // desde que existe el `sort` alfabético de más abajo, que descarta ese orden por
+        // completo. La razón válida es solo el contains en O(1).)
         Set<String> matches = new LinkedHashSet<>(SqlFormatter.KEYWORDS.stream()
                 .filter(keyword -> keyword.startsWith(prefixUpper) && !keyword.equals(prefixUpper))
                 .toList());
@@ -104,7 +128,7 @@ public final class SqlAutocomplete {
             Optional<SchemaStructure> schema = SchemaIntrospector.cached(activeDb.id());
             if (schema.isPresent()) {
                 for (String name : schema.get().queryableNames()) {
-                    if (name.toUpperCase(Locale.ROOT).startsWith(prefixUpper)) {
+                    if (startsWithIgnoreCase(name, prefix)) {
                         matches.add(name);
                     }
                 }
@@ -115,7 +139,7 @@ public final class SqlAutocomplete {
                 // autocompletado repetido sobre esa tabla) — se va llenando solo, no
                 // completo desde el primer uso. Ver SchemaIntrospector#cachedColumnNames.
                 for (String name : SchemaIntrospector.cachedColumnNames(activeDb.id())) {
-                    if (name.toUpperCase(Locale.ROOT).startsWith(prefixUpper)) {
+                    if (startsWithIgnoreCase(name, prefix)) {
                         matches.add(name);
                     }
                 }
@@ -130,6 +154,17 @@ public final class SqlAutocomplete {
         }
         List<String> sortedMatches = new ArrayList<>(matches);
         sortedMatches.sort(String.CASE_INSENSITIVE_ORDER);
+        // Tope real de sugerencias (2026-09-10, hallazgo B9) — antes se creaba un
+        // MenuItem por cada coincidencia, sin límite. Con una base DEV de cliente (miles
+        // de tablas) y un prefijo de una letra, eso son miles de nodos con su estilo y su
+        // handler: el popup tarda en aparecer y, aunque apareciera al instante, una lista
+        // de 3,000 nombres no sirve para elegir nada. Cortado y ordenado alfabéticamente,
+        // así que lo que se muestra es estable y predecible; para afinar, el usuario
+        // escribe una letra más.
+        int totalMatches = sortedMatches.size();
+        if (totalMatches > MAX_SUGGESTIONS) {
+            sortedMatches = sortedMatches.subList(0, MAX_SUGGESTIONS);
+        }
 
         ContextMenu menu = new ContextMenu();
         for (String candidate : sortedMatches) {
@@ -139,6 +174,15 @@ public final class SqlAutocomplete {
                 codeArea.moveTo(replaceStart + candidate.length());
             });
             menu.getItems().add(item);
+        }
+        if (totalMatches > MAX_SUGGESTIONS) {
+            // Deshabilitado a propósito: no es una sugerencia, es la explicación de por
+            // qué la lista se corta. Sin esto, ver 50 nombres cuando hay 3,000 parecería
+            // que el esquema está incompleto.
+            MenuItem more = new MenuItem(
+                    "… y " + (totalMatches - MAX_SUGGESTIONS) + " más — escribe otra letra para afinar");
+            more.setDisable(true);
+            menu.getItems().add(more);
         }
 
         activeMenu = menu;

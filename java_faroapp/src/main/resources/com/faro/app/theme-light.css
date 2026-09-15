@@ -50,6 +50,15 @@
     -token-accent-active: #4338CA;
     -token-accent-soft: #EEF2FF;
     -token-accent-soft-text: #4338CA;
+    /* Color de texto legible ENCIMA del acento (2026-09-10) —
+       Theme#applyAccentOverride lo sobrescribe inline con el del acento activo;
+       este es el default por si alguna Scene no pasara por ahí. Ver
+       AccentPalette.Tokens#onAccent. */
+    -token-accent-on: #FFFFFF;
+    /* Palabra reservada del editor SQL — para los 6 acentos de color vale lo mismo
+       que -token-accent-base; Theme#applyAccentOverride lo sobrescribe con el del
+       acento activo. Ver AccentPalette.Tokens#editorKeyword. */
+    -token-editor-keyword: #6366F1;
 
     /* Selección de texto del editor SQL — token propio, NO reutiliza
        accent-soft. El demo web usa accent-soft para `::selection`, pero ahí

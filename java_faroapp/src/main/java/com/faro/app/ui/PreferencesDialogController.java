@@ -150,12 +150,26 @@ public class PreferencesDialogController {
         return null;
     }
 
-    /** Un círculo de color por {@link AccentPalette#NAMES} — clic selecciona y aplica de inmediato (ver {@link #reapply}). El seleccionado lleva un anillo (borde), no un cambio de tamaño/relleno, para que los 6 sigan alineados. */
+    /**
+     * Un círculo de color por {@link AccentPalette#NAMES} — clic selecciona y aplica de
+     * inmediato (ver {@link #reapply}). El seleccionado lleva un anillo (borde), no un
+     * cambio de tamaño/relleno, para que todos sigan alineados.
+     *
+     * <p><b>Contorno en TODOS los círculos</b> (2026-09-12): el swatch usa siempre el
+     * valor de tema claro del acento, a propósito, para que la muestra no cambie de
+     * color al cambiar de tema. Eso funcionó bien mientras los 6 acentos eran de color,
+     * y se rompió al agregar "negro": su muestra es {@code #18181B}, que es
+     * EXACTAMENTE el {@code -token-surface} del tema oscuro, o sea el fondo de este
+     * mismo diálogo — contraste 1.00:1, el círculo desaparecía por completo. Un
+     * contorno fino resuelve el caso general (cualquier acento futuro cercano al fondo
+     * de alguno de los dos temas) en vez de parchear solo el negro.
+     */
     private void buildAccentSwatches() {
         accentSwatchesBox.getChildren().clear();
         accentSwatchNodes.clear();
         for (String name : AccentPalette.NAMES) {
             Circle dot = new Circle(9, Color.web(AccentPalette.swatchHex(name)));
+            dot.getStyleClass().add("pref-accent-dot");
             StackPane swatch = new StackPane(dot);
             swatch.getStyleClass().add("pref-accent-swatch");
             swatch.setCursor(Cursor.HAND);

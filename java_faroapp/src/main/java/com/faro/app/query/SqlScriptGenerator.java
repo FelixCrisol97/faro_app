@@ -1,5 +1,6 @@
 package com.faro.app.query;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -65,7 +66,7 @@ public final class SqlScriptGenerator {
     public static String generateCreateTableScript(String table, List<ColumnMetadata> columns) {
         List<String> lines = columns.stream()
                 .map(c -> columnDefinitionLine(c.name(), c.typeString(), !c.nullable()))
-                .collect(Collectors.toCollection(java.util.ArrayList::new));
+                .collect(Collectors.toCollection(ArrayList::new));
         List<String> pkColumns = columns.stream().filter(ColumnMetadata::isPrimaryKey).map(ColumnMetadata::name).toList();
         if (!pkColumns.isEmpty()) {
             lines.add("    PRIMARY KEY (" + String.join(", ", pkColumns) + ")");

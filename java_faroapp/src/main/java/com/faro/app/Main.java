@@ -76,6 +76,15 @@ public class Main extends Application {
     /** Cierra los pools de HikariCP antes de que el JVM salga — si no, sus hilos internos pueden quedar colgados. */
     @Override
     public void stop() {
+        // controller puede ser null si start() lanzó antes de asignarlo (FXML corrupto,
+        // un recurso faltante en el empaquetado — justo lo que loadFonts() ya prevé unas
+        // líneas más abajo). JavaFX llama stop() igual en ese caso, y sin este chequeo el
+        // NPE de acá TAPABA en el log el error real del arranque, que es lo contrario de
+        // la trazabilidad completa que motivó todo el logging (2026-09-10, hallazgo A12).
+        if (controller == null) {
+            log.warn("stop() sin controlador — el arranque falló antes de cargar la ventana; no hay nada que guardar.");
+            return;
+        }
         log.info("Cerrando Faro — liberando pools de conexión.");
         controller.shutdown();
     }

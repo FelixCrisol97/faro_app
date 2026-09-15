@@ -1,6 +1,7 @@
 package com.faro.app.ui;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 import com.faro.app.data.CredentialStore;
@@ -9,7 +10,6 @@ import com.faro.app.query.ConnectionPoolManager;
 import com.faro.app.query.SchemaIntrospector;
 import com.faro.app.ui.SchemaTreeNode.Kind;
 
-import javafx.application.Platform;
 import javafx.scene.control.TreeItem;
 
 /**
@@ -84,11 +84,11 @@ final class CategoryTreeItem extends TreeItem<Object> {
         }
         showLoading();
         SchemaIntrospector.loadCategoryInBackground(db, credentials, pool, kind,
-                names -> Platform.runLater(() -> applyNames(names)),
+                names -> applyNames(names),
                 // Mismo motivo que DatabaseTreeItem#requestSchema — sin esto la fila se
                 // quedaba pegada en "Cargando…" para siempre si el fetch de esta categoría
                 // fallaba, indistinguible de uno que de verdad seguía en curso.
-                error -> Platform.runLater(() -> showError(error)));
+                error -> showError(error));
     }
 
     /** Ver {@link #requestCategory()} — Tablas/Vistas comparten un solo fetch de estructura. */
@@ -100,8 +100,8 @@ final class CategoryTreeItem extends TreeItem<Object> {
         }
         showLoading();
         SchemaIntrospector.loadInBackground(db, credentials, pool,
-                structure -> Platform.runLater(() -> applyNames(namesFrom(structure))),
-                error -> Platform.runLater(() -> showError(error)));
+                structure -> applyNames(namesFrom(structure)),
+                error -> showError(error));
     }
 
     private List<String> namesFrom(SchemaIntrospector.SchemaStructure structure) {
@@ -110,7 +110,7 @@ final class CategoryTreeItem extends TreeItem<Object> {
 
     /** Fila con spinner real mientras el fetch está en curso — ver {@code SchemaTreeNode.Loading}. */
     private void showLoading() {
-        super.getChildren().setAll(List.of(new TreeItem<>(new SchemaTreeNode.Loading("Cargando " + kind.label().toLowerCase() + "…"))));
+        super.getChildren().setAll(List.of(new TreeItem<>(new SchemaTreeNode.Loading("Cargando " + kind.label().toLowerCase(Locale.ROOT) + "…"))));
     }
 
     private void showError(Throwable error) {

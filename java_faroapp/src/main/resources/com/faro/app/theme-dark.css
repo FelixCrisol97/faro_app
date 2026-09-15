@@ -43,6 +43,10 @@
     -token-accent-active: #6366F1;
     -token-accent-soft: rgba(129,140,248,.18);
     -token-accent-soft-text: #C7D2FE;
+    /* Ver la nota equivalente en theme-light.css. */
+    -token-accent-on: #FFFFFF;
+    /* Ver la nota equivalente en theme-light.css. */
+    -token-editor-keyword: #818CF8;
 
     /* Selección de texto del editor SQL — token propio, ver la explicación
        completa en theme-light.css. En oscuro el mismo problema aplica

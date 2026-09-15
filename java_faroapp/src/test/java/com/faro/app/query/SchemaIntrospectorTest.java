@@ -165,4 +165,44 @@ class SchemaIntrospectorTest {
         assertEquals(0L, SchemaIntrospector.testGeneration(dbB));
         assertTrue(SchemaIntrospector.testGeneration(dbA) != SchemaIntrospector.testGeneration(dbB));
     }
+
+    /**
+     * {@link SchemaIntrospector#invalidateAll()} (2026-09-08, hallazgo A4 de
+     * {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}) — lo que llama
+     * {@code MainController#onImportConfig} al reemplazar el registro entero, igual
+     * que ya llamaba a {@code pool.closeAll()}.
+     *
+     * <p>Lo que este test fija es la parte que NO es obvia: que además de vaciar las
+     * cachés sube la GENERACIÓN de cada base conocida. Sin eso, un fetch ya en
+     * vuelo contra el servidor viejo volvería a escribir su resultado en una caché
+     * recién limpiada justo después del import — que es exactamente el escenario que
+     * {@code invalidateAll()} existe para evitar. Vaciar los mapas es fácil de ver
+     * leyendo el método; esto no.
+     */
+    @Test
+    void invalidateAllBumpsGenerationOfEveryKnownDatabase() {
+        String dbA = "test-db-all-a-" + UUID.randomUUID();
+        String dbB = "test-db-all-b-" + UUID.randomUUID();
+        // invalidate() es lo que registra una base en el mapa de generaciones — sin
+        // JDBC de por medio, es la única forma de volverla "conocida" desde un test.
+        SchemaIntrospector.invalidate(dbA);
+        SchemaIntrospector.invalidate(dbB);
+        assertEquals(1L, SchemaIntrospector.testGeneration(dbA));
+        assertEquals(1L, SchemaIntrospector.testGeneration(dbB));
+
+        SchemaIntrospector.invalidateAll();
+
+        assertEquals(2L, SchemaIntrospector.testGeneration(dbA));
+        assertEquals(2L, SchemaIntrospector.testGeneration(dbB));
+    }
+
+    /** Una base de la que nunca se supo nada no queda registrada de la nada — {@code invalidateAll()} solo toca lo conocido. */
+    @Test
+    void invalidateAllLeavesAnUnknownDatabaseAtGenerationZero() {
+        String nuncaVista = "test-db-desconocida-" + UUID.randomUUID();
+
+        SchemaIntrospector.invalidateAll();
+
+        assertEquals(0L, SchemaIntrospector.testGeneration(nuncaVista));
+    }
 }

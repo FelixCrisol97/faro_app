@@ -3,6 +3,7 @@ package com.faro.app.ui;
 import com.faro.app.query.ExecutionStatus;
 
 import javafx.beans.binding.Bindings;
+import javafx.beans.value.ChangeListener;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
@@ -54,6 +55,29 @@ public final class ExecutionTableFactory {
          */
         private final Label errorDetail = new Label();
         private final VBox cellRoot;
+        /**
+         * A cuál {@link ExecutionStatus} está enganchado {@link #stateListener} ahora
+         * mismo — mismo patrón que {@code ConnectionTreeCell#statusListenerTarget},
+         * y por la misma razón: una celda de {@code ListView} se recicla para otro
+         * ítem, así que hay que desenganchar del anterior antes de enganchar al
+         * nuevo.
+         *
+         * <p><b>Bug real (2026-09-08, hallazgo A1 de
+         * {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}):</b> antes el listener de
+         * estado se agregaba con una lambda anónima DENTRO de {@link #updateItem},
+         * o sea uno nuevo en cada repintado, y no se quitaba nunca — quedó fuera del
+         * bloque de "desatar SIEMPRE primero" de abajo, que sí cubre las otras 7
+         * propiedades. Dos consecuencias: (a) la celda se recicla de la bodega A a
+         * la B pero el listener viejo, todavía atado al {@code ExecutionStatus} de
+         * A, seguía llamando {@link #applyState} sobre ESTA celda — o sea que el
+         * punto/badge/barra de B pasaban a mostrar el estado de A en cuanto A
+         * terminaba; (b) cada repintado sumaba un listener más al mismo
+         * {@code ExecutionStatus}, y cada uno rehace las 4 pasadas de clases de
+         * estilo de {@code applyState}.
+         */
+        private ExecutionStatus boundStatus;
+        private final ChangeListener<ExecutionStatus.State> stateListener =
+                (obs, oldState, newState) -> applyState(newState);
 
         ExecutionCell() {
             dot.getStyleClass().add("exec-dot");
@@ -128,6 +152,14 @@ public final class ExecutionTableFactory {
             // reciclada que pasa a vacía se queda con bindings vivos al
             // ExecutionStatus de la corrida anterior (mismo criterio que ya
             // tenía la TableView vieja, hallazgo real de /code-review).
+            //
+            // El listener de stateProperty va PRIMERO y por separado (2026-09-08,
+            // hallazgo A1) — no es un binding, así que ninguno de los unbind() de
+            // abajo lo alcanza; ver el javadoc de boundStatus.
+            if (boundStatus != null) {
+                boundStatus.stateProperty().removeListener(stateListener);
+                boundStatus = null;
+            }
             alias.textProperty().unbind();
             host.textProperty().unbind();
             rows.textProperty().unbind();
@@ -156,7 +188,8 @@ public final class ExecutionTableFactory {
                     status.stateProperty()));
 
             applyState(status.stateProperty().get());
-            status.stateProperty().addListener((obs, oldState, newState) -> applyState(newState));
+            boundStatus = status;
+            status.stateProperty().addListener(stateListener);
 
             // Bindeado, no `setText` de una sola vez — la última corrida
             // mostraba siempre "0 ms" en vez del mensaje de error real

@@ -1,10 +1,10 @@
 package com.faro.app.ui;
 
+import java.util.ArrayList;
 import java.util.List;
 
-import javafx.beans.property.SimpleObjectProperty;
 import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
+import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 
@@ -101,21 +101,55 @@ public final class ResultsTableFactory {
 
     public static void populate(
             TableView<Object[]> table, List<String> columnNames, List<Object[]> rows) {
-        table.getColumns().clear();
-
+        List<TableColumn<Object[], ?>> columns = new ArrayList<>(columnNames.size());
         for (int i = 0; i < columnNames.size(); i++) {
-            final int columnIndex = i;
-            TableColumn<Object[], Object> column = new TableColumn<>(columnNames.get(i));
-            column.setCellValueFactory(data -> {
-                Object[] row = data.getValue();
-                Object value = columnIndex < row.length ? row[columnIndex] : null;
-                return new SimpleObjectProperty<>(value);
-            });
-            table.getColumns().add(column);
+            columns.add(buildColumn(columnNames.get(i), i));
         }
+        // setAll de una vez, no clear() + N add() (2026-09-10, hallazgo B3) — cada add
+        // dispara su propio evento de cambio sobre el TableView, que recalcula anchos y
+        // layout de columnas. Con 20 columnas eran 21 recálculos donde alcanza uno.
+        table.getColumns().setAll(columns);
 
         // Un solo wrapper sobre la MISMA lista que ya trae QueryResult — no una
         // ObservableList nueva por fila. Ver el javadoc de la clase.
         table.setItems(FXCollections.observableList(rows));
+    }
+
+    /**
+     * Una columna que lee su valor directo de la fila, <b>sin envolverlo en una
+     * propiedad</b> (2026-09-10, hallazgo B3 de
+     * {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}).
+     *
+     * <p>Antes esto usaba {@code setCellValueFactory(data -> new SimpleObjectProperty<>(valor))}.
+     * {@code TableView} pide el {@code ObservableValue} de una celda cada vez que la
+     * celda se actualiza — en cada pasada de scroll, cada {@code refresh()}, cada
+     * cambio de tamaño — así que eso creaba un {@code SimpleObjectProperty} nuevo por
+     * celda visible y por repintado. Con 25 filas visibles × 20 columnas son ~500
+     * objetos por pulso de render mientras el usuario hace scroll, cada uno con la
+     * infraestructura de listeners que una fila de resultado nunca usa: las filas son
+     * inmutables, ninguna celda necesita avisar de cambios. Es el mismo razonamiento
+     * que ya justificó pasar de {@code ObservableList<Object>} a {@code Object[]} en
+     * {@code OPTIMIZACION_RENDIMIENTO.md} §1.2, aplicado una capa más arriba.
+     *
+     * <p>Leyendo desde el {@code cellFactory} la celda ya tiene la fila a mano
+     * ({@code getTableRow().getItem()}), así que no hace falta ninguna propiedad
+     * intermedia: cero asignaciones por repintado.
+     *
+     * <p>El chequeo contra {@code row.length} se conserva tal cual — cubre el caso ya
+     * documentado de mezclar motores con formas de resultado distintas en una misma
+     * corrida (devuelve celda vacía en vez de {@code IndexOutOfBoundsException}).
+     */
+    private static TableColumn<Object[], ?> buildColumn(String name, int columnIndex) {
+        TableColumn<Object[], Object> column = new TableColumn<>(name);
+        column.setCellFactory(ignored -> new TableCell<>() {
+            @Override
+            protected void updateItem(Object unused, boolean empty) {
+                super.updateItem(unused, empty);
+                Object[] row = empty || getTableRow() == null ? null : getTableRow().getItem();
+                Object value = row != null && columnIndex < row.length ? row[columnIndex] : null;
+                setText(value == null ? null : value.toString());
+            }
+        });
+        return column;
     }
 }

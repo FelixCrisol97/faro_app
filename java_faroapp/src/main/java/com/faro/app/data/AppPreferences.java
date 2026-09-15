@@ -22,7 +22,19 @@ public final class AppPreferences {
     private int defaultPoolSize = 4;
     private int defaultQueryTimeoutSeconds = 30;
     private boolean darkTheme;
-    /** Filas por bloque pedidas al driver JDBC ({@code Statement#setFetchSize}) — ver {@code QueryExecutionService#runOne}. Nota real: PgJDBC solo lo respeta con autocommit desactivado (no es el caso hoy) y lo ignora en silencio en autocommit — el driver de SQL Server sí lo respeta siempre. Se deja igual (no truena, solo no ayuda en Postgres todavía) para no meter cambios de semántica de transacciones solo por esto. */
+    /**
+     * Filas por bloque pedidas al driver JDBC ({@code Statement#setFetchSize}) — ver
+     * {@code QueryExecutionService#runOne}.
+     *
+     * <p><b>Ya tiene efecto en los dos motores</b> (2026-09-14). SQL Server siempre lo
+     * respetó. PostgreSQL lo ignoraba en silencio porque su driver solo usa cursor con
+     * el autocommit desactivado, cosa que la app no hacía — así que el resultado
+     * completo se materializaba dentro del driver antes de empezar a leerlo. Desde
+     * {@code QueryExecutionService#shouldUseCursor}, los scripts de SOLO LECTURA contra
+     * PostgreSQL sí abren cursor; los que escriben siguen en autocommit, para no
+     * convertir un script de varias sentencias en una transacción todo-o-nada que
+     * nadie pidió.
+     */
     private int fetchSize = 500;
     /** Uno de {@link AccentPalette#NAMES} — ver Preferencias → Apariencia. */
     private String accentName = "indigo";
@@ -68,7 +80,7 @@ public final class AppPreferences {
 
     /** Piso duro de {@link com.faro.app.model.DatabaseEntry#MIN_POOL_SIZE} — ver ese javadoc para el motivo real (el respaldo de cancelación necesita una segunda conexión libre). */
     public void setDefaultPoolSize(int value) {
-        defaultPoolSize = Math.max(com.faro.app.model.DatabaseEntry.MIN_POOL_SIZE, value);
+        defaultPoolSize = Math.max(DatabaseEntry.MIN_POOL_SIZE, value);
     }
 
     public int defaultQueryTimeoutSeconds() {

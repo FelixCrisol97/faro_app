@@ -3,6 +3,7 @@ package com.faro.app.ui;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 import com.faro.app.data.ConnectionRegistry;
 import com.faro.app.data.CredentialStore;
@@ -28,9 +29,14 @@ public final class ConnectionTreeBuilder {
     private ConnectionTreeBuilder() {
     }
 
-    public static TreeItem<Object> buildRoot(ConnectionRegistry registry, CredentialStore credentials, ConnectionPoolManager pool) {
-        return buildRoot(registry, "", credentials, pool);
-    }
+    /**
+     * Etiqueta del encabezado de las bases sin grupo — es el VALOR del
+     * {@code TreeItem} (un {@code String} suelto, ver {@code ConnectionTreeCell}),
+     * así que también es su identidad para recordar si estaba expandido o no
+     * ({@link #buildRoot(ConnectionRegistry, String, CredentialStore,
+     * ConnectionPoolManager, Set)}).
+     */
+    public static final String UNGROUPED_HEADER = "Sin grupo";
 
     /**
      * {@code filterText} vacío se comporta exactamente igual que
@@ -49,6 +55,36 @@ public final class ConnectionTreeBuilder {
      */
     public static TreeItem<Object> buildRoot(
             ConnectionRegistry registry, String filterText, CredentialStore credentials, ConnectionPoolManager pool) {
+        return buildRoot(registry, filterText, credentials, pool, null);
+    }
+
+    /**
+     * {@code expandedValues} — qué filas de grupo tienen que quedar abiertas en el
+     * árbol nuevo. {@code null} (primer armado, al arrancar la app) abre todos los
+     * grupos, que es el comportamiento de siempre; un conjunto abre EXACTAMENTE
+     * esos.
+     *
+     * <p><b>Por qué existe</b> (2026-09-10, reporte del usuario: "me despliega todas
+     * las BD, cuando tenía todas sin desplegar"): este método ponía
+     * {@code setExpanded(true)} fijo en cada grupo y en el encabezado "Sin grupo",
+     * sin excepción. Como {@code MainController#refreshTree} tira el árbol entero y
+     * lo reconstruye con este método en cada cambio —agregar una base, editarla,
+     * borrarla, moverla de grupo, importar configuración, y en CADA TECLA del
+     * buscador— cualquier grupo que el usuario hubiera cerrado a mano se volvía a
+     * abrir solo al siguiente cambio. Con ~18 grupos como los del reporte, eso
+     * convierte el panel en algo inservible después de cualquier acción.
+     *
+     * <p>Se recuerda el estado de <b>grupos</b>, no de filas de base: expandir una
+     * fila de base dispara su carga perezosa de esquema y una conexión de prueba
+     * (ver {@code DatabaseTreeItem#requestSchema}), así que restaurarla en cada
+     * tecla del buscador reabriría el hallazgo #1 de
+     * {@code AUDITORIA_BUGS_RENDIMIENTO.md}. {@code MainController} sí restaura las
+     * filas de base cuando el rebuild NO viene del buscador — ver
+     * {@code MainController#refreshTree}.
+     */
+    public static TreeItem<Object> buildRoot(
+            ConnectionRegistry registry, String filterText, CredentialStore credentials, ConnectionPoolManager pool,
+            Set<Object> expandedValues) {
         String filter = filterText == null ? "" : filterText.trim().toLowerCase(Locale.ROOT);
 
         TreeItem<Object> root = new TreeItem<>("root");
@@ -60,7 +96,7 @@ public final class ConnectionTreeBuilder {
                 continue;
             }
             TreeItem<Object> serverItem = new TreeItem<>(server);
-            serverItem.setExpanded(true);
+            serverItem.setExpanded(shouldExpand(expandedValues, server));
             for (DatabaseEntry db : matching) {
                 serverItem.getChildren().add(databaseItem(db, filter, credentials, pool));
             }
@@ -70,8 +106,8 @@ public final class ConnectionTreeBuilder {
         List<DatabaseEntry> matchingUngrouped =
                 registry.ungroupedDatabases().stream().filter(db -> matches(db, filter)).toList();
         if (!matchingUngrouped.isEmpty()) {
-            TreeItem<Object> ungroupedHeader = new TreeItem<>("Sin grupo");
-            ungroupedHeader.setExpanded(true);
+            TreeItem<Object> ungroupedHeader = new TreeItem<>(UNGROUPED_HEADER);
+            ungroupedHeader.setExpanded(shouldExpand(expandedValues, UNGROUPED_HEADER));
             for (DatabaseEntry db : matchingUngrouped) {
                 ungroupedHeader.getChildren().add(databaseItem(db, filter, credentials, pool));
             }
@@ -79,6 +115,11 @@ public final class ConnectionTreeBuilder {
         }
 
         return root;
+    }
+
+    /** {@code null} = primer armado, sin nada que recordar todavía: se abre todo, como siempre. Ver {@link #buildRoot(ConnectionRegistry, String, CredentialStore, ConnectionPoolManager, Set)}. */
+    private static boolean shouldExpand(Set<Object> expandedValues, Object value) {
+        return expandedValues == null || expandedValues.contains(value);
     }
 
     private static boolean matches(DatabaseEntry db, String filter) {

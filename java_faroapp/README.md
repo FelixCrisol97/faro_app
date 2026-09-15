@@ -6,7 +6,8 @@ Este documento describe **qué hace la app hoy**, como referencia — no es un h
 
 ## Requisitos y cómo correr
 
-- JDK 21+ (probado con JDK 25) y Maven.
+- **JDK 25 o superior** y Maven. No es "21+": `pom.xml` fija `maven.compiler.release=25`, así que con un JDK 21 el build **falla** (corregido el 2026-09-14 — el README decía 21+ y era incorrecto). El runtime de JavaFX sí es 21 (LTS), que corre sin problema sobre un JDK 25; subirlo a JavaFX 25 tendría que revisarse contra el CSS, porque esta app depende bastante de qué hereda de Modena.
+- Los usuarios finales **no necesitan Java**: el `.exe` portable de `jpackage` lleva su propio runtime embebido (ver "Empaquetado").
 - Desarrollo y ejecución en **Windows nativo** — WSLg no renderiza ventana JavaFX en algunos entornos; no es un problema de Faro, pero el camino recomendado es Windows directo.
 
 Los comandos de abajo son iguales en cmd y en PowerShell **salvo** los que arman
@@ -69,7 +70,16 @@ jpackage --type app-image --input target\dist-input --dest target\dist `
 
 `--type app-image` produce una carpeta (`target\dist\Faro\`, con `Faro.exe` + runtime embebido) copiable a cualquier máquina Windows sin instalar Java — **verificado corriendo el `.exe` real**, ventana y conexión a PostgreSQL/SQL Server confirmadas. Un instalador con asistente (`--type exe`/`--type msi`) necesita **WiX Toolset v3** instalado y en el `PATH`, que no viene con este repo.
 
-**Al transportar la carpeta a otra máquina, comprímela con 7-Zip (o similar) en vez del compresor integrado de Windows ("Enviar a → Carpeta comprimida")** — este último puede dejar el zip incompleto sin ningún error visible cuando la carpeta tiene muchos archivos chicos anidados, como `runtime\` (~123 MB, 300+ archivos). Síntoma si pasa: `Faro.exe` en la máquina destino truena con `"Failed to find JVM in '...\runtime' directory."`. Verifica antes de transferir que el comprimido pese cerca de los ~50 MB esperados (el runtime comprime bien), no ~17 MB (eso significa que `runtime\` se quedó afuera).
+**Al transportar la carpeta a otra máquina, comprímela con 7-Zip o con `tar.exe`, en vez del compresor integrado de Windows ("Enviar a → Carpeta comprimida")** — este último puede dejar el zip incompleto sin ningún error visible cuando la carpeta tiene muchos archivos chicos anidados, como `runtime\` (~123 MB, 300+ archivos). Síntoma si pasa: `Faro.exe` en la máquina destino truena con `"Failed to find JVM in '...\runtime' directory."`.
+
+`tar.exe` (bsdtar) **viene con Windows 10/11**, así que no hace falta instalar nada — es lo que se usó para armar el zip verificado:
+
+```powershell
+cd target\dist
+tar.exe -a -c -f Faro-0.1.0-portable.zip Faro
+```
+
+Verifica antes de transferir que el comprimido pese cerca de los **~61 MB** esperados, no ~17 MB (eso significa que `runtime\` se quedó afuera). Contar entradas es más seguro que mirar el tamaño: `tar.exe -tf Faro-0.1.0-portable.zip` tiene que dar **386** (380 de ellas bajo `Faro/runtime/`).
 
 ## Arquitectura
 
@@ -89,6 +99,12 @@ Barra de menú completa (Archivo/Editar/Consulta/Conexiones/Ver/Herramientas/Ayu
 Árbol de servidores ("grupos", libres y opcionales) → bases de datos (`ConnectionTreeBuilder`/`ConnectionTreeCell`/`ConnectionRegistry`). Cada fila de base muestra: casilla de selección, punto de estado de conexión (con tooltip), alias (clic sencillo marca/desmarca la casilla, doble clic abre Editar) + `host:puerto` como segunda línea, candado de modo (clicable — alterna Solo lectura ↔ Sin restricciones directo, sin abrir ningún diálogo), badge de motor (PG/MSSQL), e ícono de editar siempre visible. Buscador de bases arriba del árbol, junto con "Todas"/"Ninguna" y "+" agregar, todo en una sola fila.
 
 **Grupos** — "Conexiones → Nuevo grupo de conexiones…" crea un grupo vacío; clic derecho en una base → "Mover a grupo…" la mueve a un grupo existente, a "(Sin grupo)", o a uno nuevo (pide el nombre aparte).
+
+**Clic derecho sobre la fila de un grupo** (2026-09-11) — "Marcar/Desmarcar todas las de este grupo" (el botón "Todas" de la barra es global, esto es por grupo), "Renombrar grupo…", "Subir"/"Bajar" y "Ordenar sus bases A-Z". El encabezado "Sin grupo" trae una versión reducida (marcar/desmarcar y ordenar): no es un grupo real sino la ausencia de uno, así que no se puede renombrar ni mover.
+
+**Orden del árbol** — grupos y bases se mueven con "Subir"/"Bajar" del menú contextual, o con **Alt+↑ / Alt+↓** sobre la fila seleccionada. Mover una base la reordena **dentro de su propio grupo**; cambiar de grupo sigue siendo "Mover a grupo…". El orden se guarda en `connections.json` (es el orden de las listas del registro, no hay campo de posición aparte).
+
+**Se eligió menú contextual y no arrastrar-y-soltar** a propósito: `ConnectionTreeCell` tiene 14 manejadores de mouse, varios agregados para cerrar bugs reales de gestos (el doble clic que abría "Editar BD" desde cualquier parte de la fila, el candado, las filas de esquema), y la fila de base consume todo clic primario como red de seguridad. El arrastre queda como posible paso aparte, con su propia verificación en vivo.
 
 **Estado de conexión, sincronizado con conexiones reales, no un botón aparte** — el punto de color se actualiza solo (es una propiedad reactiva de `DatabaseEntry`) cada vez que la carga de esquema o una ejecución de consulta prueban esa base de verdad: verde si conecta, rojo si falla (sin confundir un fallo de conexión con un error de SQL sobre una conexión que sí abrió bien). Persiste entre sesiones (solo verde/rojo, nunca el estado transitorio "Probando…"). Mientras una base tiene una consulta corriendo, su punto pulsa (fundido de opacidad en bucle).
 
@@ -116,13 +132,28 @@ Barra de menú completa (Archivo/Editar/Consulta/Conexiones/Ver/Herramientas/Ayu
 
 **Límite conocido**: solo el esquema por defecto de cada motor (`public` en PostgreSQL, `dbo` en SQL Server) — bases con tablas repartidas en varios esquemas custom no las muestra todas.
 
+**Codificación del cliente, por base** (2026-09-11, solo PostgreSQL) — Agregar/editar base → "Codificación". Déjala en **Automática (UTF-8)** salvo que el esquema falle con `invalid byte sequence for encoding "UTF8"`. Ese error lo tira el **servidor**, no Faro: la base guarda texto que no es UTF-8 válido, lo típico es una creada con codificación `SQL_ASCII` —que PostgreSQL acepta sin validar— con contenido en LATIN1/Windows-1252 adentro. Poniendo la codificación REAL de los datos, el servidor deja de intentar una conversión imposible y el driver decodifica con esa misma codificación, así que los acentos salen bien en vez de romper la consulta. Internamente pone `client_encoding` **más `allowEncodingChanges=true`**, que es obligatorio: sin esa bandera pgJDBC **aborta la conexión** al detectar que `client_encoding` dejó de ser UTF8. El mensaje de error del árbol apunta directo a esta opción. **Sin verificar todavía contra una base con este problema.**
+
+**Descubrir bases** (menú Conexiones, o clic derecho en una base → "Descubrir bases en esta IP…"):
+
+- Las bases **ya registradas** salen en la lista pero **apagadas y con "— ya agregada"**: se muestran para que sepas que el escaneo sí las encontró, y no se pueden volver a agregar. Antes el diálogo no recibía el registro, así que listaba todo como nuevo y agregarlas otra vez creaba duplicados.
+- Botones **Todas / Ninguna** sobre los resultados; solo tocan las que de verdad se pueden agregar.
+- **`postgres` queda fuera** del escaneo, igual que SQL Server ya saltaba `master`/`tempdb`/`model`/`msdb`. También se omiten las bases que no aceptan conexión y las de SQL Server que no están ONLINE.
+- **"Descubrir bases en esta IP…" deja las nuevas en el MISMO grupo** que la base desde la que escaneaste (2026-09-11) — son bases del mismo servidor. Si la de origen está suelta, las nuevas también. El del menú Conexiones no parte de ninguna base, así que sigue dejándolas en "Sin grupo".
+
 ## Editor SQL
 
-`CodeArea` con resaltado de sintaxis (palabras clave/cadenas/números/comentarios) y números de línea, en pestañas independientes (`Ctrl+T` nueva pestaña, "Abrir archivo .sql…" abre cada archivo en su propia pestaña, "Guardar"/"Guardar como…" sobre la pestaña activa). Cerrar una pestaña, la ventana, o "Archivo → Salir" con cambios sin guardar pregunta antes de descartarlos.
+`CodeArea` con resaltado de sintaxis (palabras clave/cadenas/números/comentarios de línea y de bloque) y números de línea, en pestañas independientes (`Ctrl+T` nueva pestaña, "Abrir archivo .sql…" abre cada archivo en su propia pestaña, "Guardar"/"Guardar como…" sobre la pestaña activa). Cerrar una pestaña, la ventana, o "Archivo → Salir" con cambios sin guardar pregunta antes de descartarlos.
+
+**Cada pestaña dice contra qué base va a correr** (2026-09-11) — encabezado de dos líneas: el nombre arriba (o el del archivo si se guardó) y la base debajo, en letra chica monoespaciada. Una base marcada muestra su alias, varias muestran "N bases", ninguna muestra "sin base seleccionada" — que antes solo se descubría al presionar Ejecutar. En la pestaña **activa** la segunda línea sigue las casillas del árbol en vivo, no la selección guardada.
+
+**El resaltado se calcula fuera del hilo de la interfaz** — con un script grande (un dump pegado, o un `INSERT` generado de miles de líneas, algo que esta misma app produce) recorrer todo el documento con regex en cada pausa del tecleo se sentía como que el editor se trababa. Si sigues escribiendo mientras un cálculo está en vuelo, el resultado viejo se descarta en vez de pintar colores corridos respecto del texto actual.
+
+**Una sola lista de palabras reservadas** — el resaltado, el autocompletado y "Formatear SQL" comparten `SqlFormatter.KEYWORDS`. Antes el resaltado tenía su propia lista paralela y las dos ya habían divergido: 26 palabras (`EXEC`, `PROCEDURE`, `DECLARE`, `BEGIN`, `COMMIT`, `TRIGGER`…) se autocompletaban pero nunca se resaltaban.
 
 - **Buscar en el script** (`Ctrl+F`) — barra de búsqueda insensible a mayúsculas, circular (da la vuelta al llegar al final).
 - **Formatear SQL** (`Ctrl+L`) — mayúsculas en palabras clave + salto de línea antes de las cláusulas principales; nunca toca el contenido de literales de texto, identificadores entre comillas/corchetes ni comentarios (tokenizador dedicado, no un reemplazo de texto ingenuo).
-- **Autocompletado** (`Ctrl+Espacio`) — sugiere palabras clave SQL que empiecen con lo escrito antes del cursor. Limitado a palabras clave, no nombres reales de tabla/columna.
+- **Autocompletado** (`Ctrl+Espacio`) — palabras clave SQL **y** nombres reales de tabla/vista/columna de la primera base marcada, con lo que ya esté en caché de esa base (comparte el mismo fetch que el explorador de esquema; expandir una categoría ahí también alimenta esto). Corta en 50 sugerencias y avisa cuántas quedaron fuera — con una base de miles de tablas y un prefijo de una letra, una lista completa no sirve para elegir nada.
 - **Zoom del editor** — `Ctrl +`/`Ctrl -`/`Ctrl 0` y `Ctrl` + rueda del mouse/trackpad, controla el tamaño de fuente SOLO del editor (`AppPreferences#editorFontSize`, también ajustable como spinner en Preferencias → Apariencia). Independiente del tamaño de fuente del resto de la interfaz (ver "Apariencia" más abajo).
 - Clic derecho en una base del árbol → "Nueva consulta para esta base" marca esa base y abre una pestaña ya asociada a ella, sin tener que ir a buscarla después.
 - **Cada pestaña recuerda su propia selección de bases** — las casillas marcadas en el árbol son POR PESTAÑA, no un estado global compartido: cambiar de pestaña cambia solas las casillas marcadas para reflejar la selección de esa pestaña. Una pestaña nueva (Ctrl+T/"+") hereda la selección de la que estaba activa; "Nueva consulta para esta base" y "Generar…" del explorador de esquema asocian la pestaña nueva a una sola base específica.
@@ -136,7 +167,7 @@ Barra de menú completa (Archivo/Editar/Consulta/Conexiones/Ver/Herramientas/Ayu
 - **Cancelación real** — botón por fila o "Consulta → Cancelar ejecución" (menú), vía `Statement.cancel()`, con respaldo real `KILL <spid>` (SQL Server) / `pg_cancel_backend(pid)` (PostgreSQL) para cuando `cancel()` no alcanza a interrumpir la consulta en el servidor. El respaldo necesita una conexión libre en el pool de esa base — se recomienda `poolSize >= 2` si se depende de él.
 - **Modo solo lectura** — una base marcada como tal rechaza cualquier sentencia que no empiece con SELECT/WITH/SHOW/EXPLAIN/DESCRIBE, antes de tocar la base. Es una heurística por primera palabra clave, no un parser SQL completo.
 - **Explicar plan de ejecución** ("Consulta → Explicar plan…") corre solo contra la primera base marcada — un plan es específico de una base/motor. `EXPLAIN` en PostgreSQL, `SET SHOWPLAN_ALL` en SQL Server.
-- **Fetch size configurable** (Preferencias → Rendimiento) — cuántas filas se traen por bloque al leer resultados grandes. Solo tiene efecto real en SQL Server por ahora; PostgreSQL lo ignora en autocommit (comportamiento del driver, no un bug de Faro).
+- **Fetch size configurable** (Preferencias → Rendimiento) — cuántas filas se traen por bloque al leer resultados grandes. **SQL Server** siempre lo respetó. **PostgreSQL** lo respeta desde el 2026-09-14, pero **solo en scripts de solo lectura**: el driver únicamente abre cursor con el autocommit desactivado, y desactivarlo en un script que escribe lo convertiría en una transacción todo-o-nada (ver "Limitaciones conocidas" para el detalle).
 
 ## Resultados
 
@@ -149,7 +180,7 @@ Barra de menú completa (Archivo/Editar/Consulta/Conexiones/Ver/Herramientas/Ayu
 **Certificado del servidor (solo SQL Server)** — el tráfico a SQL Server siempre va cifrado (`encrypt=true`, sin opción de apagarlo). Lo que la casilla controla es si además se **verifica** que el servidor sea realmente quien dice ser: marcada (el default, y lo que hacían todas las conexiones antes de que la casilla existiera) acepta cualquier certificado; desmarcada exige uno que la máquina reconozca como válido — más seguro, pero la conexión falla si el servidor usa un certificado autofirmado, que es lo normal en servidores internos. Se guarda por base en `connections.json`; una base de una configuración anterior (sin ese campo en el archivo) se comporta igual que siempre, marcada. En PostgreSQL la casilla queda deshabilitada: esa URL no negocia TLS por su cuenta (pgJDBC usa su propio `sslmode`, todavía no expuesto en Faro).
 - **Credenciales por defecto** — usuario/contraseña de sesión, usado cuando una base no tiene su propio override guardado. Resolución: override por base → default de sesión → vacío.
 - **Descubrir bases de datos** — dado un host + usuario/contraseña, prueba conexión TCP a los puertos 5432/1433 y, si responden, hace login JDBC real para listar las bases visibles con ese usuario. Un host por búsqueda, no un rango de IPs.
-- **Importar CSV a una tabla** — parser real (maneja comillas y comas dentro de campos), `INSERT` por lotes de 500 en una sola transacción. Sin inferencia de tipo propia (todo va como texto, apoyado en la conversión implícita del driver) ni soporte de saltos de línea dentro de un campo entre comillas.
+- **Importar CSV a una tabla** — parser real (maneja comillas y comas dentro de campos), `INSERT` por lotes de 500 en una sola transacción. **La codificación se detecta sola**: se intenta UTF-8 y, si el archivo no lo es, se relee con la del sistema (la que produce Excel en Windows) y el diálogo lo dice junto al conteo de filas, para que te enteres antes de ver acentos rotos dentro de la tabla. Sin inferencia de tipo propia (todo va como texto, apoyado en la conversión implícita del driver) ni soporte de saltos de línea dentro de un campo entre comillas.
 - **"Probar todas las conexiones"** (menú Conexiones) — prueba cada base registrada (no solo las marcadas) con sus credenciales resueltas y actualiza el punto de estado de cada una en el árbol, mostrando cuáles fallaron y por qué.
 - **Preferencias** — ver el detalle completo abajo.
 
@@ -159,14 +190,23 @@ Tres pestañas, todas aplican y guardan de inmediato — no hay botones "Guardar
 
 - **Rendimiento** — bases en paralelo al ejecutar, tamaño de pool y timeout por defecto de una base nueva, fetch size. Cada campo se guarda al perder el foco (Tab/clic afuera) o con Enter.
 - **Atajos** — referencia estática de los atajos reales del menú (no editable).
-- **Apariencia** — tema (claro/oscuro), color de acento (6 opciones), tamaño de fuente del editor SQL (spinner, 10–24px), y tamaño de fuente del resto de la interfaz (slider, -5..+5, aplica sobre los tamaños base de cada elemento). Los cuatro aplican en vivo apenas se interactúa con el control — tema y tamaño también se reflejan en la ventana de Preferencias mientras sigue abierta, no solo en la ventana principal.
+- **Apariencia** — tema (claro/oscuro), color de acento (**7 opciones**), tamaño de fuente del editor SQL (spinner, 10–24px), y tamaño de fuente del resto de la interfaz (slider, -5..+5, aplica sobre los tamaños base de cada elemento). Los cuatro aplican en vivo apenas se interactúa con el control — tema y tamaño también se reflejan en la ventana de Preferencias mientras sigue abierta, no solo en la ventana principal.
+
+**Acento "negro"** (2026-09-11) — es **monocromático**, no negro literal: negro en tema claro, blanco en oscuro. No es una excepción al diseño sino su caso extremo — los otros 6 acentos ya usan una versión más clara en tema oscuro, porque el acento no solo pinta fondos de botón: también es color de texto, el subrayado de la pestaña activa y el trazo de varios íconos, y un negro literal sobre el fondo `#09090B` del tema oscuro dejaría todo eso invisible.
+
+Agregarlo destapó dos cosas que ya estaban mal para todos los acentos:
+
+- **El texto sobre el acento estaba fijo en blanco**, lo que asume que todo acento es oscuro. Ahora cada acento declara su propio color de texto legible (`-token-accent-on`). Midiendo el contraste real, **ningún acento de tema oscuro llegaba al mínimo de 3:1** para texto en negrita: `amber` daba **1.7:1** y `teal` **1.9:1** (prácticamente ilegibles), y los otros cuatro entre 2.3 y 2.8. Se corrigieron **solo los dos por debajo de 2:1**; los demás se dejaron como estaban para no cambiar el aspecto del acento por defecto sin que nadie lo pidiera. Hay un test que calcula ese contraste y que impide volver a los casos ilegibles.
+- **Las palabras reservadas del editor eran el único color de sintaxis atado al acento** (cadenas, números y comentarios ya tenían tokens propios). Ahora tienen el suyo: para los 6 acentos de color vale exactamente lo mismo que antes, y "negro" usa el índigo de siempre. Que la interfaz sea monocromática no obliga al editor a serlo — es como funcionan los temas monocromáticos de los editores reales.
 
 **Nota técnica sobre el tamaño de fuente de la interfaz**: a diferencia de los colores (que sí usan variables CSS nativas de JavaFX, "looked-up values"), `-fx-font-size` no admite ese mecanismo — es una limitación real del parser CSS de JavaFX, no una limitación de diseño. El tamaño en vivo se resuelve regenerando en memoria una copia de la hoja de estilos con los tamaños ya desplazados, en vez de con variables.
 
 ## Persistencia
 
-- **Conexiones + preferencias + favoritos + pestañas de consulta abiertas + estado de conexión (verde/rojo)** — `~/.faro/connections.json` (JSON plano vía Gson), se carga al abrir y se guarda al cerrar, con autoguardado cada 2 minutos por si la app se cierra de forma anormal.
-- **Credenciales** — `~/.faro/credentials.dat`, cifradas con DPAPI (Windows Data Protection API, atadas a la cuenta de Windows del usuario — no portables a otra cuenta/máquina). Nunca en JSON plano, nunca incluidas en "Importar/Exportar configuración".
+- **Conexiones + preferencias + favoritos + pestañas de consulta abiertas + estado de conexión (verde/rojo) + orden del árbol** — `~/.faro/connections.json` (JSON plano vía Gson), se carga al abrir y se guarda al cerrar, con autoguardado cada 2 minutos por si la app se cierra de forma anormal.
+  - **Escritura atómica** (2026-09-10) — se escribe a un temporal y recién entonces se mueve encima del definitivo. Antes era una escritura directa, que **vacía el archivo y después escribe**: si se cortaba a la mitad (el autoguardado en segundo plano y el cierre escribiendo a la vez, o el proceso matado a mitad de un autoguardado), quedaba un JSON truncado y la app arrancaba con el registro **vacío** — o sea, se perdía toda la configuración en silencio. Ahora el archivo solo existe en dos estados: el contenido viejo completo, o el nuevo completo. Lo mismo para `credentials.dat`, donde pesa más (perderlo obliga a recapturar todas las contraseñas). Al cerrar, la app además espera a que termine el autoguardado que estuviera en curso.
+- **Credenciales** — `~/.faro/credentials.dat`, cifradas con DPAPI (Windows Data Protection API, atadas a la cuenta de Windows del usuario — no portables a otra cuenta/máquina). Nunca en JSON plano en el archivo de trabajo, y el autoguardado de `connections.json` NUNCA las incluye.
+  - **Excepción, solo bajo pedido explícito (2026-09-10):** "Exportar configuración…" ofrece una casilla **"Incluir usuarios y contraseñas"**, desmarcada por defecto. Marcarla escribe usuario y contraseña **en texto legible** dentro del `.json` exportado, e importarlo los devuelve a la sesión. Es una decisión del usuario, tomada tras ver la alternativa con frase maestra y descartarla: el caso de uso es montar Faro en un equipo nuevo sin recapturar decenas de contraseñas a mano, y DPAPI no sirve para eso (cifra atado a la cuenta de Windows de origen, así que el archivo no se podría descifrar en el equipo destino). **Un archivo exportado con esa casilla marcada es un archivo con secretos:** cualquiera que lo abra ve las contraseñas. El diálogo lo advierte antes de escribir, el nombre sugerido del archivo lo dice (`faro-config-con-credenciales.json`), y el log de Diagnóstico deja la línea como advertencia — pero nada de eso lo protege si el archivo se manda por correo o se deja en una carpeta compartida. La casilla nace desmarcada en cada exportación a propósito: nunca se hereda de la vez anterior.
 - **Historial de consultas** — en memoria únicamente, se pierde al cerrar la app (tope de 50 entradas, sin duplicados consecutivos).
 - **Favoritos** — sí persisten, junto con el resto de `connections.json`.
 - **Importar/Exportar configuración** (menú Conexiones) — mismo formato que el archivo por defecto, pero a una ruta elegida por el usuario; importar reemplaza el árbol completo (no hace merge).
@@ -177,18 +217,30 @@ Pestaña "Diagnóstico" en la ventana principal — log visual de sesión (ejecu
 
 ## Tests automatizados
 
-`mvn test` — JUnit 5 sobre la lógica pura que no depende de JavaFX ni de una conexión real: parser CSV, formateador SQL, resolución de credenciales, `jdbcUrl()` por motor, aplanado del registro de conexiones, desambiguación de triggers/funciones sobrecargados, contador de generación de caché del explorador de esquema, generación de scripts SQL. No hay tests de controladores JavaFX (`TableView`/`TreeView`/diálogos) ni de nada que necesite una base de datos real — necesitarían TestFX o una base embebida/mocks de JDBC, no se agregaron.
+`mvn test` — JUnit 5 sobre la lógica pura que no depende de JavaFX ni de una conexión real: parser CSV (contenido **y** codificación detectada), formateador SQL, resolución de credenciales, `jdbcUrl()` por motor (incluidos certificado y codificación), aplanado y **orden** del registro de conexiones, desambiguación de triggers/funciones sobrecargados, contador de generación de caché del explorador de esquema, generación de scripts SQL, la heurística de **Solo lectura** (incluida la condición que activa el cursor de PostgreSQL), el escapado de CSV y la búsqueda del editor, y el contraste de la paleta de acentos. Uno de ellos no mira código sino archivos: `StyleClassCoverageTest` cruza las clases de estilo usadas contra `app.css` (ver más abajo).
+
+No hay tests de controladores JavaFX (`TableView`/`TreeView`/diálogos) ni de nada que necesite una base de datos real — necesitarían TestFX o una base embebida/mocks de JDBC, no se agregaron. **La suite permanente nunca arranca el toolkit de JavaFX**, a propósito.
+
+**Para lo visual y lo de hilos se usan sondas temporales**, no tests permanentes: un archivo de test que arranca el toolkit, **mide** lo que haga falta (el color efectivo de un control en los dos temas, la posición real de un nodo, que cada `@FXML` de un FXML quedó inyectado) y **se borra después de correrlo**. La evidencia que queda es el número medido, anotado en `CONTEXTO_SESIONES.md` — no la sonda. Vale la pena porque atrapa cosas que no se ven leyendo el CSS: un `fx:id` mal escrito no rompe la carga del FXML, deja el campo en `null` y truena en vivo; y una regla que pierde por especificidad deja dos estados del mismo color sin que nada proteste.
+
+**El hueco de las clases de estilo ya está cerrado** (2026-09-14). Una clase usada en un FXML o en Java **sin regla que la respalde en `app.css`** no la detectaba nada, y había pasado dos veces (`.trust-cert-check`, `.discover-results-scroll`) — en ambas el síntoma solo apareció en tema oscuro, porque sin regla el control se queda con los colores por defecto de Modena, que son claros. Ahora `StyleClassCoverageTest` cruza cada clase usada contra los selectores de `app.css` y falla nombrando la clase y el archivo. Se comprobó quitando esas dos reglas del CSS: las atrapa a las dos.
+
+El compilador además corre con `-Xlint:all` (`-serial` y `-this-escape` excluidas, con el motivo comentado en `pom.xml`), y el build está en **cero advertencias**.
 
 ## Limitaciones conocidas
 
 - Solo el esquema por defecto de cada motor en el explorador (`public`/`dbo`).
-- Autocompletado limitado a palabras clave SQL, no nombres reales de tabla/columna.
-- El modo "solo lectura" y el formateador SQL son heurísticas por patrón, no parsers SQL completos.
+- Autocompletado: sugiere palabras clave siempre, y nombres reales de tabla/vista/columna **solo de lo que ya esté en caché** de esa base (las categorías que hayas expandido, y las columnas de las tablas sobre las que hayas usado "Generar…"). Se va llenando con el uso, no está completo desde el primer Ctrl+Espacio. Corta en 50 sugerencias, avisando cuántas quedaron fuera. Solo dispara con `Ctrl+Espacio`, no mientras escribes.
+- El modo "solo lectura" y el formateador SQL son heurísticas por patrón, no parsers SQL completos. **Agujero conocido y cubierto por un test que lo documenta:** un CTE que escribe (`WITH x AS (DELETE … RETURNING *) SELECT …`, válido en PostgreSQL) pasa el filtro de solo lectura, porque la heurística mira la primera palabra y no el contenido.
 - "Explicar plan de ejecución" en SQL Server (`SHOWPLAN_ALL`) no se ha corrido contra un servidor SQL Server real — solo contra el comportamiento documentado del driver.
 - Historial de consultas no persiste entre sesiones (a propósito, ver "Persistencia").
-- Sin inferencia de tipo en Importar CSV; sin soporte de campos multilínea entre comillas.
-- Fetch size configurable solo tiene efecto real en SQL Server, no en PostgreSQL todavía.
-- Ningún test cubre el mecanismo de tamaño de fuente en vivo ni el layout de JavaFX en general — es comportamiento visual, verificado a mano en la app real.
+- Sin inferencia de tipo en Importar CSV; sin soporte de campos multilínea entre comillas. La **codificación sí se detecta sola** (2026-09-14): se intenta UTF-8 y, si el archivo no lo es, se relee con la codificación del sistema —la que usa Excel en Windows, normalmente `windows-1252`— y el diálogo dice con cuál lo leyó. Antes fallaba con `MalformedInputException` ante cualquier acento o `ñ`.
+- **Fetch size en PostgreSQL solo aplica a scripts de solo lectura.** Hasta el 2026-09-14 no tenía **ningún** efecto ahí: el driver solo usa cursor si el autocommit está desactivado, y la app nunca lo desactivaba, así que en una consulta de 500,000 filas el driver materializaba el resultado completo antes de retornar y al terminar el bucle el resultado vivía dos veces en memoria. Ahora los scripts de solo lectura contra PostgreSQL sí abren cursor. **Los que escriben siguen en autocommit a propósito**: desactivarlo convertiría un script de varias sentencias en una transacción todo-o-nada, y un fallo en la tercera desharía las dos primeras — un cambio de comportamiento que nadie pidió. SQL Server siempre respetó `fetchSize` y no necesitó nada.
+- **El CSV exportado va en UTF-8 sin BOM**, así que Excel en español lo abre mostrando `Ã±` donde va `ñ` (abrirlo con "Datos → Desde texto" eligiendo UTF-8 sí funciona). Es el lado inverso de la detección al importar, y sigue abierto a propósito: agregar el BOM arregla Excel pero cambia los bytes de **todos** los archivos exportados, y hay herramientas que no lo toleran.
+- El **grid de resultados** no se puede ordenar por columna ni filtrar; el resultado completo se carga en memoria (el `TableView` solo virtualiza qué se dibuja, no qué se guarda). Ver §5.1 de `OPTIMIZACION_RENDIMIENTO.md` para las tres salidas posibles, todas con decisión de producto de por medio.
+- Al editor le faltan atajos habituales: comentar/descomentar selección, duplicar línea, ir a línea.
+- ~~El alto de fila del árbol es fijo y no escala con el tamaño de fuente.~~ **Corregido el 2026-09-14**: ahora se calcula igual que el del grid de resultados, a partir del tamaño de fuente efectivo. La fórmula está calibrada para que en el tamaño por defecto siga dando **exactamente los 44px** de antes — ese alto ya se había ajustado a mano tres veces y no debía cambiar; lo que cambia es que en el extremo del slider (+5) las dos líneas de una fila de base ya no se cortan.
+- Ningún test cubre el mecanismo de tamaño de fuente en vivo ni el layout de JavaFX en general — es comportamiento visual, verificado a mano en la app real (o con sondas, ver "Tests automatizados").
 
 ## Estructura relevante
 

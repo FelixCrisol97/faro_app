@@ -1,8 +1,7 @@
 package com.faro.app.ui;
 
 import java.util.List;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
+import java.util.Locale;
 import java.util.function.IntSupplier;
 
 import com.faro.app.model.DatabaseEntry;
@@ -24,6 +23,7 @@ import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.ProgressIndicator;
+import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.Tooltip;
 import javafx.scene.control.TreeCell;
 import javafx.scene.input.MouseButton;
@@ -62,26 +62,59 @@ import javafx.util.Duration;
  */
 public class ConnectionTreeCell extends TreeCell<Object> {
 
+    // El alto de fila TIENE que coincidir con el fixedCellSize del TreeView. Si no, el
+    // contenido mide distinto de lo que JavaFX asume por el layout virtualizado y el
+    // árbol recalcula en cada clic — se veía como toda la lista parpadeando. Por eso ya
+    // no está fijo en main-view.fxml: lo calcula rowHeight() y MainController se lo pone
+    // al TreeView, para que no puedan desincronizarse (2026-09-14, hallazgo A9).
+    //
+    // Historia del valor, que explica la calibración de VERTICAL_PADDING_PX: 28→36→44
+    // (2026-08-28). La fila de base pasó de 1 línea (alias) a 2 (alias + IP:puerto
+    // apilados, ver aliasAndHostBox); 36px ya evitaba el corte, pero el usuario lo vio
+    // "muy junto" y se subió a 44. Como fixedCellSize es del TreeView completo y no por
+    // tipo de fila, TODAS las filas —servidor, categoría, objeto de esquema— usan el
+    // mismo alto aunque tengan una sola línea: quedan con más aire, no rotas.
+
     /**
-     * Debe coincidir exactamente con {@code fixedCellSize} del
-     * {@code TreeView} en main-view.fxml. Sin esto, el contenido de cada
-     * fila mide una altura distinta a la que JavaFX asume por el layout
-     * virtualizado, y el árbol recalcula el layout en cada clic — se veía
-     * como toda la lista parpadeando.
-     *
-     * <p>28→36→44 (2026-08-28) — la fila de base pasó de 1 línea (alias) a 2
-     * (alias + IP:puerto apilados, ver {@link #aliasAndHostBox}), necesita
-     * más alto para no cortar la segunda línea; 36px ya evitaba el corte,
-     * pero el usuario lo vio "muy junto" entre filas — subido otra vez a
-     * 44px + más padding vertical (ver {@code databaseRow.setPadding}) para
-     * que se note un respiro real entre una base y la siguiente. Como
-     * {@code fixedCellSize} es del `TreeView` completo (no por tipo de
-     * fila), TODAS las filas —servidor, categoría de esquema, objeto de
-     * esquema— también crecen a 44px aunque sigan teniendo 1 sola línea;
-     * quedan con más aire, no rotas (se centran verticalmente igual que
-     * antes).
+     * Tamaños reales de las dos líneas de una fila de base en {@code app.css}
+     * ({@code .tree-db-name} y {@code .tree-db-host}) — base para {@link #rowHeight}.
+     * Si esos literales cambian en la hoja, hay que cambiarlos acá.
      */
-    private static final double ROW_HEIGHT = 44;
+    private static final double NAME_FONT_SIZE_PX = 12.5;
+    private static final double HOST_FONT_SIZE_PX = 9.5;
+    /** Mismo piso que {@code Theme#scaledFontSize} — nunca calcular una fila para un tamaño ilegible. */
+    private static final double MIN_FONT_SIZE_PX = 8;
+    /**
+     * Padding vertical de {@code databaseRow} (4+4) más el aire que el usuario pidió
+     * explícitamente entre filas. Calibrado para que en el valor POR DEFECTO del slider
+     * ({@code fontScaleDelta == -1}) la fórmula dé exactamente 44 px — el alto que ya se
+     * ajustó a mano tres veces (28→36→44, la última porque se veía "muy junto") y que no
+     * debe cambiar solo porque ahora se calcule en vez de estar fijo.
+     */
+    private static final double VERTICAL_PADDING_PX = 20;
+
+    /**
+     * Alto de fila para el tamaño de fuente EFECTIVO de la interfaz (2026-09-14,
+     * hallazgo A9 de {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}).
+     *
+     * <p>Antes esto era la constante fija {@code 44}, duplicada además como
+     * {@code fixedCellSize="44"} en el FXML. La fila de base tiene DOS líneas de texto
+     * apiladas (alias + {@code host:puerto}) y las dos crecen con el slider de tamaño de
+     * interfaz, pero el alto no: con el slider arriba del todo el contenido dejaba de
+     * caber. Es el mismo modo de falla que ya se había corregido para el grid de
+     * resultados el 2026-08-26 (texto de filas contiguas superpuesto), con la misma
+     * fórmula — a esta fila simplemente nunca se le aplicó.
+     *
+     * <p>El interlineado 1.2 y la estructura del cálculo son los mismos que
+     * {@code ResultsTableFactory#rowHeight}, a propósito: dos formas distintas de
+     * calcular el alto de una fila en la misma app serían una invitación a que se
+     * desincronicen.
+     */
+    public static double rowHeight(int fontScaleDelta) {
+        double name = Math.max(MIN_FONT_SIZE_PX, NAME_FONT_SIZE_PX + fontScaleDelta);
+        double host = Math.max(MIN_FONT_SIZE_PX, HOST_FONT_SIZE_PX + fontScaleDelta);
+        return (name + host) * 1.2 + VERTICAL_PADDING_PX;
+    }
 
     // -- Fila de servidor: construida una sola vez --
     private final Label serverNameLabel = new Label();
@@ -95,7 +128,7 @@ public class ConnectionTreeCell extends TreeCell<Object> {
     private final Tooltip statusTooltip = new Tooltip();
     private final Label aliasLabel = new Label();
     private final Label hostLabel = new Label();
-    /** Alias + IP:puerto apiladas (2026-08-28, a pedido del usuario — "creo se vería mejor que esté abajo o arriba del nombre de la BD"). Necesitó subir {@link #ROW_HEIGHT} para que las 2 líneas no se corten. */
+    /** Alias + IP:puerto apiladas (2026-08-28, a pedido del usuario — "creo se vería mejor que esté abajo o arriba del nombre de la BD"). Es la razón de que la fila necesite 2 líneas de alto — ver {@link #rowHeight}. */
     private final VBox aliasAndHostBox;
     /** Candado del modo (2026-08-28) — reemplaza el texto "SIN RESTRICCIONES"/"SOLO LECTURA" de antes, pedido explícito del usuario ("se me hace muy [pesado], hay forma de usar iconos"). Cerrado = solo lectura, abierto = sin restricciones — mismo lenguaje visual que Lucide `lock`/`lock-open` (ver Icons.java), con tooltip para quien de verdad necesite el texto exacto. */
     private final SVGPath modeIcon = new SVGPath();
@@ -142,6 +175,8 @@ public class ConnectionTreeCell extends TreeCell<Object> {
     private final Label loadingLabel = new Label();
     private final HBox loadingRow;
     private final Label schemaErrorLabel = new Label();
+    /** Creado e instalado UNA vez, como {@code statusTooltip}/{@code modeTooltip} — ver el comentario en la rama de {@code SchemaTreeNode.Error} de {@link #updateItem}. */
+    private final Tooltip schemaErrorTooltip = new Tooltip();
 
     // -- Fila de objeto de esquema (una tabla/vista/función/procedimiento/trigger): construida una sola vez --
     private final SVGPath schemaItemIcon = new SVGPath();
@@ -159,11 +194,17 @@ public class ConnectionTreeCell extends TreeCell<Object> {
 
     // -- Menú contextual (clic derecho) de una fila de base — construido una sola vez --
     private final ContextMenu databaseContextMenu;
+    /** Menú contextual de una fila de GRUPO (2026-09-11) — ver el constructor. */
+    private final ContextMenu serverContextMenu;
+    /** Menú contextual del encabezado "Sin grupo" — un subconjunto del de grupo, ver el constructor. */
+    private final ContextMenu sectionHeaderContextMenu;
 
     private BooleanProperty boundCheckProperty;
     private DatabaseEntry editTarget;
     /** Capturado junto con {@code editTarget} en cada {@code updateDatabaseRow} — solo lo usa "Recargar esquema", que necesita el {@code TreeItem} real (no solo el {@code DatabaseEntry}) para poder descartar y volver a pedir sus hijos. */
     private DatabaseTreeItem editTreeItem;
+    /** El {@link Server} que muestra esta celda ahora mismo, o null — lo leen los ítems de {@code serverContextMenu}, igual que {@code editTarget} para los de la fila de base. */
+    private Server serverTarget;
     private SchemaTreeNode.Item schemaItemTarget;
 
     /**
@@ -186,29 +227,24 @@ public class ConnectionTreeCell extends TreeCell<Object> {
     /** Pulso de opacidad mientras {@link DatabaseEntry#isInUse()} — ver {@link #refreshInUseAnimation}. */
     private final FadeTransition inUsePulse = new FadeTransition(Duration.millis(600), statusDot);
 
+    /** Ver {@link ConnectionTreeActions} — agrupa todo lo que esta celda le pide a MainController. */
+    private final ConnectionTreeActions actions;
+
     /**
      * Tamaño de fuente de la interfaz vigente ahora mismo
      * ({@code AppPreferences#fontScaleDelta}) — un {@link IntSupplier}, no un
      * {@code int}, a propósito: la celda se construye una sola vez por fábrica y
      * tiene que leer el valor ACTUAL en cada repintado, no el que había cuando
-     * se creó. Ver {@link #applyDisclosureScale()}.
+     * se creó. Ver {@link #applyDisclosureScale()} y {@link #fixHeight}.
      */
     private final IntSupplier fontScaleDelta;
 
-    public ConnectionTreeCell(
-            Consumer<DatabaseEntry> onEditRequested,
-            Consumer<DatabaseEntry> onNewQueryRequested,
-            Consumer<DatabaseEntry> onDeleteRequested,
-            Consumer<DatabaseEntry> onDiscoverRequested,
-            BiConsumer<SchemaTreeNode.Item, GenerateAction> onGenerateRequested,
-            Consumer<DatabaseEntry> onModeToggleRequested,
-            Consumer<DatabaseEntry> onMoveToGroupRequested,
-            IntSupplier fontScaleDelta,
-            Consumer<SchemaTreeNode.Item> onCompareRequested) {
+    public ConnectionTreeCell(ConnectionTreeActions actions, IntSupplier fontScaleDelta) {
+        this.actions = actions;
         this.fontScaleDelta = fontScaleDelta;
         compareItem.setOnAction(event -> {
             if (schemaItemTarget != null) {
-                onCompareRequested.accept(schemaItemTarget);
+                actions.onCompare().accept(schemaItemTarget);
             }
         });
         serverNameLabel.getStyleClass().add("tree-server-name");
@@ -281,7 +317,7 @@ public class ConnectionTreeCell extends TreeCell<Object> {
             if (event.getClickCount() == 1) {
                 checkBox.setSelected(!checkBox.isSelected());
             } else if (event.getClickCount() == 2 && editTarget != null) {
-                onEditRequested.accept(editTarget);
+                actions.onEdit().accept(editTarget);
             }
         });
         engineBadge.getStyleClass().add("tree-engine-badge");
@@ -346,7 +382,7 @@ public class ConnectionTreeCell extends TreeCell<Object> {
             }
             event.consume();
             if (event.getClickCount() == 1 && editTarget != null) {
-                onModeToggleRequested.accept(editTarget);
+                actions.onToggleMode().accept(editTarget);
             }
         });
 
@@ -359,7 +395,7 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         editButton.setOnMouseClicked(event -> {
             event.consume();
             if (editTarget != null) {
-                onEditRequested.accept(editTarget);
+                actions.onEdit().accept(editTarget);
             }
         });
 
@@ -380,7 +416,7 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         deleteButton.setOnMouseClicked(event -> {
             event.consume();
             if (editTarget != null) {
-                onDeleteRequested.accept(editTarget);
+                actions.onDelete().accept(editTarget);
             }
         });
 
@@ -440,19 +476,19 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         MenuItem newQueryItem = new MenuItem("Nueva consulta para esta base");
         newQueryItem.setOnAction(event -> {
             if (editTarget != null) {
-                onNewQueryRequested.accept(editTarget);
+                actions.onNewQuery().accept(editTarget);
             }
         });
         MenuItem discoverItem = new MenuItem("Descubrir bases en esta IP…");
         discoverItem.setOnAction(event -> {
             if (editTarget != null) {
-                onDiscoverRequested.accept(editTarget);
+                actions.onDiscover().accept(editTarget);
             }
         });
         MenuItem deleteItem = new MenuItem("Eliminar esta base");
         deleteItem.setOnAction(event -> {
             if (editTarget != null) {
-                onDeleteRequested.accept(editTarget);
+                actions.onDelete().accept(editTarget);
             }
         });
         // "Mover a grupo…" (2026-08-28, pedido explícito del usuario, con imagen de
@@ -463,7 +499,7 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         MenuItem moveToGroupItem = new MenuItem("Mover a grupo…");
         moveToGroupItem.setOnAction(event -> {
             if (editTarget != null) {
-                onMoveToGroupRequested.accept(editTarget);
+                actions.onMoveToGroup().accept(editTarget);
             }
         });
         // "Recargar esquema" (2026-08-25, el usuario preguntó cómo recargar y no
@@ -480,7 +516,50 @@ public class ConnectionTreeCell extends TreeCell<Object> {
                 editTreeItem.reloadSchema();
             }
         });
-        databaseContextMenu = new ContextMenu(newQueryItem, discoverItem, reloadSchemaItem, moveToGroupItem, deleteItem);
+        // Subir/Bajar de una base (2026-09-11, pedido del usuario: "tampoco puedo mover
+        // las bd y grupos de acuerdo al orden que yo quiera"). Mueve dentro de SU lista
+        // —su grupo, o las sueltas— sin sacarla de ahí; cambiar de grupo sigue siendo
+        // "Mover a grupo…", que es otra cosa. Ver ConnectionRegistry#moveDatabase.
+        MenuItem moveDatabaseUpItem = new MenuItem("Subir");
+        moveDatabaseUpItem.setOnAction(event -> {
+            if (editTarget != null) {
+                actions.onMoveDatabase().accept(editTarget, -1);
+            }
+        });
+        MenuItem moveDatabaseDownItem = new MenuItem("Bajar");
+        moveDatabaseDownItem.setOnAction(event -> {
+            if (editTarget != null) {
+                actions.onMoveDatabase().accept(editTarget, 1);
+            }
+        });
+        databaseContextMenu = new ContextMenu(newQueryItem, discoverItem, reloadSchemaItem,
+                new SeparatorMenuItem(), moveDatabaseUpItem, moveDatabaseDownItem, moveToGroupItem,
+                new SeparatorMenuItem(), deleteItem);
+
+        // -- Menú contextual de una fila de GRUPO (2026-09-11) --
+        // Antes las filas de grupo no tenían menú (setContextMenu(null)): no había forma
+        // de renombrar un grupo, de marcar/desmarcar solo sus bases —el botón "Todas" de
+        // arriba es global— ni de cambiarlas de orden.
+        serverContextMenu = new ContextMenu(
+                groupItem("Marcar todas las de este grupo", () -> actions.onSetGroupSelection().accept(serverTarget, true)),
+                groupItem("Desmarcar todas las de este grupo", () -> actions.onSetGroupSelection().accept(serverTarget, false)),
+                new SeparatorMenuItem(),
+                groupItem("Renombrar grupo…", () -> actions.onRenameGroup().accept(serverTarget)),
+                new SeparatorMenuItem(),
+                groupItem("Subir", () -> actions.onMoveGroup().accept(serverTarget, -1)),
+                groupItem("Bajar", () -> actions.onMoveGroup().accept(serverTarget, 1)),
+                groupItem("Ordenar sus bases A-Z", () -> actions.onSortGroup().accept(serverTarget)));
+
+        // El encabezado "Sin grupo" NO es un Server (es la ausencia de grupo, ver el
+        // javadoc de Server), así que no se puede renombrar ni mover — pero marcar sus
+        // bases y ordenarlas sí tiene el mismo sentido. serverTarget queda en null ahí,
+        // que es justo lo que ConnectionRegistry#sortDatabasesByAlias entiende como
+        // "las sueltas".
+        sectionHeaderContextMenu = new ContextMenu(
+                groupItem("Marcar todas las de aquí", () -> actions.onSetGroupSelection().accept(null, true)),
+                groupItem("Desmarcar todas las de aquí", () -> actions.onSetGroupSelection().accept(null, false)),
+                new SeparatorMenuItem(),
+                groupItem("Ordenar A-Z", () -> actions.onSortGroup().accept(null)));
 
         sectionHeaderLabel.getStyleClass().add("tree-section-label");
         fixHeight(sectionHeaderLabel);
@@ -516,6 +595,7 @@ public class ConnectionTreeCell extends TreeCell<Object> {
 
         schemaErrorLabel.getStyleClass().add("tree-schema-error");
         schemaErrorLabel.setWrapText(false);
+        Tooltip.install(schemaErrorLabel, schemaErrorTooltip);
         // Menú "Generar…" — qué acciones aplican a cada fila depende de su tipo (ver
         // menuItemsFor(), llamado desde updateItem()): Tabla tiene las 5; Vista solo
         // SELECT+CREATE (no toda vista es escribible, "Generar UPDATE/INSERT/DELETE"
@@ -524,17 +604,17 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         // alcance a propósito (ver SchemaIntrospector). Doble clic en Tabla/Vista
         // dispara SELECT directo — atajo extra, nunca el único camino (mismo criterio
         // que el resto de esta celda).
-        generateSelectItem.setOnAction(event -> fireGenerate(onGenerateRequested, GenerateAction.SELECT));
-        generateInsertItem.setOnAction(event -> fireGenerate(onGenerateRequested, GenerateAction.INSERT));
-        generateUpdateItem.setOnAction(event -> fireGenerate(onGenerateRequested, GenerateAction.UPDATE));
-        generateDeleteItem.setOnAction(event -> fireGenerate(onGenerateRequested, GenerateAction.DELETE));
+        generateSelectItem.setOnAction(event -> fireGenerate(GenerateAction.SELECT));
+        generateInsertItem.setOnAction(event -> fireGenerate(GenerateAction.INSERT));
+        generateUpdateItem.setOnAction(event -> fireGenerate(GenerateAction.UPDATE));
+        generateDeleteItem.setOnAction(event -> fireGenerate(GenerateAction.DELETE));
         // "Generar script CREATE" es un solo ítem para los 2 casos posibles (tabla vs.
         // el resto) — nunca conviven en la misma fila, así que basta decidir la acción
         // real al hacer clic, en vez de 2 MenuItem con el mismo texto.
         generateCreateItem.setOnAction(event -> {
             if (schemaItemTarget != null) {
-                fireGenerate(onGenerateRequested,
-                        schemaItemTarget.kind() == Kind.TABLES ? GenerateAction.CREATE_TABLE : GenerateAction.CREATE_SCRIPT);
+                fireGenerate(schemaItemTarget.kind() == Kind.TABLES
+                        ? GenerateAction.CREATE_TABLE : GenerateAction.CREATE_SCRIPT);
             }
         });
         // NUNCA consumía nada (2026-08-28, mismo bug real que aliasLabel/modeIcon,
@@ -552,14 +632,25 @@ public class ConnectionTreeCell extends TreeCell<Object> {
             }
             event.consume();
             if (event.getClickCount() == 2 && schemaItemTarget != null && isQueryable(schemaItemTarget.kind())) {
-                onGenerateRequested.accept(schemaItemTarget, GenerateAction.SELECT);
+                actions.onGenerate().accept(schemaItemTarget, GenerateAction.SELECT);
             }
         });
     }
 
-    private void fireGenerate(BiConsumer<SchemaTreeNode.Item, GenerateAction> onGenerateRequested, GenerateAction action) {
+    /**
+     * Un {@code MenuItem} de los menús de grupo — todos siguen el mismo patrón (texto
+     * fijo, acción que lee {@code serverTarget} al dispararse, no al construirse), así
+     * que escribirlos uno por uno sería repetir cuatro líneas ocho veces.
+     */
+    private static MenuItem groupItem(String text, Runnable action) {
+        MenuItem item = new MenuItem(text);
+        item.setOnAction(event -> action.run());
+        return item;
+    }
+
+    private void fireGenerate(GenerateAction action) {
         if (schemaItemTarget != null) {
-            onGenerateRequested.accept(schemaItemTarget, action);
+            actions.onGenerate().accept(schemaItemTarget, action);
         }
     }
 
@@ -567,7 +658,11 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         return kind == Kind.TABLES || kind == Kind.VIEWS;
     }
 
-    /** Tabla: las 5. Vista: SELECT + CREATE (nunca INSERT/UPDATE/DELETE — no toda vista es escribible). Función/Procedimiento/Trigger/Tipo: solo CREATE (un SELECT/CALL o "instanciar" un tipo no tienen equivalente genérico seguro). */
+    /*
+     * Tabla: las 5. Vista: SELECT + CREATE (nunca INSERT/UPDATE/DELETE — no toda vista
+     * es escribible). Función/Procedimiento/Trigger/Tipo: solo CREATE (un SELECT/CALL o
+     * "instanciar" un tipo no tienen equivalente genérico seguro).
+     */
     /**
      * {@link #compareItem} va en TODOS los tipos (2026-09-07) — a diferencia de
      * "Generar…", comparar tiene sentido para cualquier objeto de esquema: el
@@ -583,7 +678,6 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         };
     }
 
-    /** {@code prefHeight == minHeight == maxHeight == ROW_HEIGHT}, para que no pueda haber mismatch con {@code fixedCellSize}. */
     /**
      * Tamaño base de la flecha de expandir, como múltiplo de la que trae Modena
      * (2026-09-07, pedido del usuario: "se ven muy pequeñas"). La anterior estaba
@@ -628,55 +722,68 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         }
     }
 
-    private static void fixHeight(Region node) {
-        node.setPrefHeight(ROW_HEIGHT);
-        node.setMinHeight(ROW_HEIGHT);
-        node.setMaxHeight(ROW_HEIGHT);
+    /**
+     * Fija el alto de una fila al calculado para el tamaño de fuente vigente.
+     *
+     * <p>Ya no es estático ni constante: lee {@link #fontScaleDelta}, el mismo
+     * {@code IntSupplier} que usa {@link #applyDisclosureScale()}. Se vuelve a aplicar
+     * en cada {@code updateItem} porque el usuario puede mover el slider con el árbol
+     * ya dibujado, y las celdas se reciclan sin reconstruirse.
+     */
+    private void fixHeight(Region node) {
+        double height = rowHeight(fontScaleDelta.getAsInt());
+        if (node.getPrefHeight() == height) {
+            return;
+        }
+        node.setPrefHeight(height);
+        node.setMinHeight(height);
+        node.setMaxHeight(height);
+    }
+
+    /** Reaplica el alto a las filas ya construidas — ver {@link #fixHeight}. */
+    private void applyRowHeight() {
+        fixHeight(serverRow);
+        fixHeight(databaseRow);
+        fixHeight(sectionHeaderLabel);
+        fixHeight(schemaCategoryRow);
+        fixHeight(schemaItemRow);
+        fixHeight(loadingRow);
     }
 
     @Override
     protected void updateItem(Object item, boolean empty) {
         super.updateItem(item, empty);
         applyDisclosureScale();
+        applyRowHeight();
 
         if (empty || item == null) {
-            unbindCheckbox();
-            // Detener el pulso al quedar vacía (2026-09-07, hallazgo #10 de
-            // AUDITORIA_BUGS_RENDIMIENTO.md) — inUsePulse es INDEFINITE, así que una
-            // celda reciclada a vacía mientras su base seguía "en uso" dejaba la
-            // animación viva, interpolando en cada frame sobre un nodo que ya no se
-            // muestra. Solo se apagaba cuando inUse pasaba a false, cosa que esta celda
-            // ya no escucha una vez que dejó de representar esa base.
-            refreshInUseAnimation(null);
-            editTarget = null;
-            editTreeItem = null;
-            schemaItemTarget = null;
-            setContextMenu(null);
+            detachRowState();
             setText(null);
             setGraphic(null);
             return;
         }
 
         if (item instanceof Server server) {
-            unbindCheckbox();
-            editTarget = null;
-            editTreeItem = null;
-            schemaItemTarget = null;
-            setContextMenu(null);
+            detachRowState();
+            serverTarget = server;
+            setContextMenu(serverContextMenu);
             updateServerRow(server);
             setGraphic(serverRow);
         } else if (item instanceof DatabaseEntry db) {
             schemaItemTarget = null;
+            // serverTarget también (2026-09-12) — esta rama no pasa por detachRowState()
+            // a propósito (updateDatabaseRow reengancha los listeners de forma
+            // condicional, ver su comentario), así que hay que limpiar a mano lo que
+            // aquella limpiaría. Hoy no es alcanzable —el menú que se pone acá es el de
+            // base, y sus ítems leen editTarget— pero dejar apuntando a un Server de una
+            // fila anterior es exactamente la clase de referencia obsoleta que causó A2.
+            serverTarget = null;
             editTreeItem = getTreeItem() instanceof DatabaseTreeItem dbTreeItem ? dbTreeItem : null;
             updateDatabaseRow(db);
             setContextMenu(databaseContextMenu);
             setGraphic(databaseRow);
         } else if (item instanceof SchemaTreeNode.Category category) {
-            unbindCheckbox();
-            editTarget = null;
-            editTreeItem = null;
-            schemaItemTarget = null;
-            setContextMenu(null);
+            detachRowState();
             schemaCategoryLabel.setText(category.kind().label());
             // Esquema progresivo (2026-08-25): Funciones/Procedimientos/Triggers/Tipos son
             // categorías perezosas (CategoryTreeItem) — mientras no se hayan expandido, su
@@ -686,29 +793,26 @@ public class ConnectionTreeCell extends TreeCell<Object> {
                     category.count() == SchemaTreeNode.UNKNOWN_COUNT ? "" : String.valueOf(category.count()));
             setGraphic(schemaCategoryRow);
         } else if (item instanceof SchemaTreeNode.Loading loading) {
-            unbindCheckbox();
-            editTarget = null;
-            editTreeItem = null;
-            schemaItemTarget = null;
-            setContextMenu(null);
+            detachRowState();
             loadingLabel.setText(loading.label());
             setGraphic(loadingRow);
         } else if (item instanceof SchemaTreeNode.Error error) {
-            unbindCheckbox();
-            editTarget = null;
-            editTreeItem = null;
-            schemaItemTarget = null;
-            setContextMenu(null);
+            detachRowState();
             schemaErrorLabel.setText(error.message());
             // Tooltip aparte porque el mensaje real de JDBC suele ser bastante más
             // largo que el ancho del panel — la fila lo corta con "…", el tooltip
             // deja leerlo completo (mismo criterio que alias/host en Ejecución).
-            Tooltip.install(schemaErrorLabel, new Tooltip(error.message()));
+            //
+            // setText sobre un Tooltip creado UNA vez, no `Tooltip.install(label, new
+            // Tooltip(...))` en cada repintado (2026-09-08, hallazgo A5): eso creaba un
+            // Tooltip nuevo y reinstalaba sus manejadores de mouse sobre el mismo Label
+            // en cada pasada de layout, contra el criterio de toda esta clase (ver su
+            // javadoc: los nodos se construyen una sola vez y updateItem solo actualiza
+            // su contenido — statusTooltip/modeTooltip ya lo hacían así).
+            schemaErrorTooltip.setText(error.message());
             setGraphic(schemaErrorLabel);
         } else if (item instanceof SchemaTreeNode.Item schemaItem) {
-            unbindCheckbox();
-            editTarget = null;
-            editTreeItem = null;
+            detachRowState();
             schemaItemTarget = schemaItem;
             schemaItemIcon.setContent(isQueryable(schemaItem.kind()) ? Icons.TABLE : Icons.SETTINGS);
             schemaItemLabel.setText(schemaItem.name());
@@ -716,15 +820,57 @@ public class ConnectionTreeCell extends TreeCell<Object> {
             setContextMenu(schemaItemContextMenu);
             setGraphic(schemaItemRow);
         } else {
-            unbindCheckbox();
-            editTarget = null;
-            editTreeItem = null;
-            schemaItemTarget = null;
-            setContextMenu(null);
-            sectionHeaderLabel.setText(String.valueOf(item).toUpperCase());
+            detachRowState();
+            // El encabezado "Sin grupo" — serverTarget queda en null a propósito, que es
+            // lo que sus acciones interpretan como "las bases sueltas".
+            setContextMenu(sectionHeaderContextMenu);
+            sectionHeaderLabel.setText(String.valueOf(item).toUpperCase(Locale.ROOT));
             setGraphic(sectionHeaderLabel);
         }
         setText(null);
+    }
+
+    /**
+     * Deja la celda sin ningún vínculo con la fila que mostraba antes — casilla
+     * desatada, listeners de estado desenganchados, pulso apagado, referencias de
+     * menú/edición limpias. Lo llaman las 6 ramas de {@link #updateItem} que NO son
+     * una fila de base; la de base no, porque {@link #updateDatabaseRow} ya hace lo
+     * suyo de forma condicional (solo re-engancha si de verdad cambió de base, ver
+     * su comentario sobre el parpadeo del árbol).
+     *
+     * <p><b>Antes esto eran 5 líneas copiadas 6 veces</b> (2026-09-08, hallazgos A2
+     * y C4 de {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}) y a ninguna de las 6
+     * copias se le había agregado el desenganche de los listeners de
+     * {@code connectionStatus}/{@code inUse} — solo {@link #updateDatabaseRow} los
+     * cambiaba, y únicamente al pasar a otra base. O sea que una celda reciclada a
+     * una fila de esquema (o vacía) seguía escuchando a la base anterior: cuando esa
+     * base pasaba a "en uso", {@link #refreshInUseAnimation} arrancaba un
+     * {@code FadeTransition} INDEFINITE sobre un {@code statusDot} que ya no se
+     * muestra, y {@link #refreshStatusDot} reescribía clases de estilo en una fila
+     * que estaba pintando otra cosa. Es el mismo bug que el hallazgo #10 de
+     * {@code AUDITORIA_BUGS_RENDIMIENTO.md} intentó cerrar: aquel apagó la animación
+     * al quedar la celda vacía, pero dejó vivo el listener que la volvía a prender.
+     */
+    private void detachRowState() {
+        unbindCheckbox();
+        // Primero desenganchar, después apagar — al revés, un evento que llegara
+        // entre las dos líneas volvería a prender el pulso que se acaba de apagar.
+        detachStatusListeners();
+        refreshInUseAnimation(null);
+        editTarget = null;
+        editTreeItem = null;
+        schemaItemTarget = null;
+        serverTarget = null;
+        setContextMenu(null);
+    }
+
+    /** Ver {@link #detachRowState()} y el javadoc de {@code statusListenerTarget}. */
+    private void detachStatusListeners() {
+        if (statusListenerTarget != null) {
+            statusListenerTarget.connectionStatusProperty().removeListener(connectionStatusListener);
+            statusListenerTarget.inUseProperty().removeListener(inUseListener);
+            statusListenerTarget = null;
+        }
     }
 
     private void updateServerRow(Server server) {
@@ -779,9 +925,17 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         // RESTRICCIONES" que reemplaza, que solo aparecía en el caso no-lectura):
         // un ícono cerrado/abierto se lee de un vistazo en los dos estados, no hace
         // falta esconder el "normal" para no distraer, como sí hacía falta con un
-        // bloque de texto. Mutaciones condicionales (solo si de verdad cambió, no
-        // en cada updateItem) — mismo criterio contra el parpadeo del árbol que ya
-        // usan las demás filas de esta celda, ver el javadoc de la clase.
+        // bloque de texto.
+        //
+        // Corrección del comentario (2026-09-14, hallazgo C7): acá decía que TODAS las
+        // mutaciones de abajo eran condicionales. No es así — solo lo es la de la clase
+        // de estilo. `setContent` y `setText` se llaman siempre, y está bien que así sea:
+        // las propiedades de JavaFX descartan por su cuenta un `set` con un valor igual
+        // (comparan por equals), así que no invalidan nada ni disparan CSS de más. Lo que
+        // SÍ hay que hacer a mano es lo de la clase de estilo, porque mutar la lista de
+        // clases fuerza una repasada de CSS aunque el resultado final sea idéntico — ese
+        // es el caso que causaba el parpadeo del árbol y el que el javadoc de la clase
+        // describe.
         boolean unrestricted = db.mode() != ServerMode.READ_ONLY;
         modeIcon.setContent(unrestricted ? Icons.LOCK_OPEN : Icons.LOCK);
         modeTooltip.setText(db.mode().label());

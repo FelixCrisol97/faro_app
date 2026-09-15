@@ -42,6 +42,18 @@
         <Label fx:id="searchStatusLabel" styleClass="muted" wrapText="true"/>
     </HBox>
 
+    <!-- "Todas"/"Ninguna" sobre los resultados (2026-09-10, pedido del usuario).
+         Nacen deshabilitados: no hay nada que marcar hasta que un escaneo devuelva
+         algo, y se vuelven a deshabilitar si todo lo encontrado ya estaba agregado
+         (ver DiscoverDialogController#onSearch). -->
+    <HBox spacing="8" alignment="CENTER_LEFT">
+        <Button fx:id="selectAllButton" text="Todas" styleClass="button-secondary"
+                disable="true" onAction="#onSelectAllResults"/>
+        <Button fx:id="selectNoneButton" text="Ninguna" styleClass="button-secondary"
+                disable="true" onAction="#onSelectNoResults"/>
+        <Label styleClass="muted" text="Las que ya tienes agregadas salen apagadas."/>
+    </HBox>
+
     <ScrollPane fitToWidth="true" VBox.vgrow="ALWAYS" styleClass="discover-results-scroll">
         <VBox fx:id="resultsBox" spacing="4"/>
     </ScrollPane>

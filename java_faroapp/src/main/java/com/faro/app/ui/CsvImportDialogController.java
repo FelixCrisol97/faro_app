@@ -113,7 +113,12 @@ public class CsvImportDialogController {
             log.info("Importación de '{}' completa — {} fila(s) a '{}'.'{}'",
                     chosenFile.getName(), task.getValue(), database.alias(), tableName.trim());
             importButton.setDisable(false);
-            statusLabel.setText(task.getValue() + " fila(s) importada(s) a " + tableName + ".");
+            // El servicio deja en el mensaje del Task una nota cuando el archivo NO era
+            // UTF-8 y hubo que releerlo con otra codificación (2026-09-14, hallazgo A8) —
+            // se muestra junto al conteo para que no pase inadvertido.
+            String nota = task.getMessage();
+            statusLabel.setText(task.getValue() + " fila(s) importada(s) a " + tableName
+                    + (nota == null || nota.isBlank() ? "." : " · " + nota));
         });
         task.setOnFailed(e -> {
             log.warn("Importación de '{}' falló: {}", chosenFile.getName(), task.getException().getMessage());

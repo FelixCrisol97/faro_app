@@ -88,6 +88,25 @@ public final class QueryExecutionService {
     private QueryExecutionService() {
     }
 
+    /**
+     * Lo que es igual para TODAS las bases de una corrida — se calcula una sola vez en
+     * {@link #execute} y se le pasa a cada {@link #runOne} (2026-09-10, hallazgo B4).
+     *
+     * <p>Existe además para no seguir engordando la firma de {@code runOne}, que ya
+     * iba por 10 parámetros posicionales: agrupar los invariantes de la corrida en un
+     * solo objeto la baja a 9 y deja explícito cuáles varían por base y cuáles no.
+     *
+     * <p>{@code allStatementsReadOnly} se calcula acá aunque solo lo miren las bases
+     * en modo {@code READ_ONLY}: es una propiedad del SCRIPT, no de la base, y con
+     * varias bodegas protegidas marcadas se recalculaba idéntico una vez por cada una.
+     */
+    record RunPlan(List<String> statements, boolean allStatementsReadOnly, int fetchSize) {
+
+        RunPlan(List<String> statements, int fetchSize) {
+            this(statements, statements.stream().allMatch(QueryExecutionService::isReadOnlyStatement), fetchSize);
+        }
+    }
+
     public static Task<QueryResult> execute(
             List<DatabaseEntry> databases, CredentialStore credentials, ConnectionPoolManager pool,
             Map<String, ExecutionStatus> statusByDatabaseId, String sql, int maxConcurrentDatabases,
@@ -100,15 +119,26 @@ public final class QueryExecutionService {
                 List<Object[]> rows = Collections.synchronizedList(new ArrayList<>());
                 List<String> errors = Collections.synchronizedList(new ArrayList<>());
 
+                // UNA sola vez por corrida, no una por base (2026-09-10, hallazgo B4 de
+                // ANALISIS_OPTIMIZACION_ESTRUCTURA.md). Partir el script es un escaneo
+                // carácter por carácter de todo el texto más un substring por sentencia, y
+                // el resultado es IDÉNTICO para todas las bases —es el mismo `sql`—, pero
+                // se calculaba dentro de runOne, o sea N veces en paralelo, cada una con su
+                // propia copia del script partido viva a la vez. Lo mismo con la validación
+                // de solo lectura: es una función del script, no de la base; de la base solo
+                // depende SI aplica.
+                RunPlan plan = new RunPlan(
+                        SqlStatementSplitter.split(sql),
+                        fetchSize);
                 int poolSize = Math.min(Math.max(1, databases.size()), Math.max(1, maxConcurrentDatabases));
-                log.info("Ejecutando consulta contra {} base(s), concurrencia={}, fetchSize={}, sql.length={}",
-                        databases.size(), poolSize, fetchSize, sql.length());
+                log.info("Ejecutando consulta contra {} base(s), concurrencia={}, fetchSize={}, sql.length={}, sentencias={}",
+                        databases.size(), poolSize, fetchSize, sql.length(), plan.statements().size());
                 ExecutorService executor = Executors.newFixedThreadPool(poolSize);
                 try {
                     List<Callable<Void>> jobs = databases.stream()
                         .<Callable<Void>>map(db -> () -> {
-                            runOne(db, credentials, pool, sql, statusByDatabaseId.get(db.id()), columnsRef, rows, errors,
-                                    fetchSize, engineVersions);
+                            runOne(db, credentials, pool, plan, statusByDatabaseId.get(db.id()), columnsRef, rows, errors,
+                                    engineVersions);
                             return null;
                         })
                         .toList();
@@ -227,9 +257,9 @@ public final class QueryExecutionService {
      * {@code SELECT} no borra los resultados que sí importan).
      */
     private static void runOne(
-            DatabaseEntry db, CredentialStore credentials, ConnectionPoolManager pool, String sql,
+            DatabaseEntry db, CredentialStore credentials, ConnectionPoolManager pool, RunPlan plan,
             ExecutionStatus status, AtomicReference<List<String>> columnsRef,
-            List<Object[]> rows, List<String> errors, int fetchSize,
+            List<Object[]> rows, List<String> errors,
             Map<DbEngine, String> engineVersions) {
         long startedAt = System.currentTimeMillis();
         log.debug("[{}] Iniciando ejecución ({})", db.alias(), db.engine());
@@ -244,24 +274,24 @@ public final class QueryExecutionService {
             return;
         }
 
-        List<String> statements = SqlStatementSplitter.split(sql);
-        log.debug("[{}] Script partido en {} sentencia(s).", db.alias(), statements.size());
-        if (db.mode() == ServerMode.READ_ONLY) {
-            for (String statement : statements) {
-                if (!isReadOnlyStatement(statement)) {
-                    String message = "Base de solo lectura — la consulta debe empezar con "
-                            + "SELECT/WITH/SHOW/EXPLAIN/DESCRIBE";
-                    log.warn("[{}] Ejecución rechazada — {}", db.alias(), message);
-                    errors.add(db.alias() + ": " + message);
-                    reportFailure(status, message, startedAt);
-                    return;
-                }
-            }
+        List<String> statements = plan.statements();
+        if (db.mode() == ServerMode.READ_ONLY && !plan.allStatementsReadOnly()) {
+            String message = "Base de solo lectura — la consulta debe empezar con "
+                    + "SELECT/WITH/SHOW/EXPLAIN/DESCRIBE";
+            log.warn("[{}] Ejecución rechazada — {}", db.alias(), message);
+            errors.add(db.alias() + ": " + message);
+            reportFailure(status, message, startedAt);
+            return;
         }
 
         int rowCount = 0;
+        // Fuera del try para poder restaurar autoCommit en el finally y, sobre todo, para
+        // que el catch sepa si hay una transacción abierta que revertir.
+        boolean useCursor = false;
+        Connection openConnection = null;
         try (Connection conn = pool.getConnection(db, creds.get());
              Statement jdbcStatement = conn.createStatement()) {
+            openConnection = conn;
             // Conexión real, exitosa, de verdad — mismo punto de sincronización real
             // que la carga de esquema de DatabaseTreeItem (2026-08-28, pedido
             // explícito del usuario: "estos círculos de conexión deberían estar
@@ -290,7 +320,13 @@ public final class QueryExecutionService {
                 attachKillFallback(status, db, creds.get(), pool, conn);
             }
             jdbcStatement.setQueryTimeout(db.queryTimeoutSeconds());
-            jdbcStatement.setFetchSize(fetchSize);
+            jdbcStatement.setFetchSize(plan.fetchSize());
+            // Cursor real en PostgreSQL — ver shouldUseCursor(). Tiene que ir DESPUÉS de
+            // setFetchSize (el driver mira las dos cosas juntas) y antes de ejecutar nada.
+            useCursor = shouldUseCursor(db, plan);
+            if (useCursor) {
+                conn.setAutoCommit(false);
+            }
 
             List<String> lastColumnNames = null;
             List<Object[]> lastRows = null;
@@ -329,6 +365,13 @@ public final class QueryExecutionService {
                 rows.addAll(lastRows);
                 rowCount = lastRows.size();
             }
+            if (useCursor) {
+                // Cierra la transacción de lectura. No hay nada que persistir —
+                // shouldUseCursor solo deja entrar scripts de solo lectura— pero dejarla
+                // abierta mantendría un snapshot vivo en el servidor hasta que la conexión
+                // se reciclara.
+                conn.commit();
+            }
             long elapsed = System.currentTimeMillis() - startedAt;
             log.info("[{}] OK — {} fila(s) en {} ms.", db.alias(), rowCount, elapsed);
             reportSuccess(status, rowCount, startedAt);
@@ -362,16 +405,116 @@ public final class QueryExecutionService {
             errors.add(db.alias() + ": " + e.getMessage());
             reportFailure(status, String.valueOf(e.getMessage()), startedAt);
         } finally {
+            if (useCursor && openConnection != null) {
+                endCursorTransaction(db, openConnection);
+            }
             if (status != null) {
                 status.attachStatement(null);
             }
         }
     }
 
-    /** Recorta el texto de una sentencia para el log — un INSERT con miles de literales no debe volar el archivo de log. */
+    /**
+     * Cierra la transacción abierta por el modo cursor y restaura el {@code autoCommit}
+     * antes de que la conexión vuelva al pool.
+     *
+     * <p><b>El orden importa y no es intercambiable:</b> según el contrato de JDBC,
+     * cambiar {@code autoCommit} con una transacción abierta la <b>confirma
+     * implícitamente</b>. Por eso primero se revierte lo que quede vivo (en el camino
+     * de éxito ya se hizo {@code commit}, así que esto no encuentra nada; en el de
+     * error sí) y recién después se restaura la bandera.
+     *
+     * <p>Se restaura a mano aunque HikariCP también lo haría al reciclar la conexión
+     * ({@code DIRTY_BIT_AUTOCOMMIT} → {@code resetConnectionState}, verificado en su
+     * código): que la transacción termine de forma deliberada no debe depender del
+     * comportamiento interno del pool.
+     *
+     * <p>Mejor esfuerzo — si el servidor ya cerró la sesión (una cancelación con
+     * {@code pg_cancel_backend} de por medio) estas llamadas fallan, y eso no es un
+     * error que reportarle al usuario: la consulta ya terminó de la forma que
+     * corresponda y la conexión se va a descartar igual.
+     */
+    private static void endCursorTransaction(DatabaseEntry db, Connection conn) {
+        try {
+            if (!conn.getAutoCommit()) {
+                conn.rollback();
+            }
+        } catch (SQLException e) {
+            log.debug("[{}] rollback al cerrar el modo cursor falló (la sesión ya pudo haber terminado): {}",
+                    db.alias(), e.getMessage());
+        }
+        try {
+            conn.setAutoCommit(true);
+        } catch (SQLException e) {
+            log.debug("[{}] no se pudo restaurar autoCommit: {}", db.alias(), e.getMessage());
+        }
+    }
+
+    /**
+     * Si esta corrida debe traer las filas con un cursor del servidor en vez de
+     * cargarlas todas en el driver (2026-09-14).
+     *
+     * <p><b>El problema.</b> {@code Statement#setFetchSize} —la preferencia "fetch" de
+     * Preferencias → Rendimiento— <b>no hacía absolutamente nada en PostgreSQL</b>. La
+     * documentación de pgJDBC exige cuatro condiciones para usar cursor, y tres ya se
+     * cumplían (protocolo V3, {@code TYPE_FORWARD_ONLY} por defecto de
+     * {@code createStatement()}, y una sentencia a la vez porque
+     * {@link SqlStatementSplitter} ya las separa). Faltaba la cuarta, textual:
+     * <i>"The Connection must not be in autocommit mode. The backend closes cursors at
+     * the end of transactions, so in autocommit mode the backend will have closed the
+     * cursor before anything can be fetched from it."</i>
+     *
+     * <p>Sin cursor, el driver <b>materializa el resultado completo</b> antes de que
+     * {@code execute} retorne; recién entonces el bucle de {@link #runOne} lo copia a
+     * los {@code Object[]}. Al terminar el bucle, el resultado vive <b>dos veces</b>:
+     * el buffer del driver y las filas de la app. Es la causa de memoria que quedaba
+     * en pie después de haber quitado las otras dos copias (ver
+     * {@code OPTIMIZACION_RENDIMIENTO.md}), y el escenario del {@code OutOfMemoryError}
+     * reportado con 6 bodegas × 500,000 filas.
+     *
+     * <p><b>Por qué SOLO con scripts de solo lectura.</b> Desactivar el autocommit
+     * convierte el script entero en una transacción: un fallo en la sentencia 3 de 5
+     * desharía las dos primeras, cuando hoy cada una se confirma sola. Eso es un cambio
+     * de comportamiento que nadie pidió. Limitándolo a scripts donde no hay nada que
+     * confirmar, el cambio es <b>invisible</b>: mismo resultado, mismo manejo de
+     * errores, solo que las filas llegan de a {@code fetchSize} en vez de todas juntas.
+     * La condición ya estaba calculada en {@link RunPlan#allStatementsReadOnly()}, que
+     * hasta ahora solo servía para el modo Solo lectura del árbol.
+     *
+     * <p>SQL Server no entra: su driver respeta {@code setFetchSize} sin tocar el
+     * autocommit, así que ahí no hay nada que arreglar y cambiarlo solo agregaría
+     * semántica transaccional sin ganancia.
+     */
+    static boolean shouldUseCursor(DatabaseEntry db, RunPlan plan) {
+        return db.engine() == DbEngine.POSTGRES && plan.allStatementsReadOnly();
+    }
+
+    /** Cuántos caracteres de una sentencia llegan al archivo de log — un INSERT con miles de literales no debe volar el log. */
+    private static final int LOG_STATEMENT_LIMIT = 500;
+
+    /**
+     * Recorta el texto de una sentencia para el log.
+     *
+     * <p><b>Recorta ANTES de limpiar, no después</b> (2026-09-12): la versión anterior
+     * hacía {@code statement.replace('\n',' ').replace('\r',' ').strip()} sobre el
+     * texto COMPLETO y recién entonces cortaba a 500 caracteres. Cada {@code replace}
+     * copia la cadena entera, así que una sentencia de 2 MB producía ~4 MB de basura
+     * — y esto corre por cada sentencia, por cada base, en cada corrida: con 20
+     * bodegas y un {@code INSERT} generado grande (algo que esta misma app produce)
+     * son decenas de MB de copias temporales solo para escribir 500 caracteres.
+     *
+     * <p>El argumento además se evalúa SIEMPRE, aunque DEBUG estuviera apagado: el
+     * formato diferido de SLF4J difiere el {@code toString} de los argumentos, no la
+     * llamada al método que los produce. Recortando primero, el costo pasa a ser fijo
+     * (500 caracteres) en vez de proporcional al tamaño del script.
+     */
     private static String truncateForLog(String statement) {
-        String oneLine = statement.replace('\n', ' ').replace('\r', ' ').strip();
-        return oneLine.length() > 500 ? oneLine.substring(0, 500) + "… (truncado, " + oneLine.length() + " caracteres)" : oneLine;
+        boolean truncated = statement.length() > LOG_STATEMENT_LIMIT;
+        String head = truncated ? statement.substring(0, LOG_STATEMENT_LIMIT) : statement;
+        String oneLine = head.replace('\n', ' ').replace('\r', ' ').strip();
+        return truncated
+                ? oneLine + "… (truncado, " + statement.length() + " caracteres)"
+                : oneLine;
     }
 
     /**
@@ -393,7 +536,7 @@ public final class QueryExecutionService {
      * "empieza" con `SELECT` a la mitad, sin ser dos sentencias). Más
      * seguro explicar el error real que adivinar mal una corrección.
      */
-    private static String enrichErrorMessage(DbEngine engine, String rawMessage) {
+    static String enrichErrorMessage(DbEngine engine, String rawMessage) {
         if (engine != DbEngine.POSTGRES || rawMessage == null) {
             return rawMessage;
         }
@@ -472,7 +615,7 @@ public final class QueryExecutionService {
     }
 
     /** Ver el javadoc de la clase — heurística por primera palabra clave, no un parser SQL completo. */
-    private static boolean isReadOnlyStatement(String sql) {
+    static boolean isReadOnlyStatement(String sql) {
         Matcher noise = LEADING_NOISE.matcher(sql);
         String rest = (noise.lookingAt() ? sql.substring(noise.end()) : sql).stripLeading();
 

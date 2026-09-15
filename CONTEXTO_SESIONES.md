@@ -3323,3 +3323,379 @@ El README ahora trae los comandos en cmd **y** en PowerShell (cambia la continua
 **Confirmado en vivo por el usuario:** arranque sin pools (con log), hallazgo #11, legibilidad de la casilla del certificado, y flechas alineadas.
 
 **Sin confirmar en vivo todavía:** la comparación desde el menú contextual real (se verificó el servicio de punta a punta con una sonda contra las 6 bases, pero nadie ha hecho clic en el ítem del menú); el efecto de desmarcar la casilla del certificado contra un SQL Server con certificado autofirmado; y los arreglos #2/#4/#5/#6/#10, que solo se confirman usándolos.
+
+---
+
+## 2026-09-08/11 — Análisis de optimización y estructura (36 hallazgos), los dos bloques implementados, 7 pedidos de uso real, acciones de grupo, y acento negro
+
+Sesión larga y en varias tandas. Orden real de los hechos, no temático.
+
+### 1. Análisis nuevo: `ANALISIS_OPTIMIZACION_ESTRUCTURA.md` — 36 hallazgos
+
+Pedido: *"análisis de optimización de código y rendimiento… así como reestructuración, identación, comentarios, refactorización, buenas prácticas, nada de code smell"*.
+
+Se releyeron las 51 clases completas. Punto de partida confirmado antes de escribir nada: `mvn compile` limpio y **89/89 tests**. Los 12 hallazgos del pase anterior se revisaron uno por uno contra el código actual — **los 12 seguían arreglados**, y dos resultaron estar arreglados **a medias**: el diagnóstico era correcto pero el arreglo no cubría todo el caso. Eso entró como hallazgo nuevo.
+
+Estructura: §A correctitud (12), §B rendimiento (13), §C estructura y buenas prácticas (11) — 36 en total.
+
+### 2. Primer bloque — los dos arreglos a medias, y el gemelo del #3
+
+- **A1 — `ExecutionTableFactory`.** Se agregaba un listener a `stateProperty()` con una lambda anónima en **cada** `updateItem` y no se quitaba nunca; quedó fuera del bloque de "desatar SIEMPRE primero" que ya cubría las otras 7 propiedades. Dos efectos: la celda se recicla de una bodega a otra y el listener viejo sigue pintando el estado de la anterior sobre la fila nueva, y cada repintado suma un listener más.
+- **A2 — `ConnectionTreeCell`: el #10 quedó a medias.** Aquel apagó la animación al quedar la celda vacía, pero **dejó vivo el listener que la vuelve a prender**. `statusListenerTarget` solo se reasignaba al mostrar otra base; ninguna de las otras 6 ramas de `updateItem` la tocaba. Escenario: celda reciclada a una fila de esquema, la base anterior pasa a "en uso" → `FadeTransition` INDEFINITE animando un `statusDot` invisible. Arreglado con `detachRowState()`, que además elimina las **5 líneas repetidas 6 veces** (C4.1) — el mejor tipo de refactor: el que hace el descuido imposible, no solo menos probable.
+- **A4 — el gemelo del hallazgo #3, una capa más arriba.** Aquel arregló los pools viejos tras importar; los 7 cachés estáticos de `SchemaIntrospector` están indexados **por id igual que los pools** y no se tocaron. `invalidate()` tenía **un solo llamador** en todo el proyecto ("Recargar esquema"). Eliminar una base o importar configuración dejaba vivo el esquema del servidor anterior: el árbol listaba tablas inexistentes y "Generar SELECT" armaba SQL sobre columnas de otra base, en silencio. Nuevo `invalidateAll()`, análogo de `pool.closeAll()`, que además **sube la generación** de cada base conocida (incluidas las que tienen un fetch en vuelo, que salen de `loading`/`categoryLoading`) — si no, un fetch contra el servidor viejo repoblaría la caché recién limpiada justo después del import.
+- **A5** — `Tooltip` nuevo creado e instalado en cada repintado de una fila de error, contra el criterio de toda la clase.
+- **B2.1** — `matchesAnyName` construía el mapa filtrado COMPLETO para después preguntar si algo había quedado. Ahora sale en la primera coincidencia y compara con `regionMatches(true, …)` sin copiar — misma técnica del hallazgo #9, en otro archivo.
+
+**96/96 tests** (89 + 7). Los 5 de `SchemaTreeNodeTest` existen porque se reescribió `matchesAnyName` y el riesgo real era cambiar la semántica: el caso de filtro vacío con todas las categorías vacías tiene que seguir dando `false`, no `true`.
+
+**Corrección del propio análisis:** §C11 decía que el README tenía el conteo de tests desactualizado. **No es cierto — el README no trae ningún número.** La cifra vive solo en `AUDITORIA_BUGS_RENDIMIENTO.md` y ahí es un registro fechado que no hay que reescribir. Corregido en el documento.
+
+### 3. Siete pedidos de uso real (con capturas)
+
+1. **La pestaña no decía contra qué base corre** — el único aviso estaba en la barra de estado de abajo. Encabezado de **2 líneas** (elegido entre 3 opciones): nombre arriba, base debajo en monoespaciada. Una base → su alias; varias → "3 bases"; ninguna → "sin base seleccionada". En la pestaña activa sigue **en vivo** las casillas del árbol, no la selección guardada. De paso el punto de "sin guardar" dejó de concatenarse al título (era `replace("● ", "")` en dos sitios, frágil e incompatible con 2 líneas).
+2. **`ERROR: invalid byte sequence for encoding "UTF8": 0xe9 0x73 0x20`** al expandir el esquema. Diagnosticado: lo tira el **servidor**, no Faro — base con texto que no es UTF-8 válido, típico de una creada como `SQL_ASCII` con contenido LATIN1 (`0xe9` es `é`). Nuevo campo **Codificación** por base (solo PostgreSQL), que pone `client_encoding` **más `allowEncodingChanges=true`**: sin esa bandera pgJDBC **corta la conexión** al ver que el encoding dejó de ser UTF8. El error del árbol ahora termina en *"Editar base → Codificación (prueba LATIN1 o WIN1252)"*. **Sin verificar contra la base real que lo produjo.**
+3. **Descubrir bases** — tres cosas distintas: `postgres` no se excluía (la rama de SQL Server sí saltaba master/tempdb/model/msdb con `database_id > 4`; la de PostgreSQL no tenía el filtro equivalente); el diálogo **no recibía el registro**, así que listaba todo como nuevo y `onAddSelected` creaba un `DatabaseEntry` con id nuevo por cada marcada — de ahí los duplicados; y faltaban **Todas/Ninguna**.
+4. **Contraseñas al exportar.** Decisión del usuario tras ver la alternativa con frase maestra y descartarla: **texto legible**, casilla desmarcada siempre (no se hereda de la exportación anterior), advertencia visible antes de escribir, y el archivo sugerido se llama `faro-config-con-credenciales.json`. `connections.json` **no cambia** — hay un test que falla si alguna vez le entra la sección de credenciales. Documentado en el README como excepción deliberada al diseño.
+5. y 6. **El árbol volvía al tope y reabría todos los grupos.** Misma causa: `buildRoot` ponía `setExpanded(true)` fijo, y `refreshTree()` reconstruye el árbol entero en cada cambio *y en cada tecla del buscador*. Ahora recuerda qué grupos quedaron abiertos, conserva el scroll, y al agregar una base lleva hasta ella. **Matiz:** las filas de **base** expandidas se restauran en todos los caminos **menos** el buscador — hacerlo por tecla reabriría el hallazgo #1.
+
+### 4. Empaquetado verificado de verdad
+
+`Faro-0.1.0-portable.zip`, 61.5 MB. Verificado: los **dos** drivers JDBC registrados dentro del jar (el bug del `ServicesResourceTransformer` solo se manifiesta empaquetado), 380 entradas bajo `runtime/`, y **arranque real desde el zip extraído en otra carpeta**, no desde `target/dist`. No hay 7-Zip instalado en el equipo; se usó `tar.exe` (bsdtar), que es otra implementación real y no el compresor de Explorer contra el que advierte el README.
+
+**Efecto secundario a registrar:** probar el `.exe` hizo que la app **escribiera en `~/.faro/`**. Se pretendía matarla con `Stop-Process` justo para evitarlo, pero se cerró limpiamente antes por su cuenta y el cierre limpio guarda. Verificado que no hubo pérdida: cargó 2 grupos + 1 suelta y guardó lo mismo.
+
+El zip no se veía en el explorador de VS Code porque **`target/` está en `.gitignore`** y VS Code oculta los archivos ignorados. Se copió al escritorio, con SHA-256 comparado contra el original.
+
+### 5. Segundo bloque — todas las optimizaciones de §B salvo dos
+
+- **B1 — el resaltado de sintaxis salió del hilo de la UI.** Era la variante **síncrona** del demo de RichTextFX, la que la propia biblioteca publica junto a una asíncrona porque no aguanta documentos grandes: cada 150 ms de pausa recorría el documento COMPLETO con regex y reconstruía todos los spans, en el hilo que dibuja la ventana. En vez del plumbing de ReactFX se usó el **contador de generación** que el proyecto ya tiene en `SchemaIntrospector` — si el usuario sigue escribiendo, el resultado viejo describe un texto que ya no existe y se descarta en vez de pintar los colores corridos. `getText()` se queda en el hilo de la UI (obligatorio), que es la parte barata de las tres.
+- **A6 — se cierra una función que llevaba un mes a medias.** El 2026-08-22 se agregaron palabras reservadas a pedido del usuario (`exec`, `procedure`). Entraron a `SqlFormatter.KEYWORDS` —público justamente para que no haya una segunda lista— pero `SqlEditorFactory` mantenía la suya. Comparadas con un diff real: **26 palabras se autocompletaban y nunca se resaltaban** (justo las que se habían pedido) y 5 agregados se resaltaban sin autocompletarse. Ahora el regex se arma desde esa única lista, y el editor reconoce comentarios de bloque, que ignoraba.
+- **A3 — `connections.json` se podía perder entero.** `Files.writeString` abre con `TRUNCATE_EXISTING`: **vacía el archivo y después escribe**. Si se corta a la mitad, `loadOrCreateRegistry` captura la excepción y arranca con registro **vacío**. Escritura atómica (temporal + `ATOMIC_MOVE`) en `connections.json` **y** `credentials.dat`, más espera acotada del autoguardado en `shutdown()` — `autosaveTimer.cancel()` impide ticks futuros pero no espera al que ya corre.
+- **B4** — el script se partía una vez **por base**; ahora una vez por corrida, con un `RunPlan` que de paso baja `runOne` de 10 parámetros a 9.
+- **B3** — el grid creaba un `SimpleObjectProperty` por celda visible **y por repintado** (~500 objetos por pulso de render haciendo scroll). Ahora lee del `cellFactory`, cero asignaciones. Columnas con `setAll` en vez de N `add`.
+- **B6 + A10** — exportar 3M filas × 10 columnas generaba decenas de millones de cadenas temporales; encabezados sin escapar; retorno de carro no cubierto.
+- **B7 + A7** — el pool se construía dentro de `computeIfAbsent` (abre una conexión real, y mientras corre bloquea el bin del mapa: dos bases distintas se bloqueaban entre sí). Y cerrar pools congelaba la ventana. **Matiz importante:** al cerrar la app sí hay que esperar, porque la JVM sale y mata los hilos demonio a medio cierre → `closeAllAndWait()` aparte.
+- **B2 completo** (recorrido único + debounce de 200 ms), **B5**, **B8**, **B9**, **B10**, **B12**, **A11**, **A12**.
+- **C6** — borrados `styles.css` y `styles-dark.css` (**51 KB muertos** en el JAR y el ejecutable), `legacyStylesheetResourcePath()`, el constructor de 3 args de `DatabaseTreeItem` y la rama inalcanzable de `SqlEditorFactory`. Peor que el tamaño: al abrirlos parecían vigentes, o sea que conservaban la trampa de "editar el archivo equivocado" que el sistema de tokens vino a cerrar.
+- **C8 parcial** — 11 tests para `isReadOnlyStatement`, que es **lo único que hace cumplir el modo Solo lectura** y no tenía ninguno. Uno **documenta a propósito** el agujero conocido: un `WITH x AS (DELETE …)` pasa el filtro.
+
+**Abiertos a propósito:** **B11** (un viaje de red de microsegundos, no justifica la complejidad), **B13** (`minimumIdle`, decisión de producto), y **A9** (alto de fila del árbol — el arreglo es mecánico pero toca un alto que el usuario ya ajustó a mano tres veces y solo falla en el extremo del slider).
+
+### 6. Acento negro — y el token que faltaba desde siempre
+
+Pedido: *"¿habrá posibilidad de tener un color de accent negro?"*. Elegido **monocromático**: negro en tema claro, blanco en oscuro. No es una excepción al diseño sino su caso extremo — los 6 acentos ya usan una versión más clara en tema oscuro porque `-token-accent-base` **no solo pinta fondos de botón**: también es color de texto, el subrayado de la pestaña activa, el trazo de íconos y el color de las palabras reservadas del editor.
+
+Eso destapó que `.button` tenía **texto blanco fijo**, lo que asume que todo acento es oscuro. Nuevo token **`-token-accent-on`**. Midiendo el contraste WCAG real de cada acento oscuro con texto blanco salió que **ninguno llega al 3:1** de texto en negrita: amber **1.7**, teal **1.9**, blue 2.3, violet 2.5, rose 2.7, indigo 2.8. Se corrigieron **solo los dos por debajo de 2:1**; los otros cuatro se dejaron **exactamente como se ven hoy** — cambiarlos altera el acento por defecto sin que nadie lo pidiera.
+
+**Dos bugs reportados al probarlo, los dos con la misma causa:**
+
+- **El ícono del botón Ejecutar desaparecía** — `.icon-fill` con blanco fijo, el mismo defecto del texto pero en el ícono, que se había pasado por alto.
+- **Las palabras reservadas dejaron de distinguirse.** La corrección del usuario (*"números y cadenas sí se marcan, las reservadas no"*) fue clave: **descartó que fuera el resaltado asíncrono**. De los 4 colores de sintaxis, las reservadas eran **las únicas atadas al acento**; cadenas/números/comentarios ya tenían tokens propios, por eso seguían bien. Con negro en oscuro el acento (`#FAFAFA`) y el texto normal (`#F4F4F5`) dan **1.05:1** entre sí, y como todo el editor va en negrita tampoco el peso las distinguía. Nuevo `-token-editor-keyword`: para los 6 acentos vale lo mismo que antes (cero cambio), y negro usa el índigo de siempre — que la interfaz sea monocromática no obliga al editor a serlo.
+
+**El test de contraste se verificó por mutación**, y la **primera corrida dio un falso OK**: la sustitución no había calzado por un paréntesis, así que nunca llegó a ejecutar el caso malo. Repetida verificando que la mutación se aplicara, falló con el mensaje esperado (`1.05:1 — se resalta pero no se nota`).
+
+### 7. Acciones de grupo, orden, y herencia al descubrir
+
+Pedido: marcar/desmarcar por grupo, renombrar grupo, y cambiar el orden de grupos y bases.
+
+Para reordenar se eligió **Subir/Bajar en el menú contextual + Alt+↑/↓** sobre arrastrar-y-soltar: `ConnectionTreeCell` tiene **14 manejadores de mouse**, varios agregados para cerrar bugs reportados (el doble clic que abría "Editar BD", el candado, las filas de esquema), y la fila de base hoy **consume todo clic primario** como red de seguridad. El arrastre queda como paso aparte si se quiere.
+
+- **Marcar todas por grupo NO usa la propagación de `CheckBoxTreeItem`** — esa está desactivada desde el hallazgo #1 porque recorría los hijos de cada base. Se tocan las casillas de los hijos directamente: pedirle los hijos a una fila de **grupo** es gratis; lo que nunca hay que hacer es pedírselos a una de **base**.
+- El orden del árbol **es** el orden de las listas del registro, y eso es lo que se persiste — reordenar ahí alcanza, no hay campo de posición que mantener en sincronía.
+- **Descubrir bases en esta IP dejaba las nuevas siempre en "Sin grupo"**, aunque el escaneo hubiera salido de una base agrupada. Ahora heredan su grupo. (El del menú `Conexiones → Descubrir` no parte de ninguna base, así que sigue igual.)
+
+Al agregar esto el constructor de `ConnectionTreeCell` se iba a **14 parámetros posicionales**, muchos del mismo tipo: `onEdit` y `onDelete` son los dos `Consumer<DatabaseEntry>`, así que intercambiarlos compilaba sin protestar y hacía que el lápiz borrara la base. Agrupados en `ConnectionTreeActions`.
+
+### 8. Bug de CSS en el diálogo de descubrir — introducido en esta misma sesión
+
+Reportado: *"en modo oscuro… no se ve nada de la lista, está todo blanco"*.
+
+`.discover-results-scroll` se usaba como clase en el FXML pero **nunca tuvo regla de fondo**: ese `ScrollPane` se quedaba con el fondo claro de Modena en los dos temas. Mientras las casillas tampoco tenían color propio quedaba feo pero legible; **al ponerles `-token-text` en el punto 3 de esta misma sesión pasaron a ser casi blancas en tema oscuro** — blanco sobre blanco. El fondo faltaba desde el principio; el cambio lo volvió visible.
+
+Un `ScrollPane` necesita **dos** reglas: Modena pinta su viewport con `-fx-background`, distinta de `-fx-background-color`.
+
+**Medido con sonda, no a ojo** — y apareció un segundo problema que no se había reportado: las filas "ya agregada" medían **el mismo color** que las seleccionables (`#F4F4F5` las dos en oscuro), porque `.discover-already-added:disabled` perdía por especificidad contra `.discover-results-scroll .check-box`. Medición final: claro `#F1F5F9` / `#0F172A` / `#475569` (16.3:1); oscuro `#27272A` / `#F4F4F5` / `#A1A1AA` (13.6:1).
+
+### Hallazgo pendiente de mayor impacto: `fetchSize` no hace nada en PostgreSQL
+
+Confirmado contra la documentación oficial de pgJDBC, no de memoria. El cursor necesita cuatro condiciones; tres ya se cumplen (protocolo V3, `TYPE_FORWARD_ONLY`, una sentencia a la vez). **Falta la cuarta:** *"The Connection must not be in autocommit mode."* — `setAutoCommit(false)` no se llama nunca en `QueryExecutionService`.
+
+Consecuencia: en una consulta de 500,000 filas pgJDBC **materializa el resultado completo dentro del driver** antes de retornar; recién entonces el bucle lo copia a los `Object[]`. Al final del bucle el resultado vive **dos veces**. Es el escenario del `OutOfMemoryError` ya reportado, y la causa que quedaba sin tocar tras haber quitado las otras dos copias. La preferencia "fetch 500" es hoy **decorativa en ~15 de las 19 bases** del usuario.
+
+**No implementado**: desactivar el autocommit cambia la semántica transaccional (un script con `INSERT`/`UPDATE` necesitaría `commit()` explícito y `rollback()` en el error) y hay que confirmar que HikariCP restaura el `autoCommit` al devolver la conexión.
+
+### Verificación de toda la sesión
+
+**131/131 tests en verde**, con recompilación desde cero (89 → 131, +42). Todos lógica pura o contrato de estructura; se mantuvo el criterio de que la suite permanente **no arranque JavaFX**.
+
+Para lo visual se usaron **sondas temporales** que arrancan el toolkit, miden y **se borran**: carga real de los 2 FXML tocados comprobando que cada `@FXML` quedó inyectado (un `fx:id` mal escrito no rompe la carga, deja el campo en `null` y truena en vivo), y los colores efectivos del diálogo de descubrir en ambos temas.
+
+**Sin confirmar en vivo:** el encabezado de 2 líneas, el combo de codificación (y que LATIN1 sea la correcta para esa base), las casillas apagadas del escaneo, el diálogo de exportar, que el árbol conserve grupos y scroll, los menús de grupo, Alt+↑/↓, y el acento negro completo.
+
+---
+
+## 2026-09-12 — Auditoría del código YA modificado: 7 hallazgos nuevos, 4 de ellos introducidos en el pase anterior
+
+Pedido: *"documenta nuevamente, haz un análisis exhaustivo"*. Los §A/§B/§C del
+análisis auditaron el código **antes** de tocarlo; esta ronda audita el resultado —
+38 archivos cambiados, `src/main` de ~9,950 a **12,648** líneas. La pregunta es la
+que importa después de un pase grande: **qué se rompió al arreglar**. Resultado en
+`java_faroapp/ANALISIS_OPTIMIZACION_ESTRUCTURA.md`, §D.
+
+**131/131 tests en verde**, con recompilación desde cero, antes y después.
+
+### Lo primero: verificar el cambio de mayor consecuencia, no razonarlo
+
+B3 reescribió el mecanismo de render del grid (se quitó el `cellValueFactory` y se lee
+desde el `cellFactory`). Si `TableCell` no llamara a `updateItem` en algún camino, el
+grid saldría **vacío** y ningún test de la suite se enteraría. Se verificó con una
+sonda: renderiza en la primera corrida, **al repoblar** con otro resultado (segunda
+consulta) y con filas más cortas que las columnas. Correcto en los tres.
+
+### Los 7 hallazgos
+
+- **[MEDIA] El swatch del acento "negro" era invisible en tema oscuro.** `#18181B`
+  sobre `-token-surface` `#18181B`: **1.00:1**. En Preferencias se veían 6 muestras y
+  un hueco. La causa de fondo no es el negro sino una decisión anterior que dejó de
+  valer — el swatch usa siempre el valor de tema claro, a propósito, y eso funcionaba
+  solo porque ninguno de los 6 acentos se acercaba al fondo de ningún tema. Arreglado
+  con contorno en **todos** los círculos. Medido: el primer intento con
+  `-token-border` dio **1.70:1**, demasiado tenue para un anillo de 1px justo en el
+  caso que venía a rescatar; con `-token-text-muted`, **6.91:1** oscuro / 7.58:1 claro.
+- **[MEDIA] Reordenar con el buscador activo mueve filas invisibles.** Registro
+  `[A,B,C]`, filtro oculta `B`, el árbol muestra `[A,C]`: "Subir" sobre `C` cambia el
+  registro de verdad pero **en pantalla no pasa nada**, y el orden guardado se
+  desordena sin que el usuario lo vea. Bloqueado con aviso mientras haya filtro.
+  "Ordenar A-Z" se revisó y **no** lleva la guarda: ordena la lista completa, el
+  resultado es determinista sin importar el filtro.
+- **[MEDIA] `truncateForLog` copiaba la sentencia completa antes de recortarla.**
+  Limpiaba primero (`replace` × 2, copia entera) y recortaba después, para escribir
+  500 caracteres al log. Por sentencia, por base, en cada corrida: con 20 bodegas y un
+  `INSERT` generado grande, decenas de MB de copias temporales. Agravante: el argumento
+  se evalúa aunque DEBUG esté apagado — SLF4J difiere el `toString` de los argumentos,
+  no la llamada que los produce. **Este se le escapó a §B** pese a haber revisado
+  `QueryExecutionService` entero: aquella revisión miró el camino de los DATOS y no el
+  del logging. Anotado como límite de aquel método.
+- **[BAJA] `serverTarget` no se limpiaba en la rama de fila de base** — la misma clase
+  de referencia obsoleta que causó A2, en una clase que ya tuvo ese bug dos veces. Hoy
+  no es alcanzable; cerrado por la clase de bug, no por el síntoma.
+- **[BAJA] La escritura atómica dejaba un `.tmp` huérfano** si fallaba a mitad.
+- **[BAJA] Dos `toLowerCase()` sin `Locale`.** Uno construye una **clase CSS**: en
+  locale turco `"INFO"` da `"ınfo"` y la regla deja de aplicar, o sea las líneas de
+  Diagnóstico perderían el color sin ningún error. El mismo barrido cerró **C5** — ya
+  no queda ningún import cualificado en línea en todo `src/main`.
+- **[BAJA] El encabezado de pestaña hacía dos recorridos del árbol por casilla** — y
+  uno de ellos construía una lista con TODAS las bases solo para buscar un alias que
+  ya venía en el objeto. Misma clase de desperdicio que B2, introducida por el arreglo
+  de otra cosa.
+
+### Cerrados de paso
+
+**C4.2** (las cuatro copias del mismo `stream` con el mismo cast sin chequear, ahora
+`selectedDatabases()`) y **C5** completo.
+
+### Revisado y limpio
+
+Recursos JDBC todos en try-with-resources; ningún `catch` vacío sin log; ningún
+`System.out`/`printStackTrace`; `logback.xml` con rotación correcta (20 MB/día, 14
+días, 500 MB de tope); y el orden de los 13 componentes de `ConnectionTreeActions`
+verificado uno por uno contra las 13 referencias a método — correcto.
+
+### Riesgo que queda abierto, declarado
+
+`ConnectionTreeActions` tiene 13 componentes posicionales, seis de ellos
+`Consumer<DatabaseEntry>`. Intercambiar dos **compila** y falla en vivo: con
+`onEdit`/`onDelete` cruzados, el lápiz borraría la base. El record fue una mejora
+clara sobre los 14 parámetros sueltos, pero **reduce el riesgo, no lo elimina**.
+
+### Y el dato que más pesa sobre §C1
+
+`MainController` pasó de **2,621 a 3,324 líneas** durante este pase — creció 27%
+mientras su plan de división seguía sin ejecutarse. Cada función nueva entra ahí
+porque es donde está todo lo demás; es el mecanismo por el que una clase así crece, y
+va a seguir pasando.
+
+---
+
+## 2026-09-14 — Cierre de los pendientes del análisis: el cursor de PostgreSQL, y que la máquina atrape lo que las auditorías atrapaban a mano
+
+Pedido: *"has el modo plan para terminar de corregir y todo esto"*. Quedaban 9
+hallazgos abiertos y 2 parciales de los 36 del análisis, más uno sin numerar que
+había salido del uso real y pesaba más que todos los demás juntos.
+
+**158/158 tests en verde** (eran 131), con `target/classes` borrado antes de correr,
+y **cero advertencias** del compilador con `-Xlint:all` puesto.
+
+### Lo que de verdad importaba: `fetchSize` no hacía nada en PostgreSQL
+
+Confirmado contra la documentación oficial de pgJDBC: el driver usa cursor solo si se
+cumplen **cuatro** condiciones. Tres ya se cumplían (protocolo V3,
+`TYPE_FORWARD_ONLY`, una sentencia a la vez porque el splitter ya las separa). La
+cuarta —*"The `Connection` must not be in autocommit mode"*— no. Consecuencia: el
+driver **materializaba el resultado completo** antes de retornar, así que al terminar
+el bucle el resultado vivía dos veces. Era la causa de memoria que quedaba en pie
+después de haber quitado las otras dos copias en las rondas anteriores, la que tumbó
+la app con 6 bodegas × 500K filas.
+
+**El diseño está en la condición, no en el cambio.** Desactivar el autocommit a secas
+le habría cambiado la semántica a todos los scripts que escriben: de "cada sentencia
+se confirma sola" a "todo o nada", y un fallo en la sentencia 3 de 5 desharía las dos
+primeras. Nadie pidió eso. Así que el cursor se activa **solo** cuando el motor es
+PostgreSQL **y** todas las sentencias son de solo lectura — condición que ya estaba
+calculada (`RunPlan.allStatementsReadOnly`, que hasta ahora solo servía para el modo
+Solo lectura). Bajo esa condición no hay nada que confirmar, así que no hay semántica
+que cambiar.
+
+Dos detalles de JDBC que no son adorno: `setAutoCommit(true)` se restaura a mano
+aunque HikariCP también lo haría (verificado: `DIRTY_BIT_AUTOCOMMIT` →
+`resetConnectionState`), porque el `commit`/`rollback` tiene que ser deliberado y no
+depender del pool; y el orden importa — cambiar `autoCommit` con una transacción
+abierta la confirma implícitamente, según el contrato de JDBC. Por eso es
+rollback **y después** `setAutoCommit(true)`.
+
+**Lo que no se puede verificar acá:** que el pico de memoria baje de verdad. Eso pide
+una base real con volumen y VisualVM comparando el pico de heap antes/después en la
+misma máquina. Queda a cargo del usuario, igual que en `OPTIMIZACION_RENDIMIENTO.md`.
+
+### El CSV de Excel, y un error mío que el test atrapó
+
+`CsvParser` leía con UTF-8 estricto, así que un CSV exportado por Excel en Windows
+tronaba con `MalformedInputException` ante el primer acento. El arreglo es leer UTF-8
+y, si falla, releer con la codificación del sistema.
+
+Lo escribí con `Charset.defaultCharset()` — **y está mal**: desde Java 18 (JEP 400)
+`defaultCharset()` devuelve siempre UTF-8, así que el reintento usaba exactamente la
+misma codificación que acababa de fallar. El test lo atrapó de inmediato. Lo correcto
+es la propiedad `native.encoding` (Java 17+), que sí reporta la del sistema operativo
+— `windows-1252` en este equipo. Y el parser ahora **devuelve** con cuál leyó, para
+que el diálogo lo diga en vez de dejarlo invisible.
+
+### Que la máquina atrape lo que las auditorías atrapaban a mano (§C9)
+
+Dos piezas. La primera, `-Xlint:all` en el compilador. Sacó **9 advertencias**, todas
+javadocs huérfanos — y varias eran **obra de mis propias inserciones** de las rondas
+anteriores: el javadoc de `ROW_HEIGHT` quedó colgando cuando A9 eliminó la constante,
+el de `shutdown()` quedó empujado al insertar `awaitAutosave()`, y el de
+`selectedDatabaseIds` terminó encima de la clase en vez del campo. Las 9 corregidas.
+(Un detalle de proceso: en la primera corrida creí que estaban las 9 arregladas
+porque un `tail -4` me recortó de la salida las dos que faltaban. El build limpio
+desde cero fue lo que las mostró.)
+
+La segunda es la que más vale: **`StyleClassCoverageTest`**. Cruza cada clase de
+estilo usada en Java y FXML contra los selectores de `app.css`. Es el chequeo que
+habría atrapado **los dos** bugs que solo se vieron en tema oscuro y solo cuando el
+usuario los reportó — `.trust-cert-check` (2026-09-07) y `.discover-results-scroll`
+(2026-09-11, ese lo introduje yo). En los dos el patrón fue idéntico: la clase se
+aplicaba y no existía ninguna regla, así que el control caía a los defaults de
+Modena, que son claros; en tema claro no se nota, en oscuro queda blanco sobre
+blanco.
+
+**Verificado quitando esas dos reglas de `app.css`** con una sonda temporal: el test
+falla y nombra la clase **y el archivo donde se usa**. Restaurado y comprobado
+idéntico después.
+
+Tres cosas que salieron al construirlo y que valía la pena entender:
+
+- **No alcanza con escanear `add`/`addAll`/`setAll`.** Las dos formas que un escaneo
+  de texto no alcanzaría de otro modo son `removeAll("status-success", …)` —la clase
+  se pone desde un parámetro, así que en el `add` no hay ningún literal— y
+  `removeIf(c -> c.startsWith("tree-status-dot-"))`, que es donde el código declara
+  que esa familia entera de clases es suya. Escanear **cualquier** método de
+  `getStyleClass()` las cubre, y no tiene riesgo al revés: los métodos que no reciben
+  clases no llevan literales.
+- **En su primera corrida encontró un tercer caso**, `.exec-cell-root`. No era un bug:
+  es un gancho de estilo que quedó a propósito sin reglas cuando el usuario pidió
+  quitar las líneas de la lista de ejecución (2026-08-28), y el CSS lo explica. Está
+  declarado como excepción — con un test aparte que falla si la excepción deja de
+  hacer falta, para que la lista no se pudra sola.
+- **El cruce inverso no se hace.** `app.css` restiliza a propósito decenas de clases
+  internas de JavaFX y de RichTextFX, que saldrían todas como falsos "muertos".
+
+### Lo demás que se cerró
+
+`rowHeight(delta)` para la fila del árbol (**calibrado para dar 44 px exactos** en el
+tamaño por defecto — ese alto el usuario ya lo ajustó a mano tres veces, 28→36→44, y
+no debía cambiar); los 2 comentarios que faltaban de C7; 13 tests de lógica pura de
+`MainController` (C8) — los tres métodos eran `private static` y no tocaban un solo
+nodo, se podían testear desde siempre; y el requisito de **JDK 25** escrito en el
+README, que con `release=25` hacía fallar un JDK 21 sin que nada lo dijera.
+
+**B11 y B13 se cierran descartándolos**, con la razón escrita: el viaje de red por el
+pid son microsegundos del lado del servidor, y `minimumIdle` es una decisión de
+producto (menos conexiones ociosas contra los servidores a cambio de un primer
+`Ejecutar` más lento), no un arreglo.
+
+### Lo que queda, y por qué
+
+**C1** (dividir `MainController`, 3,344 líneas), **C2** (los 7 mapas estáticos de
+`SchemaIntrospector`) y **C3** (los 12 `new Thread`) siguen abiertos **a propósito**,
+ahora con una sección propia en el análisis que lo dice así. El motivo es el mismo
+para los tres: son refactors grandes sin ninguna red de tests de UI debajo —la suite
+permanente no arranca JavaFX a propósito—, y hacerlos en la misma ronda que 15
+arreglos funcionales habría hecho imposible saber cuál de los dos rompió qué. C2
+conviene hacerlo la próxima vez que haya que tocar esa clase por otro motivo.
+
+Y sigue en pie el riesgo declarado de `ConnectionTreeActions`: 13 componentes
+posicionales, seis del mismo tipo.
+
+### Empaquetado, y una mejora en cómo se prueba
+
+`Faro-0.1.0-portable.zip` regenerado, **61.5 MB**. Verificado igual que la vez
+anterior: los **dos** drivers JDBC concatenados en
+`META-INF/services/java.sql.Driver` dentro del jar (el bug del
+`ServicesResourceTransformer` solo se manifiesta empaquetado), 380 entradas bajo
+`runtime/`, 385 elementos en origen contra 385 extraídos, y **arranque real desde
+el zip extraído en otra carpeta**. Comprimido con `tar.exe` (bsdtar), no con el
+compresor de Explorer contra el que advierte el README. Copiado al escritorio con
+SHA-256 comparado, porque `target/` está en `.gitignore` y VS Code lo oculta.
+
+**Lo que cambió respecto de la vez pasada:** probar el `.exe` había escrito en el
+`~/.faro/` real del usuario. Esta vez la copia extraída se arrancó con
+`-Duser.home=<carpeta temporal>` agregado **solo a su propio `Faro.cfg`**, así que
+guardó en un directorio aislado. Comprobado después: `connections.json` y
+`credentials.dat` del usuario siguen con los mismos bytes y la misma fecha del
+11/09. El arranque se verificó igual de bien — el log muestra runtime embebido
+`java.version=25.0.4.1`, las 3 fuentes cargadas, "Ventana principal mostrada" y un
+cierre limpio.
+
+### 2026-09-15 — Revisión de la documentación antes del push, y lo que encontró
+
+Pedido: *"verifica que esté todo documentado a lo más actual"*. No fue un trámite —
+salieron tres cosas, una de ellas un hallazgo real:
+
+**1. Un hallazgo que existía solo en prosa y no en ninguna tabla.** Dentro del cuerpo
+de A8 (el CSV que se importa) había un párrafo describiendo el problema **del otro
+lado**: el CSV que la app **exporta** va en UTF-8 **sin BOM**, así que Excel en
+español lo abre mostrando `Ã±` en vez de `ñ`. Verificado que sigue así
+(`Files.newBufferedWriter` sin charset, `MainController:1832`). Como A8 quedó marcado
+como corregido, la tabla daba a entender que el tema del CSV estaba cerrado de los dos
+lados, y no lo está. Ahora es **A14**, con su fila propia y su línea en las
+limitaciones del README.
+
+**No se arregló, a propósito:** el cambio es de una línea pero **cambia los bytes de
+todos los archivos exportados**, y hay herramientas que no toleran el BOM. Es decisión
+del usuario, no un arreglo que deba entrar de contrabando en una revisión de
+documentación.
+
+**2. Dos afirmaciones del README que la ronda anterior dejó viejas.** La de
+`fetchSize` ("solo tiene efecto real en SQL Server; PostgreSQL lo ignora en
+autocommit") y la del alto de fila del árbol ("es fijo (44px) y no escala… está sin
+corregir a propósito"). Las dos describían el estado anterior a los arreglos del
+2026-09-14 y estaban a pocas líneas de los párrafos nuevos que decían lo contrario.
+Corregidas.
+
+**3. Un número mal contado mío.** Al numerar el hallazgo del cursor como A13 escribí
+"37 hallazgos" en el encabezado del resumen; con A14 son **38**. Ahora el encabezado
+dice cómo se llega al número (14 de §A + 13 de §B + 11 de §C) y qué estado tiene cada
+uno, contado contra las tablas: 30 corregidos, 4 abiertos (C1/C2/C3 a propósito, más
+A14), y B11/B13/C10/C11 cerrados como decisión, documentación o error del propio
+documento.
+
+Las menciones a "36 hallazgos" de la entrada del 2026-09-08/11 **se dejan como
+están**: son un registro de lo que había ese día, no una afirmación sobre el presente
+— mismo criterio que §C11 estableció sobre los conteos de tests.
+
+**De paso, al README:** `tar.exe` documentado como alternativa a 7-Zip para comprimir
+el portable (viene con Windows 10/11, es lo que se usó de verdad), con el número de
+entradas esperado —386, de las cuales 380 bajo `runtime/`— porque contarlas es más
+confiable que mirar el tamaño del archivo.

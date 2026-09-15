@@ -1,5 +1,6 @@
 package com.faro.app.model;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -96,6 +97,35 @@ public class DatabaseEntry {
      * tengan un certificado bueno.
      */
     private volatile boolean trustServerCertificate = true;
+
+    /**
+     * Codificación que se le pide al servidor PostgreSQL para esta conexión
+     * ({@code client_encoding}) — vacío (el default) significa "no tocar nada": el
+     * driver usa UTF8, que es lo que hacían TODAS las conexiones antes de que este
+     * campo existiera. Solo aplica a PostgreSQL, ver {@link #jdbcUrl()}.
+     *
+     * <p><b>Para qué sirve</b> (2026-09-10, error real reportado por el usuario al
+     * expandir el esquema de una base: {@code ERROR: invalid byte sequence for
+     * encoding "UTF8": 0xe9 0x73 0x20}). Ese error lo tira el SERVIDOR, no Faro:
+     * pasa cuando la base guarda texto que no es UTF-8 válido —lo típico es una base
+     * creada con codificación {@code SQL_ASCII}, que PostgreSQL acepta sin validar
+     * nada, con contenido en LATIN1/Windows-1252 adentro (el {@code 0xe9} del error
+     * es una 'é' en LATIN1)— y el cliente pide UTF8. El servidor no puede convertir
+     * esos bytes y falla la consulta entera, incluidas las del catálogo que usa el
+     * explorador de esquema.
+     *
+     * <p>Poniendo acá la codificación REAL de los datos (LATIN1, WIN1252,
+     * SQL_ASCII), el servidor deja de intentar una conversión imposible y pgJDBC
+     * decodifica con esa misma codificación, así que los acentos salen bien en vez
+     * de romper la consulta.
+     *
+     * <p><b>Sin verificar contra un servidor con este problema</b> — implementado
+     * contra el comportamiento documentado de pgJDBC ({@code allowEncodingChanges}
+     * es su escotilla oficial para esto: sin ella el driver ABORTA la conexión si
+     * {@code client_encoding} no es UTF8). Queda pendiente probarlo contra la base
+     * real que dio el error.
+     */
+    private volatile String clientEncoding = "";
 
     public DatabaseEntry(String alias, String host, int port, String databaseName,
                           DbEngine engine, ServerMode mode) {
@@ -228,6 +258,19 @@ public class DatabaseEntry {
         this.trustServerCertificate = trustServerCertificate;
     }
 
+    /** Ver el javadoc del campo {@link #clientEncoding} — vacío = automática (UTF8), el comportamiento de siempre. Solo tiene efecto en PostgreSQL. */
+    public String clientEncoding() {
+        return clientEncoding;
+    }
+
+    public void setClientEncoding(String clientEncoding) {
+        this.clientEncoding = clientEncoding == null ? "" : clientEncoding.trim();
+    }
+
+    /** Las codificaciones que ofrece el diálogo de Agregar/editar — la vacía es "Automática (UTF-8)". Nombres tal cual los entiende PostgreSQL en {@code client_encoding}. */
+    public static final List<String> CLIENT_ENCODINGS =
+            List.of("", "LATIN1", "WIN1252", "SQL_ASCII", "LATIN9", "UTF8");
+
     /**
      * {@code jdbc:postgresql://host:port/db} /
      * {@code jdbc:sqlserver://host:port;databaseName=db}.
@@ -242,10 +285,39 @@ public class DatabaseEntry {
      */
     public String jdbcUrl() {
         return switch (engine) {
-            case POSTGRES -> "jdbc:postgresql://" + host + ":" + port + "/" + databaseName;
+            case POSTGRES -> "jdbc:postgresql://" + host + ":" + port + "/" + databaseName + postgresEncodingParams();
             case SQL_SERVER -> "jdbc:sqlserver://" + host + ":" + port + ";databaseName=" + databaseName
                     + ";encrypt=true;trustServerCertificate=" + trustServerCertificate;
         };
+    }
+
+    /**
+     * Parámetros de codificación de la URL de PostgreSQL — cadena vacía cuando
+     * {@link #clientEncoding} no está puesto, o sea que una base sin configurar
+     * produce EXACTAMENTE la misma URL que antes de que este campo existiera.
+     *
+     * <p>Los dos parámetros van juntos y ninguno sirve solo:
+     * <ul>
+     *   <li>{@code options=-c client_encoding=XXX} es lo que le pide al servidor que
+     *       hable en esa codificación (la forma estándar de pasarle parámetros de
+     *       sesión a PostgreSQL desde la cadena de conexión).</li>
+     *   <li>{@code allowEncodingChanges=true} es obligatorio: pgJDBC fija
+     *       {@code client_encoding=UTF8} por su cuenta y <b>corta la conexión</b> si
+     *       detecta que cambió, salvo con esta bandera. Con ella puesta, además,
+     *       el driver reconfigura su propio decodificador con la codificación nueva
+     *       — que es justo lo que hace que el texto salga bien y no como mojibake.</li>
+     * </ul>
+     *
+     * <p>{@code %20} y {@code %3D} porque el valor viaja dentro de la cadena de
+     * consulta de la URL: un espacio o un {@code =} sin escapar cortarían el
+     * parámetro a la mitad. pgJDBC decodifica estos valores al parsear la URL.
+     */
+    private String postgresEncodingParams() {
+        String encoding = clientEncoding;
+        if (encoding == null || encoding.isBlank()) {
+            return "";
+        }
+        return "?options=-c%20client_encoding%3D" + encoding.trim() + "&allowEncodingChanges=true";
     }
 
     @Override

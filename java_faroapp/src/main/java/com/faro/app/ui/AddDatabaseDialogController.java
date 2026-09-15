@@ -62,6 +62,9 @@ public class AddDatabaseDialogController {
     /** Ver {@link DatabaseEntry#trustServerCertificate()} — solo aplica a SQL Server, ver {@link #syncTrustCertificateAvailability}. */
     @FXML private CheckBox trustCertificateCheck;
     @FXML private Label trustCertificateHint;
+    /** Ver {@link DatabaseEntry#clientEncoding()} — solo aplica a PostgreSQL, mismo criterio de "visible pero apagada" que la casilla del certificado. */
+    @FXML private ComboBox<String> clientEncodingCombo;
+    @FXML private Label clientEncodingHint;
 
     private Stage stage;
     private CredentialStore credentials;
@@ -79,10 +82,18 @@ public class AddDatabaseDialogController {
                 portField.setText(String.valueOf(engine.defaultPort()));
             }
             syncTrustCertificateAvailability();
+            syncClientEncodingAvailability();
         });
 
         modeCombo.setConverter(labelConverter(ServerMode::label));
         modeCombo.getItems().setAll(ServerMode.values());
+
+        // La entrada vacía es la opción por defecto — se muestra con nombre propio en
+        // vez de como una fila en blanco, que parecería un error de la lista.
+        clientEncodingCombo.setConverter(labelConverter(
+                encoding -> encoding == null || encoding.isBlank() ? "Automática (UTF-8)" : encoding));
+        clientEncodingCombo.getItems().setAll(DatabaseEntry.CLIENT_ENCODINGS);
+        clientEncodingCombo.getSelectionModel().selectFirst();
 
         // startAdd()/startEdit() se llaman explícitamente desde AddDatabaseDialog
         // después de attachPreferences()/attachCredentialStore() — no acá, porque
@@ -104,6 +115,13 @@ public class AddDatabaseDialogController {
         boolean sqlServer = engineCombo.getValue() == DbEngine.SQL_SERVER;
         trustCertificateCheck.setDisable(!sqlServer);
         trustCertificateHint.setDisable(!sqlServer);
+    }
+
+    /** Contraparte de {@link #syncTrustCertificateAvailability()} para la codificación — solo PostgreSQL, mismo criterio de dejarla visible pero apagada en el otro motor. */
+    private void syncClientEncodingAvailability() {
+        boolean postgres = engineCombo.getValue() == DbEngine.POSTGRES;
+        clientEncodingCombo.setDisable(!postgres);
+        clientEncodingHint.setDisable(!postgres);
     }
 
     void attachStage(Stage stage) {
@@ -137,6 +155,9 @@ public class AddDatabaseDialogController {
         // certificado autofirmado (lo común en servidores internos) no falla de entrada.
         trustCertificateCheck.setSelected(true);
         syncTrustCertificateAvailability();
+        // Automática (la entrada vacía) — igual que antes de que esta opción existiera.
+        clientEncodingCombo.getSelectionModel().selectFirst();
+        syncClientEncodingAvailability();
         testStatusLabel.setText(null);
     }
 
@@ -161,6 +182,8 @@ public class AddDatabaseDialogController {
         queryTimeoutField.setText(String.valueOf(entry.queryTimeoutSeconds()));
         trustCertificateCheck.setSelected(entry.trustServerCertificate());
         syncTrustCertificateAvailability();
+        clientEncodingCombo.getSelectionModel().select(entry.clientEncoding());
+        syncClientEncodingAvailability();
         testStatusLabel.setText(null);
     }
 
@@ -181,6 +204,10 @@ public class AddDatabaseDialogController {
         // con la casilla desmarcada conectaría igual (confiando en el certificado) y
         // diría "Conectado", para después fallar de verdad al ejecutar una consulta.
         probe.setTrustServerCertificate(trustCertificateCheck.isSelected());
+        // Misma razón que la línea de arriba: si la prueba no usara la codificación que
+        // se va a guardar, podría decir "Conectado" con una configuración distinta de la
+        // real — justo el caso que esta opción existe para arreglar.
+        probe.setClientEncoding(clientEncodingCombo.getValue());
         String user = userField.getText();
         String password = passwordField.getText();
         // Hallazgo en vivo del usuario (2026-08-25, bases reales de cliente): los campos
@@ -303,6 +330,7 @@ public class AddDatabaseDialogController {
         entry.setPoolSize(values.poolSize);
         entry.setQueryTimeoutSeconds(values.queryTimeout);
         entry.setTrustServerCertificate(trustCertificateCheck.isSelected());
+        entry.setClientEncoding(clientEncodingCombo.getValue());
 
         if (isBlank(userField.getText())) {
             // Vaciar el usuario a propósito quita el override guardado (si había uno) — antes

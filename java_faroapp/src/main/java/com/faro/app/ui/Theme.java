@@ -34,6 +34,15 @@ import javafx.scene.Scene;
  * apareciera doce veces seguidas en una sola sesión — ver README, "Sistema
  * de temas".
  *
+ * <p><b>{@code styles.css}/{@code styles-dark.css} ya no existen</b> (2026-09-10,
+ * hallazgo C6 de {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}). Eran 51 KB y ~1,450
+ * líneas de CSS del sistema viejo que seguían empaquetándose en el JAR y en el
+ * {@code .exe} sin que nada los cargara — el único código que los nombraba era un
+ * {@code legacyStylesheetResourcePath()} sin ningún llamador. Peor que el tamaño:
+ * al abrirlos parecían vigentes, o sea que conservaban exactamente la trampa de
+ * "editar el archivo equivocado" que el sistema de tokens vino a cerrar. Siguen en
+ * el historial de git si alguna vez hicieran falta.
+ *
  * <p><b>Tamaño de fuente de la interfaz (2026-08-26) — NO usa el mismo
  * mecanismo de variables que los colores.</b> Se intentó primero con
  * tokens {@code -token-font-*} sobre {@code .root}, igual que los colores
@@ -130,7 +139,17 @@ public final class Theme {
                 + " -token-accent-hover: " + t.hover() + ";"
                 + " -token-accent-active: " + t.active() + ";"
                 + " -token-accent-soft: " + t.soft() + ";"
-                + " -token-accent-soft-text: " + t.softText() + ";");
+                + " -token-accent-soft-text: " + t.softText() + ";"
+                // 6º token (2026-09-10) — el color de texto legible ENCIMA del acento.
+                // Ver AccentPalette.Tokens#onAccent: hizo falta al agregar el acento
+                // "negro", cuyo valor en tema oscuro es blanco, contra el
+                // `-fx-text-fill: white` que app.css tenía fijo.
+                + " -token-accent-on: " + t.onAccent() + ";"
+                // 7º token — color de las palabras reservadas del editor SQL. Para los 6
+                // acentos de color es el acento mismo (sin cambio); "negro" lo separa
+                // porque su acento coincide con el color del texto normal del editor. Ver
+                // AccentPalette.Tokens#editorKeyword.
+                + " -token-editor-keyword: " + t.editorKeyword() + ";");
     }
 
     /**
@@ -211,8 +230,4 @@ public final class Theme {
         return number + "px";
     }
 
-    /** Sistema viejo, sin usar — ver el javadoc de la clase para cuándo volver a esto. */
-    public static String legacyStylesheetResourcePath(boolean darkTheme) {
-        return darkTheme ? "/com/faro/app/styles-dark.css" : "/com/faro/app/styles.css";
-    }
 }

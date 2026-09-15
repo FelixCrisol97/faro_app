@@ -51,7 +51,13 @@ public final class SqlFormatter {
             "DECLARE", "BEGIN", "COMMIT", "ROLLBACK", "TRANSACTION",
             "PRIMARY", "KEY", "FOREIGN", "REFERENCES", "DEFAULT", "CHECK", "UNIQUE",
             "CONSTRAINT", "COLUMN", "RENAME", "TRUNCATE", "MERGE", "USING", "RETURNS",
-            "GRANT", "REVOKE", "IDENTITY", "OUTPUT");
+            "GRANT", "REVOKE", "IDENTITY", "OUTPUT",
+            // Agregados 2026-09-10 (hallazgo A6 de ANALISIS_OPTIMIZACION_ESTRUCTURA.md):
+            // estaban SOLO en la lista paralela de SqlEditorFactory, así que se resaltaban
+            // en el editor pero no se autocompletaban ni se pasaban a mayúscula al
+            // formatear. Ahora que esa lista se arma desde acá, tienen que estar en este
+            // set o se perderían del resaltado.
+            "COUNT", "SUM", "AVG", "MIN", "MAX", "COALESCE", "CAST", "CONVERT");
 
     private static final Set<String> NEWLINE_BEFORE = Set.of(
             "SELECT", "FROM", "WHERE", "GROUP", "ORDER", "HAVING",

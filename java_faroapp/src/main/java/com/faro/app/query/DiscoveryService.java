@@ -76,9 +76,19 @@ public final class DiscoveryService {
     private static List<DiscoveredDatabase> listPostgresDatabases(String host, String user, String password) {
         String url = "jdbc:postgresql://" + host + ":" + DbEngine.POSTGRES.defaultPort() + "/postgres";
         List<DiscoveredDatabase> result = new ArrayList<>();
+        // datistemplate saca template0/template1; datallowconn saca las que ni siquiera
+        // aceptan conexión (no sirve ofrecerlas); y 'postgres' es la base de
+        // mantenimiento que crea el propio motor — nadie consulta datos de negocio ahí
+        // (2026-09-10, pedido del usuario: "me está considerando la bd postgres cuando
+        // esta no me interesa"). Es el equivalente PostgreSQL del `database_id > 4` que
+        // la rama de SQL Server de abajo ya usaba para saltarse master/tempdb/model/msdb
+        // — o sea que esta rama simplemente no tenía el filtro que la otra sí tenía.
+        String query = "SELECT datname FROM pg_database "
+                + "WHERE datistemplate = false AND datallowconn = true AND datname <> 'postgres' "
+                + "ORDER BY datname";
         try (Connection conn = DriverManager.getConnection(url, user, password);
              Statement statement = conn.createStatement();
-             ResultSet rs = statement.executeQuery("SELECT datname FROM pg_database WHERE datistemplate = false")) {
+             ResultSet rs = statement.executeQuery(query)) {
             while (rs.next()) {
                 result.add(new DiscoveredDatabase(DbEngine.POSTGRES, rs.getString(1)));
             }
@@ -97,7 +107,11 @@ public final class DiscoveryService {
         List<DiscoveredDatabase> result = new ArrayList<>();
         try (Connection conn = DriverManager.getConnection(url, user, password);
              Statement statement = conn.createStatement();
-             ResultSet rs = statement.executeQuery("SELECT name FROM sys.databases WHERE database_id > 4")) {
+             // database_id > 4 salta master/tempdb/model/msdb — el equivalente del filtro
+             // de la rama PostgreSQL de arriba. state = 0 (ONLINE) evita ofrecer bases
+             // que están OFFLINE/RESTORING y contra las que la conexión fallaría igual.
+             ResultSet rs = statement.executeQuery(
+                     "SELECT name FROM sys.databases WHERE database_id > 4 AND state = 0 ORDER BY name")) {
             while (rs.next()) {
                 result.add(new DiscoveredDatabase(DbEngine.SQL_SERVER, rs.getString(1)));
             }

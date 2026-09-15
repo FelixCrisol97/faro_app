@@ -6,14 +6,19 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import com.faro.app.data.CredentialStore;
 import com.faro.app.model.ColumnMetadata;
@@ -24,7 +29,6 @@ import com.faro.app.ui.SchemaTreeNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javafx.application.Platform;
 import javafx.concurrent.Task;
 
 /**
@@ -95,9 +99,9 @@ public final class SchemaIntrospector {
     /** Caché en memoria por id de base, compartido entre autocompletado y el árbol — vive mientras la app esté abierta, sin invalidación si el esquema cambia en caliente del lado del servidor (límite conocido, v0; alcanza con marcar/desmarcar la base o reiniciar la app). */
     private static final Map<String, SchemaStructure> cache = new ConcurrentHashMap<>();
     /** Bases con una carga de estructura en curso — evita pedir el mismo esquema dos veces si autocompletado y el árbol lo piden casi a la vez. */
-    private static final java.util.Set<String> loading = ConcurrentHashMap.newKeySet();
+    private static final Set<String> loading = ConcurrentHashMap.newKeySet();
     /** Igual que {@link #loading} pero por base+categoría — Funciones/Procedimientos/Triggers/Tipos se piden cada una por separado (ver {@link #loadCategoryInBackground}), llave {@code "dbId:KIND"}. */
-    private static final java.util.Set<String> categoryLoading = ConcurrentHashMap.newKeySet();
+    private static final Set<String> categoryLoading = ConcurrentHashMap.newKeySet();
     /** Caché de columnas con tipo/PK, por base y por tabla — {@link #fetchColumns}, usado por "Generar SELECT/INSERT/UPDATE/DELETE/script CREATE" (tabla). Separado de {@code cache} porque es más caro de pedir (tipo/PK reales, no solo nombres) y solo hace falta bajo demanda, no al expandir la base. */
     private static final Map<String, Map<String, List<ColumnMetadata>>> columnDetailsCache = new ConcurrentHashMap<>();
     /** Caché de scripts CREATE, por base y por "{@code KIND:nombre}" — {@link #fetchDefinition}, usado por "Generar script CREATE" (vistas/funciones/procedimientos/triggers). */
@@ -198,7 +202,7 @@ public final class SchemaIntrospector {
      * ahora también implícito por categoría, no solo por base.
      */
     public static Map<SchemaTreeNode.Kind, List<String>> cachedNamesByKind(String databaseId) {
-        Map<SchemaTreeNode.Kind, List<String>> byKind = new java.util.EnumMap<>(SchemaTreeNode.Kind.class);
+        Map<SchemaTreeNode.Kind, List<String>> byKind = new EnumMap<>(SchemaTreeNode.Kind.class);
         Optional<SchemaStructure> structure = cached(databaseId);
         byKind.put(SchemaTreeNode.Kind.TABLES, structure.map(SchemaStructure::tableNames).orElse(List.of()));
         byKind.put(SchemaTreeNode.Kind.VIEWS, structure.map(SchemaStructure::viewNames).orElse(List.of()));
@@ -252,6 +256,63 @@ public final class SchemaIntrospector {
     }
 
     /**
+     * Descarta lo cacheado de TODAS las bases — análogo directo de
+     * {@code ConnectionPoolManager#closeAll()}, y por el mismo motivo: cuando se
+     * reemplaza el registro entero (Conexiones → Importar configuración…) no hay
+     * forma de saber cuáles ids siguen siendo "la misma base" de verdad.
+     *
+     * <p><b>Bug real que cierra</b> (2026-09-08, hallazgo A4 de
+     * {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}): un archivo exportado CONSERVA
+     * los ids, y las cachés de acá están indexadas por id igual que los pools. Si
+     * una base cambió de servidor entre exportar e importar, y en esta sesión ya se
+     * había expandido una vez, {@link #cached} seguía devolviendo las tablas del
+     * servidor ANTERIOR — el árbol listaba objetos que ya no existen, el
+     * autocompletado los sugería, y "Generar SELECT" armaba SQL sobre columnas de
+     * otra base. Todo en silencio, sin ningún error. Es exactamente el hallazgo #3
+     * de {@code AUDITORIA_BUGS_RENDIMIENTO.md} (pools viejos tras importar), una
+     * capa más arriba: aquel se arregló con {@code pool.closeAll()} y este camino
+     * quedó sin su equivalente.
+     *
+     * <p><b>Por qué recolecta los ids en vez de solo llamar {@code clear()}:</b> el
+     * contador de {@link #generation} es lo que hace que un fetch EN VUELO descarte
+     * su resultado en vez de repoblar una caché recién limpiada (ver su javadoc).
+     * Vaciar los mapas sin subir la generación dejaría a un fetch en curso —
+     * disparado contra el servidor viejo — escribiendo su resultado después del
+     * import, que es justo el caso que esto viene a evitar. Por eso el conjunto
+     * incluye {@link #loading}/{@link #categoryLoading}: son las bases con un fetch
+     * corriendo AHORA, que pueden no tener todavía ninguna entrada en las cachés.
+     */
+    public static void invalidateAll() {
+        for (String databaseId : knownDatabaseIds()) {
+            generation.merge(databaseId, 1L, Long::sum);
+        }
+        cache.clear();
+        columnDetailsCache.clear();
+        definitionCache.clear();
+        categoryCache.clear();
+        triggerCache.clear();
+    }
+
+    /** Toda base de la que se sepa algo ahora mismo — con caché, con generación propia, o con un fetch en vuelo. Ver {@link #invalidateAll()}. */
+    private static Set<String> knownDatabaseIds() {
+        Set<String> ids = new HashSet<>(generation.keySet());
+        ids.addAll(cache.keySet());
+        ids.addAll(columnDetailsCache.keySet());
+        ids.addAll(definitionCache.keySet());
+        ids.addAll(categoryCache.keySet());
+        ids.addAll(triggerCache.keySet());
+        ids.addAll(loading);
+        for (String loadKey : categoryLoading) {
+            // Llave "dbId:KIND" (ver loadCategoryInBackground) — un id es un UUID y un
+            // Kind un nombre de enum, ninguno de los dos trae ':', así que cortar por el
+            // último es exacto.
+            int separator = loadKey.lastIndexOf(':');
+            ids.add(separator < 0 ? loadKey : loadKey.substring(0, separator));
+        }
+        return ids;
+    }
+
+    /**
      * Igual que {@link #loadInBackground(DatabaseEntry, CredentialStore,
      * ConnectionPoolManager, Consumer)} pero sin ningún consumidor real de la
      * falla — usada por {@code SqlAutocomplete}, a quien le basta con el
@@ -296,7 +357,15 @@ public final class SchemaIntrospector {
                 return;
             }
             cache.put(db.id(), structure);
-            Platform.runLater(() -> onLoaded.accept(structure));
+            // Directo, sin Platform.runLater (2026-09-10, hallazgo B12) — este bloque YA
+            // corre en el hilo de JavaFX: la máquina de estados de Task invoca
+            // setOnSucceeded ahí. Envolverlo otra vez solo difería el resultado un pulso de
+            // render más, y el llamador (CategoryTreeItem) agregaba encima una TERCERA
+            // capa "por si acaso", así que aplicar el esquema al árbol esperaba dos frames
+            // de más después de que el fetch ya había terminado. El javadoc de este método
+            // siempre dijo que los callbacks corren en el hilo de la UI; ahora el código lo
+            // cumple sin rodeos.
+            onLoaded.accept(structure);
         });
         task.setOnFailed(e -> {
             Throwable error = task.getException();
@@ -369,7 +438,9 @@ public final class SchemaIntrospector {
                 log.debug("[{}] {} descartado — la base se recargó mientras el fetch seguía en curso.", db.alias(), kind.label());
                 return;
             }
-            Platform.runLater(() -> onLoaded.accept(names));
+            // Directo, sin Platform.runLater — ver el comentario equivalente en
+            // loadInBackground (hallazgo B12).
+            onLoaded.accept(names);
         });
         task.setOnFailed(e -> {
             Throwable error = task.getException();
@@ -795,7 +866,7 @@ public final class SchemaIntrospector {
                 }
             }
         }
-        String values = labels.stream().map(l -> "'" + l.replace("'", "''") + "'").collect(java.util.stream.Collectors.joining(", "));
+        String values = labels.stream().map(l -> "'" + l.replace("'", "''") + "'").collect(Collectors.joining(", "));
         return "CREATE TYPE " + qualifiedName + " AS ENUM (" + values + ");";
     }
 
@@ -919,7 +990,7 @@ public final class SchemaIntrospector {
      * {@code SchemaIntrospectorTest} la ejercita directo, sin necesitar JDBC.
      */
     static String sqlServerTypeWithLength(String baseType, int maxLength, int precision, int scale) {
-        String lower = baseType.toLowerCase(java.util.Locale.ROOT);
+        String lower = baseType.toLowerCase(Locale.ROOT);
         if (lower.equals("decimal") || lower.equals("numeric")) {
             return baseType + "(" + precision + "," + scale + ")";
         }
@@ -1037,7 +1108,7 @@ public final class SchemaIntrospector {
      */
     static LinkedHashMap<String, String> disambiguateByTable(List<String[]> rows) {
         Map<String, Long> occurrences = rows.stream()
-                .collect(java.util.stream.Collectors.groupingBy(row -> row[0], java.util.stream.Collectors.counting()));
+                .collect(Collectors.groupingBy(row -> row[0], Collectors.counting()));
         LinkedHashMap<String, String> byKey = new LinkedHashMap<>();
         for (String[] row : rows) {
             String name = row[0];
@@ -1102,7 +1173,7 @@ public final class SchemaIntrospector {
      */
     static LinkedHashMap<String, String> disambiguateBySignature(List<String[]> rows) {
         Map<String, Long> occurrences = rows.stream()
-                .collect(java.util.stream.Collectors.groupingBy(row -> row[0], java.util.stream.Collectors.counting()));
+                .collect(Collectors.groupingBy(row -> row[0], Collectors.counting()));
         LinkedHashMap<String, String> byKey = new LinkedHashMap<>();
         for (String[] row : rows) {
             String name = row[0];
