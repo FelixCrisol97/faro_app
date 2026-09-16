@@ -20,7 +20,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.Optional;
 import java.util.Set;
 import java.util.Timer;
@@ -41,10 +40,10 @@ import com.faro.app.data.AppPreferences;
 import com.faro.app.data.ConnectionRegistry;
 import com.faro.app.data.ConnectionRegistryStore;
 import com.faro.app.data.CredentialStore;
-import com.faro.app.data.CredentialVaultStore;
 import com.faro.app.data.Favorite;
 import com.faro.app.data.FavoritesStore;
 import com.faro.app.data.SavedQueryTab;
+import com.faro.app.data.SessionPersistence;
 import com.faro.app.model.ColumnMetadata;
 import com.faro.app.model.DatabaseEntry;
 import com.faro.app.model.DbEngine;
@@ -326,13 +325,17 @@ public class MainController {
      * esperaba, ni de distinguirlo si tenía 4 pestañas abiertas a la vez.
      */
     private String lastExecutionTabLabel = "";
-    /** Poblado por {@link #loadOrCreateRegistry()} (corre antes de armar las pestañas en {@link #initialize()}) — si no está vacío, {@link #initialize()} recrea estas pestañas en vez de abrir una sola en blanco. Ver {@link SavedQueryTab}. */
+    /** Poblado al cargar la sesión anterior (corre antes de armar las pestañas en {@link #initialize()}) — si no está vacío, {@link #initialize()} recrea estas pestañas en vez de abrir una sola en blanco. Ver {@link SavedQueryTab}. */
     private List<SavedQueryTab> restoredQueryTabs = List.of();
     private int queryTabCounter;
-    private Timer autosaveTimer;
     private Timer statusBarTimer;
-    /** Candado del autoguardado en segundo plano — ver {@link #autosave()}. */
-    private final AtomicBoolean autosaveInProgress = new AtomicBoolean(false);
+    /**
+     * Carga, autoguardado y guardado final — ver {@link SessionPersistence} (2026-09-15,
+     * primer paso de C1). El registro entra como {@code Supplier} porque "Importar
+     * configuración…" lo <b>reemplaza</b>: con una referencia fija, esta clase habría
+     * seguido guardando el registro viejo después de cada importación.
+     */
+    private SessionPersistence session;
 
     /**
      * Espera tras la última tecla del buscador de bases antes de reconstruir el árbol
@@ -342,15 +345,22 @@ public class MainController {
     private final PauseTransition filterDebounce =
             new PauseTransition(Duration.millis(200));
 
-    private static final long AUTOSAVE_INTERVAL_MILLIS = 120_000;
     /** Pool activo/total y memoria SÍ cambian en cualquier momento (no solo al terminar una ejecución/exportación, que es cuando refreshStatusBar() ya se llamaba) — hallazgo real del usuario probando en vivo: "lo veo todo estático no veo que cambie". 2.5s de por medio: suficiente para sentirse en vivo, demasiado espaciado como para que leer HikariCP/Runtime en cada tick importe de verdad. */
     private static final long STATUS_BAR_REFRESH_INTERVAL_MILLIS = 2500;
 
     @FXML
     private void initialize() {
         logger.info("MainController.initialize() — arrancando.");
-        registry = loadOrCreateRegistry();
-        loadCredentials();
+        SessionPersistence.LoadedSession loaded = SessionPersistence.load(preferences, favorites);
+        registry = loaded.registry();
+        restoredQueryTabs = loaded.queryTabs();
+        SessionPersistence.loadCredentials(credentials);
+        // El registro entra como Supplier, no como referencia: "Importar configuración…"
+        // lo reemplaza por otro objeto. Ver el javadoc de SessionPersistence.
+        session = new SessionPersistence(
+                () -> registry, preferences, favorites, credentials,
+                this::capturedQueryTabsForSave,
+                message -> log(LogLevel.ERROR, message));
         // Un solo objeto con todas las acciones (2026-09-11) — ver ConnectionTreeActions
         // para por qué, en vez de 14 parámetros posicionales del mismo tipo.
         ConnectionTreeActions treeActions = new ConnectionTreeActions(
@@ -407,7 +417,7 @@ public class MainController {
             filterDebounce.playFromStart();
         });
         refreshTree();
-        startAutosave();
+        session.startAutosave(Platform::runLater);
         startStatusBarRefresh();
 
         // Ver el javadoc de QueryTabState — cada pestaña recuerda qué bases tenía
@@ -3156,74 +3166,13 @@ public class MainController {
     }
 
     /**
-     * Intenta cargar conexiones/preferencias guardadas de una sesión
-     * anterior (ver {@link ConnectionRegistryStore}); si el archivo no
-     * existe (primera vez que se corre la app) o está corrupto/con un
-     * formato que ya no reconoce, no truena el arranque — cae de vuelta a
-     * un registro vacío (sin datos de ejemplo, se quitaron a pedido del
-     * usuario, ver el javadoc de {@link ConnectionRegistry}).
-     */
-    private ConnectionRegistry loadOrCreateRegistry() {
-        if (Files.exists(ConnectionRegistryStore.DEFAULT_FILE)) {
-            try {
-                ConnectionRegistryStore.LoadResult result =
-                        ConnectionRegistryStore.load(ConnectionRegistryStore.DEFAULT_FILE, preferences, favorites);
-                restoredQueryTabs = result.queryTabs();
-                return result.registry();
-            } catch (IOException | RuntimeException e) {
-                logger.warn("No se pudo cargar {}, empezando con un registro vacío", ConnectionRegistryStore.DEFAULT_FILE, e);
-            }
-        }
-        return new ConnectionRegistry();
-    }
-
-    /**
-     * Carga las credenciales guardadas de una sesión anterior (cifradas
-     * con DPAPI, ver {@link CredentialVaultStore}). Igual criterio que
-     * {@link #loadOrCreateRegistry}: si el archivo no existe todavía (primer
-     * arranque) o no se pudo descifrar (ej. el perfil de Windows cambió),
-     * sigue con {@link CredentialStore} vacío en vez de tronar el arranque.
-     */
-    private void loadCredentials() {
-        if (Files.exists(CredentialVaultStore.DEFAULT_FILE)) {
-            try {
-                CredentialVaultStore.load(credentials, CredentialVaultStore.DEFAULT_FILE);
-            } catch (IOException | RuntimeException e) {
-                logger.warn("No se pudieron cargar las credenciales guardadas", e);
-            }
-        }
-    }
-
-    /**
-     * Guardado incremental — antes solo se guardaba al cerrar la ventana
-     * ({@link #shutdown()}), así que un cierre anormal (proceso matado)
-     * perdía los cambios de toda la sesión. Reintenta cada
-     * {@link #AUTOSAVE_INTERVAL_MILLIS} sin importar si algo cambió de
-     * verdad desde el último guardado — más simple y seguro que rastrear
-     * un flag "sucio" en cada punto donde se muta {@code registry}/
-     * {@code favorites}/{@code credentials}/{@code preferences} (son
-     * varios: agregar/editar/eliminar base, Descubrir bases, Favoritos,
-     * Preferencias, Credenciales), y el costo de reescribir un JSON chico
-     * de más en más es insignificante.
-     */
-    private void startAutosave() {
-        autosaveTimer = new Timer("faro-autosave", true);
-        autosaveTimer.scheduleAtFixedRate(new TimerTask() {
-            @Override
-            public void run() {
-                Platform.runLater(MainController.this::autosave);
-            }
-        }, AUTOSAVE_INTERVAL_MILLIS, AUTOSAVE_INTERVAL_MILLIS);
-    }
-
-    /**
      * Antes {@link #refreshStatusBar()} solo se llamaba al arrancar y al
      * terminar una ejecución/exportación — "pool activo/total" y "Memoria"
      * se quedaban congelados con ese último valor mientras tanto, aunque el
      * pool/la memoria real siguieran cambiando de verdad (ej. mientras una
      * consulta pesada seguía corriendo). Hallazgo real del usuario probando
      * en vivo (2026-08-25): "lo veo todo estático no veo que cambie".
-     * Mismo patrón que {@link #startAutosave()} — {@code Timer} demonio,
+     * Mismo patrón que el autoguardado de {@link SessionPersistence} — {@code Timer} demonio,
      * {@code Platform.runLater} porque el tick corre en el hilo del
      * {@code Timer}, no en el de JavaFX.
      */
@@ -3238,106 +3187,22 @@ public class MainController {
     }
 
     /**
-     * <b>Captura en el hilo de la UI, escritura en un hilo de fondo</b>
-     * (2026-09-07, hallazgo #4 de {@code AUDITORIA_BUGS_RENDIMIENTO.md}). Antes
-     * todo esto corría dentro del {@code Platform.runLater} del temporizador —
-     * o sea que cada 2 minutos el hilo de JavaFX serializaba el JSON completo
-     * (incluyendo el TEXTO de cada pestaña de consulta abierta), lo escribía a
-     * disco, cifraba las credenciales con DPAPI y escribía un segundo archivo.
-     * Con varias pestañas grandes y un perfil de usuario en disco de red, eso
-     * es un tirón perceptible de la ventana en un momento arbitrario, quizá a
-     * mitad de un tecleo.
-     *
-     * <p>La captura SÍ tiene que quedarse en el hilo de la UI: leer
-     * {@code codeArea.getText()} de cada pestaña y las casillas del árbol
-     * ({@link #capturedQueryTabsForSave()}) solo es seguro ahí. Lo que se movió
-     * es la parte de I/O, con los datos ya capturados en mano.
-     *
-     * <p>Un solo hilo a la vez ({@link #autosaveInProgress}) — dos guardados
-     * solapados escribirían el mismo archivo al mismo tiempo; si el anterior
-     * todavía no termina, este ciclo simplemente se salta (el siguiente tick
-     * llega en 2 minutos, no se pierde nada).
-     */
-    private void autosave() {
-        if (!autosaveInProgress.compareAndSet(false, true)) {
-            logger.debug("Autoguardado saltado — el anterior sigue en curso.");
-            return;
-        }
-        List<SavedQueryTab> tabs = capturedQueryTabsForSave();
-        Thread thread = new Thread(() -> {
-            try {
-                ConnectionRegistryStore.save(
-                        registry, preferences, favorites, tabs, ConnectionRegistryStore.DEFAULT_FILE);
-                CredentialVaultStore.save(credentials, CredentialVaultStore.DEFAULT_FILE);
-                logger.debug("Autoguardado completo.");
-            } catch (IOException | RuntimeException e) {
-                logger.error("Autoguardado falló", e);
-                Platform.runLater(() -> log(LogLevel.ERROR, "Autoguardado falló: " + e.getMessage()));
-            } finally {
-                autosaveInProgress.set(false);
-            }
-        }, "faro-autosave-write");
-        thread.setDaemon(true);
-        thread.start();
-    }
-
-    /**
-     * Espera (acotado) a que termine el autoguardado en segundo plano antes de que
-     * {@link #shutdown()} escriba los mismos archivos (2026-09-10, hallazgo A3 de
-     * {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}).
-     *
-     * <p>{@code autosaveTimer.cancel()} impide ticks FUTUROS pero no espera al que ya
-     * está corriendo en {@code faro-autosave-write}. Sin esta espera, ese hilo y el de
-     * JavaFX podían estar escribiendo {@code connections.json} y
-     * {@code credentials.dat} <b>al mismo tiempo</b>. Con la escritura atómica de
-     * {@code ConnectionRegistryStore#writeAtomically} el archivo ya no queda a medias
-     * aunque pase, pero seguiría siendo una carrera por cuál de los dos guardados gana
-     * — y el de {@code shutdown()} es el que tiene el estado bueno (captura las
-     * pestañas justo antes de cerrar). Esperar lo vuelve determinista.
-     *
-     * <p>Tope de 5 s: si el autoguardado se quedara trabado (disco de red que no
-     * responde), cerrar la app igual es mejor que dejarla colgada — la escritura
-     * atómica garantiza que el archivo en disco sigue siendo válido en cualquier caso.
-     */
-    private void awaitAutosave() {
-        long deadline = System.currentTimeMillis() + 5_000;
-        while (autosaveInProgress.get() && System.currentTimeMillis() < deadline) {
-            try {
-                Thread.sleep(50);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
-            }
-        }
-        if (autosaveInProgress.get()) {
-            logger.warn("Cierre: el autoguardado en segundo plano no terminó en 5 s — se guarda igual por encima.");
-        }
-    }
-
-    /**
-     * Cierra los pools de HikariCP y guarda conexiones/preferencias/credenciales en
-     * disco — llamado desde {@code Main#stop()} al cerrar la ventana. Las credenciales
-     * van a un archivo aparte y cifrado, ver {@link CredentialVaultStore}.
+     * Cierra los pools de HikariCP y guarda la sesión — llamado desde {@code Main#stop()}
+     * al cerrar la ventana. El guardado en sí (esperar al autoguardado en vuelo, escribir
+     * conexiones y credenciales) vive en {@link SessionPersistence#saveOnShutdown()}.
      */
     void shutdown() {
         logger.info("MainController.shutdown() — guardando y cerrando pools.");
-        autosaveTimer.cancel();
         statusBarTimer.cancel();
-        awaitAutosave();
+        session.stopAutosaveAndWait();
         // closeAllAndWait, no closeAll — la JVM sale enseguida y los hilos de cierre en
         // segundo plano son demonio; acá sí hay que esperarlos. Ver su javadoc.
+        //
+        // El guardado va DESPUÉS de cerrar los pools, igual que antes de separar
+        // SessionPersistence — por eso el cierre son dos llamadas y no una. Ver el
+        // javadoc de stopAutosaveAndWait().
         pool.closeAllAndWait();
-        try {
-            ConnectionRegistryStore.save(
-                    registry, preferences, favorites, capturedQueryTabsForSave(), ConnectionRegistryStore.DEFAULT_FILE);
-        } catch (IOException e) {
-            logger.warn("No se pudieron guardar conexiones al cerrar", e);
-        }
-        try {
-            CredentialVaultStore.save(credentials, CredentialVaultStore.DEFAULT_FILE);
-        } catch (IOException | RuntimeException e) {
-            logger.warn("No se pudieron guardar las credenciales al cerrar", e);
-        }
+        session.saveNow();
         logger.info("MainController.shutdown() completo.");
     }
 
