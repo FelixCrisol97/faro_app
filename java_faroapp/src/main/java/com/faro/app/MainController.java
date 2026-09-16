@@ -25,7 +25,6 @@ import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.UUID;
-import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -44,7 +43,6 @@ import com.faro.app.data.Favorite;
 import com.faro.app.data.FavoritesStore;
 import com.faro.app.data.SavedQueryTab;
 import com.faro.app.data.SessionPersistence;
-import com.faro.app.model.ColumnMetadata;
 import com.faro.app.model.DatabaseEntry;
 import com.faro.app.model.DbEngine;
 import com.faro.app.model.Server;
@@ -57,7 +55,6 @@ import com.faro.app.query.QueryResult;
 import com.faro.app.query.SchemaComparisonService;
 import com.faro.app.query.SchemaIntrospector;
 import com.faro.app.query.SqlFormatter;
-import com.faro.app.query.SqlScriptGenerator;
 import com.faro.app.ui.AddDatabaseDialog;
 import com.faro.app.ui.ConnectionTreeActions;
 import com.faro.app.ui.ConnectionTreeBuilder;
@@ -70,6 +67,7 @@ import com.faro.app.ui.Icons;
 import com.faro.app.ui.PreferencesDialog;
 import com.faro.app.ui.ResultsTableFactory;
 import com.faro.app.ui.SchemaTreeNode;
+import com.faro.app.ui.ScriptGeneratorCoordinator;
 import com.faro.app.ui.SqlAutocomplete;
 import com.faro.app.ui.SqlEditorFactory;
 import com.faro.app.ui.Theme;
@@ -294,8 +292,8 @@ public class MainController {
     private final ConnectionPoolManager pool = new ConnectionPoolManager();
     /** Versión real de cada motor, cacheada la primera vez que una conexión de ese tipo tiene éxito (ver {@code QueryExecutionService#runOne}) — para la barra de estado de abajo ("PostgreSQL 15.4 · SQL Server 2019"). */
     private final Map<DbEngine, String> engineVersions = new ConcurrentHashMap<>();
-    /** "db:label:objeto" en vuelo ahora mismo — evita mandar 2 fetches JDBC idénticos si el usuario repite el mismo "Generar…" antes de que el primero termine (hallazgo real de revisión de código, 2026-08-25: {@link #generateFromCacheOrFetch} no tenía ningún candado, a diferencia de {@code loading}/{@code categoryLoading} en {@code SchemaIntrospector}, mismo criterio ahora acá). */
-    private final Set<String> pendingGenerations = ConcurrentHashMap.newKeySet();
+    /** Las seis acciones "Generar…" del explorador de esquema — ver {@link ScriptGeneratorCoordinator} (2026-09-15, segundo paso de C1). */
+    private ScriptGeneratorCoordinator scriptGenerator;
     private final AppPreferences preferences = new AppPreferences();
     private final FavoritesStore favorites = new FavoritesStore();
     private final ObservableList<DiagnosticEntry> diagnosticLog = FXCollections.observableArrayList();
@@ -355,6 +353,12 @@ public class MainController {
         registry = loaded.registry();
         restoredQueryTabs = loaded.queryTabs();
         SessionPersistence.loadCredentials(credentials);
+        // Las seis acciones "Generar…" — el controlador solo le presta abrir una pestaña
+        // y escribir en la barra de estado. Ver ScriptGeneratorCoordinator.
+        scriptGenerator = new ScriptGeneratorCoordinator(
+                credentials, pool,
+                (sql, databaseIds) -> addQueryTab(sql, null, databaseIds),
+                statusLabel::setText);
         // El registro entra como Supplier, no como referencia: "Importar configuración…"
         // lo reemplaza por otro objeto. Ver el javadoc de SessionPersistence.
         session = new SessionPersistence(
@@ -371,7 +375,7 @@ public class MainController {
                 this::onToggleDatabaseMode,
                 this::onMoveDatabaseToGroup,
                 this::onMoveDatabaseInOrder,
-                this::onGenerateScript,
+                (item, action) -> scriptGenerator.generate(item, action),
                 this::onCompareObject,
                 this::onRenameGroup,
                 this::onSetGroupSelection,
@@ -790,7 +794,7 @@ public class MainController {
      * siempre para Ctrl+T/"+" — abrir una pestaña nueva no debería dejar el árbol en
      * blanco de la nada); un conjunto explícito (ej. {@code Set.of(db.id())}) fuerza
      * esa selección exacta — usado por {@link #onNewQueryForDatabase}/
-     * {@link #applyGeneratedScript} para asociar la pestaña nueva a UNA base sin
+     * {@code ScriptGeneratorCoordinator} para asociar la pestaña nueva a UNA base sin
      * tocar las casillas de la pestaña que se está dejando (si mutaran el árbol
      * ANTES de crear la pestaña, como hacía el código viejo, el listener de cambio de
      * pestaña de más abajo guardaría esa mutación como si fuera la selección real de
@@ -2776,165 +2780,6 @@ public class MainController {
         Thread thread = new Thread(task, "faro-schema-compare");
         thread.setDaemon(true);
         thread.start();
-    }
-
-    /**
-     * Único punto de entrada de "Generar…" desde {@link ConnectionTreeCell}
-     * — reparte según la acción pedida (ver {@code SchemaTreeNode
-     * .GenerateAction}) al método real, sin cambiar la firma del
-     * constructor de {@code ConnectionTreeCell} cada vez que se agregue una
-     * acción nueva.
-     */
-    private void onGenerateScript(SchemaTreeNode.Item item, SchemaTreeNode.GenerateAction action) {
-        switch (action) {
-            case SELECT -> onGenerateSelect(item);
-            case INSERT -> onGenerateInsert(item);
-            case UPDATE -> onGenerateUpdate(item);
-            case DELETE -> onGenerateDelete(item);
-            case CREATE_TABLE -> onGenerateCreateTable(item);
-            case CREATE_SCRIPT -> onGenerateCreateScript(item);
-        }
-    }
-
-    /**
-     * "Generar SELECT" del explorador de esquema (clic derecho o doble clic
-     * en una fila de Tabla/Vista, ver {@code ConnectionTreeCell}) — arma
-     * {@code SELECT col1, col2, ... FROM tabla} con las columnas reales.
-     *
-     * <p><b>Esquema progresivo (2026-08-25):</b> antes esto leía
-     * {@code columnsByTable}, un caché masivo con las columnas de TODAS las
-     * tablas de la base, cargado de un jalón al expandirla — hallazgo en
-     * vivo del usuario contra bases DEV reales de cliente: ese fetch masivo
-     * era lo que dejaba el árbol pegado en "Cargando esquema…" en bases
-     * grandes. Ahora pasa por {@link #generateFromColumnDetails}, el mismo
-     * camino caché-primero-si-no-fetch que ya usaban UPDATE/DELETE/CREATE
-     * TABLE — instantáneo si esta tabla ya se tocó antes en la sesión, o un
-     * fetch real (con "Generando…" en {@code statusLabel}) la primera vez.
-     */
-    private void onGenerateSelect(SchemaTreeNode.Item item) {
-        generateFromColumnDetails(item, "SELECT", columns -> {
-            String columnList = columns.isEmpty() ? "*"
-                    : columns.stream().map(ColumnMetadata::name).collect(Collectors.joining(", "));
-            return "SELECT " + columnList + " FROM " + item.name();
-        });
-    }
-
-    /** "Generar INSERT" (solo tablas) — mismo camino que {@link #onGenerateSelect} ahora (ver su javadoc), solo los nombres de columna le importan a {@code SqlScriptGenerator#generateInsertScript}. */
-    private void onGenerateInsert(SchemaTreeNode.Item item) {
-        generateFromColumnDetails(item, "INSERT", columns ->
-                SqlScriptGenerator.generateInsertScript(item.name(), columns.stream().map(ColumnMetadata::name).toList()));
-    }
-
-    /** "Generar UPDATE" (solo tablas) — a diferencia de SELECT/INSERT, necesita saber cuál columna es la PK (para el WHERE), así que sí puede implicar un viaje real a la base si nunca se pidió antes en esta sesión (ver {@link #generateFromColumnDetails}). */
-    private void onGenerateUpdate(SchemaTreeNode.Item item) {
-        generateFromColumnDetails(item, "UPDATE", columns -> SqlScriptGenerator.generateUpdateScript(item.name(), columns));
-    }
-
-    /** "Generar DELETE" (solo tablas) — mismo motivo que UPDATE: necesita la PK real. */
-    private void onGenerateDelete(SchemaTreeNode.Item item) {
-        generateFromColumnDetails(item, "DELETE", columns -> SqlScriptGenerator.generateDeleteScript(item.name(), columns));
-    }
-
-    /** "Generar script CREATE" de una tabla — mejor esfuerzo desde columnas (tipo/NOT NULL/PK), ver {@code SqlScriptGenerator#generateCreateTableScript}. Ningún motor expone un DDL completo listo para tablas como sí tiene para rutinas — de ahí la diferencia con {@link #onGenerateCreateScript}. */
-    private void onGenerateCreateTable(SchemaTreeNode.Item item) {
-        generateFromColumnDetails(item, "CREATE TABLE", columns -> SqlScriptGenerator.generateCreateTableScript(item.name(), columns));
-    }
-
-    /**
-     * Columnas con tipo/PK reales — instantáneo si ya se pidieron antes en
-     * esta sesión ({@link SchemaIntrospector#cachedColumns}); si no, un
-     * fetch real en segundo plano (con feedback en {@code statusLabel}
-     * mientras corre). Camino compartido por las 5 acciones de tabla
-     * (SELECT/INSERT/UPDATE/DELETE/CREATE TABLE) desde el esquema
-     * progresivo (2026-08-25) — antes SELECT/INSERT tenían su propio atajo
-     * "instantáneo" leyendo un caché masivo de columnas que se cargaba
-     * completo al expandir la base; ese caché desapareció (era la causa
-     * real de que el árbol se quedara pegado en "Cargando esquema…" contra
-     * bases DEV grandes del cliente), así que ahora las 5 comparten este
-     * mismo mecanismo bajo demanda.
-     */
-    private void generateFromColumnDetails(SchemaTreeNode.Item item, String label, Function<List<ColumnMetadata>, String> scriptBuilder) {
-        generateFromCacheOrFetch(item, label, "faro-script-columns",
-                () -> SchemaIntrospector.cachedColumns(item.database().id(), item.name()),
-                () -> SchemaIntrospector.fetchColumns(item.database(), credentials, pool, item.name()),
-                scriptBuilder);
-    }
-
-    /**
-     * "Generar script CREATE" de vista/función/procedimiento/trigger — a
-     * diferencia de una tabla, sí hay un DDL real que el motor puede dar de
-     * un solo viaje ({@code pg_get_viewdef}/{@code pg_get_functiondef}/
-     * {@code pg_get_triggerdef} en PostgreSQL, {@code OBJECT_DEFINITION()}
-     * en SQL Server — ver {@code SchemaIntrospector#fetchDefinition}).
-     * Mismo patrón caché-primero-si-no-fetch que {@link #generateFromColumnDetails}.
-     */
-    private void onGenerateCreateScript(SchemaTreeNode.Item item) {
-        generateFromCacheOrFetch(item, "script CREATE", "faro-script-definition",
-                () -> SchemaIntrospector.cachedDefinition(item.database().id(), item.kind(), item.name()),
-                () -> SchemaIntrospector.fetchDefinition(item.database(), credentials, pool, item.kind(), item.name(), item.parentTable()),
-                script -> script);
-    }
-
-    /**
-     * Único armazón real de "caché primero, si no fetch en segundo plano con
-     * feedback" — {@link #generateFromColumnDetails}/{@link #onGenerateCreateScript}
-     * eran dos copias casi idénticas de esto (hallazgo real de revisión de
-     * código, 2026-08-25: cache-lookup+early-return, mensaje "Generando…",
-     * construir el {@code Task}, éxito→{@link #applyGeneratedScript}, falla→log
-     * + mensaje, hilo demonio — diferían solo en de dónde sale el valor
-     * cacheado/el {@code Task} y el nombre del hilo).
-     *
-     * <p><b>{@code pendingKey} (hallazgo real de revisión de código,
-     * 2026-08-25):</b> repetir el mismo "Generar…" antes de que el primer
-     * fetch termine (doble clic en la fila + clic derecho, o el usuario
-     * impaciente repitiendo el clic) mandaba 2 consultas JDBC idénticas en
-     * paralelo, sin ningún candado — a diferencia de
-     * {@code loading}/{@code categoryLoading} en {@code SchemaIntrospector},
-     * que sí dedupan la carga de esquema. La llave usa {@code label} (no
-     * {@code threadName}) a propósito: SELECT/INSERT/UPDATE/DELETE/CREATE
-     * TABLE de una tabla comparten el mismo {@code threadName}
-     * ("faro-script-columns", ver {@link #generateFromColumnDetails}) pero
-     * cada una es una acción distinta que el usuario sí quiere ver
-     * completada por separado (su propia pestaña con su propio SQL) — dedup
-     * por {@code threadName} habría descartado en silencio, sin pestaña ni
-     * aviso, un SELECT pedido justo después de un UPDATE sobre la misma
-     * tabla mientras el UPDATE seguía en curso. Por {@code label} solo
-     * dedupa el caso real que importa: repetir la MISMA acción sobre el
-     * MISMO objeto antes de que termine.
-     */
-    private <T> void generateFromCacheOrFetch(
-            SchemaTreeNode.Item item, String label, String threadName,
-            Supplier<Optional<T>> cacheLookup, Supplier<Task<T>> taskFactory, Function<T, String> scriptBuilder) {
-        Optional<T> cached = cacheLookup.get();
-        if (cached.isPresent()) {
-            applyGeneratedScript(item, label, scriptBuilder.apply(cached.get()));
-            return;
-        }
-        String pendingKey = label + ":" + item.database().id() + ":" + item.name();
-        if (!pendingGenerations.add(pendingKey)) {
-            return;
-        }
-        statusLabel.setText("Generando " + label + " para " + item.name() + "…");
-        Task<T> task = taskFactory.get();
-        task.setOnSucceeded(e -> {
-            pendingGenerations.remove(pendingKey);
-            applyGeneratedScript(item, label, scriptBuilder.apply(task.getValue()));
-        });
-        task.setOnFailed(e -> {
-            pendingGenerations.remove(pendingKey);
-            logger.warn("Generar {} falló para [{}] {}", label, item.database().alias(), item.name(), task.getException());
-            statusLabel.setText("No se pudo generar " + label + " de " + item.name() + " — revisa Diagnóstico.");
-        });
-        Thread thread = new Thread(task, threadName);
-        thread.setDaemon(true);
-        thread.start();
-    }
-
-    /** Último paso común de cualquier "Generar…": marcar SOLO la casilla de la base dueña, abrir una pestaña nueva con el script, y avisar en {@code statusLabel}/Diagnóstico. */
-    private void applyGeneratedScript(SchemaTreeNode.Item item, String label, String sql) {
-        addQueryTab(sql, null, Set.of(item.database().id()));
-        statusLabel.setText(label + " generado para " + item.name() + " — su casilla ya quedó marcada.");
-        logger.info("Generar {}: [{}] {}", label, item.database().alias(), sql);
     }
 
     /**

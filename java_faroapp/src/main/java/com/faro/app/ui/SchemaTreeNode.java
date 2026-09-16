@@ -75,7 +75,7 @@ public final class SchemaTreeNode {
     public record Item(DatabaseEntry database, Kind kind, String name, String parentTable) {
     }
 
-    /** Las 6 acciones del menú "Generar…" de una fila de objeto de esquema — ver {@code ConnectionTreeCell}/{@code MainController#onGenerateScript}. */
+    /** Las 6 acciones del menú "Generar…" de una fila de objeto de esquema — ver {@code ConnectionTreeCell}/{@link ScriptGeneratorCoordinator}. */
     public enum GenerateAction {
         SELECT, INSERT, UPDATE, DELETE, CREATE_TABLE, CREATE_SCRIPT
     }
