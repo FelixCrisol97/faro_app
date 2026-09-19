@@ -9,7 +9,11 @@ import org.junit.jupiter.api.Test;
  * Lógica pura de {@link MainController} — sin JavaFX de por medio (2026-09-14, cierra
  * el hallazgo C8 de {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}).
  *
- * <p>Los tres métodos son estáticos y no tocan ningún nodo: se podían testear desde
+ * <p>Eran tres métodos; quedan dos ({@code appendCsvEscaped} y {@code summarize}) —
+ * {@code indexOfIgnoreCase} se mudó a {@code QueryTabManager} con el resto de la
+ * búsqueda (2026-09-18) y sus tests están en {@code QueryTabManagerTest}.
+ *
+ * <p>Son estáticos y no tocan ningún nodo: se podían testear desde
  * siempre, simplemente nadie lo había hecho. Son package-private a propósito para
  * poder ejercitarlos directo, mismo criterio que
  * {@code SchemaIntrospector#sqlServerTypeWithLength} y
@@ -77,48 +81,8 @@ class MainControllerLogicTest {
         assertEquals("previo,nuevo", out.toString());
     }
 
-    // ---- indexOfIgnoreCase ----
-    //
-    // Reemplazó a getText().toLowerCase() en "Buscar en el script" (hallazgo #9): compara
-    // en el lugar en vez de copiar el documento dos veces por cada F3.
-
-    @Test
-    void buscaHaciaAdelanteSinDistinguirMayusculas() {
-        assertEquals(0, MainController.indexOfIgnoreCase("SELECT * FROM t", "select", 0, true));
-        assertEquals(9, MainController.indexOfIgnoreCase("SELECT * FROM t", "from", 0, true));
-        assertEquals(-1, MainController.indexOfIgnoreCase("SELECT * FROM t", "where", 0, true));
-    }
-
-    /** Desde una posición dada encuentra la SIGUIENTE, no la primera — es lo que hace funcionar F3 repetido. */
-    @Test
-    void buscaDesdeLaPosicionDada() {
-        String texto = "select a, select b";
-
-        assertEquals(0, MainController.indexOfIgnoreCase(texto, "select", 0, true));
-        assertEquals(10, MainController.indexOfIgnoreCase(texto, "select", 1, true));
-    }
-
-    @Test
-    void buscaHaciaAtras() {
-        String texto = "select a, select b";
-
-        assertEquals(10, MainController.indexOfIgnoreCase(texto, "select", 17, false));
-        assertEquals(0, MainController.indexOfIgnoreCase(texto, "select", 9, false));
-    }
-
-    /**
-     * Los bordes que rompen una búsqueda escrita a mano: aguja más larga que el texto,
-     * aguja vacía, y un {@code from} fuera de rango (pasa al dar la vuelta circular
-     * desde el final del documento).
-     */
-    @Test
-    void casosDeBorde() {
-        assertEquals(-1, MainController.indexOfIgnoreCase("ab", "abcdef", 0, true));
-        assertEquals(-1, MainController.indexOfIgnoreCase("", "a", 0, true));
-        assertEquals(-1, MainController.indexOfIgnoreCase("abc", "", 0, true));
-        assertEquals(-1, MainController.indexOfIgnoreCase("abc", "z", 99, true));
-        assertEquals(0, MainController.indexOfIgnoreCase("abc", "a", 99, false));
-    }
+    // indexOfIgnoreCase se mudó a QueryTabManager el 2026-09-18 (paso 3 de C1), y sus
+    // tests con él — ver QueryTabManagerTest.
 
     // ---- summarize ----
 

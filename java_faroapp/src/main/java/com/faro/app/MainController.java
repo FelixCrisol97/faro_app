@@ -29,8 +29,6 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import org.fxmisc.flowless.VirtualizedScrollPane;
-import org.fxmisc.richtext.CodeArea;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,7 +52,6 @@ import com.faro.app.query.QueryExecutionService;
 import com.faro.app.query.QueryResult;
 import com.faro.app.query.SchemaComparisonService;
 import com.faro.app.query.SchemaIntrospector;
-import com.faro.app.query.SqlFormatter;
 import com.faro.app.ui.AddDatabaseDialog;
 import com.faro.app.ui.ConnectionTreeActions;
 import com.faro.app.ui.ConnectionTreeBuilder;
@@ -67,9 +64,9 @@ import com.faro.app.ui.Icons;
 import com.faro.app.ui.PreferencesDialog;
 import com.faro.app.ui.ResultsTableFactory;
 import com.faro.app.ui.SchemaTreeNode;
+import com.faro.app.ui.QueryTabManager;
 import com.faro.app.ui.ScriptGeneratorCoordinator;
 import com.faro.app.ui.SqlAutocomplete;
-import com.faro.app.ui.SqlEditorFactory;
 import com.faro.app.ui.Theme;
 
 import javafx.animation.Animation;
@@ -110,7 +107,6 @@ import javafx.scene.control.TreeView;
 import javafx.scene.control.skin.VirtualFlow;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
-import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -118,6 +114,7 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.Circle;
 import javafx.stage.FileChooser;
+import javafx.stage.Window;
 import javafx.util.Duration;
 
 /**
@@ -294,6 +291,8 @@ public class MainController {
     private final Map<DbEngine, String> engineVersions = new ConcurrentHashMap<>();
     /** Las seis acciones "Generar…" del explorador de esquema — ver {@link ScriptGeneratorCoordinator} (2026-09-15, segundo paso de C1). */
     private ScriptGeneratorCoordinator scriptGenerator;
+    /** Las pestañas de consulta, buscar y formatear — ver {@link QueryTabManager} (2026-09-18, tercer paso de C1). */
+    private QueryTabManager tabs;
     private final AppPreferences preferences = new AppPreferences();
     private final FavoritesStore favorites = new FavoritesStore();
     private final ObservableList<DiagnosticEntry> diagnosticLog = FXCollections.observableArrayList();
@@ -325,7 +324,6 @@ public class MainController {
     private String lastExecutionTabLabel = "";
     /** Poblado al cargar la sesión anterior (corre antes de armar las pestañas en {@link #initialize()}) — si no está vacío, {@link #initialize()} recrea estas pestañas en vez de abrir una sola en blanco. Ver {@link SavedQueryTab}. */
     private List<SavedQueryTab> restoredQueryTabs = List.of();
-    private int queryTabCounter;
     private Timer statusBarTimer;
     /**
      * Carga, autoguardado y guardado final — ver {@link SessionPersistence} (2026-09-15,
@@ -357,14 +355,64 @@ public class MainController {
         // y escribir en la barra de estado. Ver ScriptGeneratorCoordinator.
         scriptGenerator = new ScriptGeneratorCoordinator(
                 credentials, pool,
-                (sql, databaseIds) -> addQueryTab(sql, null, databaseIds),
+                (sql, databaseIds) -> tabs.addQueryTab(sql, null, databaseIds),
                 statusLabel::setText);
         // El registro entra como Supplier, no como referencia: "Importar configuración…"
         // lo reemplaza por otro objeto. Ver el javadoc de SessionPersistence.
         session = new SessionPersistence(
                 () -> registry, preferences, favorites, credentials,
-                this::capturedQueryTabsForSave,
+                () -> tabs.captureForSave(),
                 message -> log(LogLevel.ERROR, message));
+        // Las pestañas se construyen ACÁ, antes de la primera reconstrucción del árbol:
+        // refreshTree() ya repinta el encabezado de la pestaña activa, y aunque al
+        // arrancar todavía no haya ninguna, para "no hacer nada" necesita que tabs exista.
+        // Ver el javadoc del constructor de QueryTabManager.
+        tabs = new QueryTabManager(queryTabPane, preferences, new QueryTabManager.Host() {
+            @Override
+            public Window window() {
+                return connectionTree.getScene().getWindow();
+            }
+
+            @Override
+            public List<DatabaseEntry> selectedDatabases() {
+                return MainController.this.selectedDatabases();
+            }
+
+            @Override
+            public Set<String> capturedSelectedDatabaseIds() {
+                return MainController.this.capturedSelectedDatabaseIds();
+            }
+
+            @Override
+            public void applySelectedDatabaseIds(Set<String> ids) {
+                MainController.this.applySelectedDatabaseIds(ids);
+            }
+
+            @Override
+            public boolean treeReady() {
+                return connectionTree.getRoot() != null;
+            }
+
+            @Override
+            public ConnectionRegistry registry() {
+                return registry;
+            }
+
+            @Override
+            public void applyTheme(Dialog<?> dialog) {
+                applyThemeToAlert(dialog);
+            }
+
+            @Override
+            public void status(String message) {
+                statusLabel.setText(message);
+            }
+
+            @Override
+            public void diagnostic(String message) {
+                log(message);
+            }
+        });
         // Un solo objeto con todas las acciones (2026-09-11) — ver ConnectionTreeActions
         // para por qué, en vez de 14 parámetros posicionales del mismo tipo.
         ConnectionTreeActions treeActions = new ConnectionTreeActions(
@@ -424,33 +472,16 @@ public class MainController {
         session.startAutosave(Platform::runLater);
         startStatusBarRefresh();
 
-        // Ver el javadoc de QueryTabState — cada pestaña recuerda qué bases tenía
-        // marcadas; al cambiar de pestaña, se guarda la selección de la que se deja
-        // (oldTab) y se aplica al árbol la de la que se activa (newTab), ANTES de que
-        // el usuario pueda tocar "Ejecutar" contra la base equivocada.
-        queryTabPane.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> {
-            if (oldTab != null && oldTab.getUserData() instanceof QueryTabState oldState) {
-                oldState.selectedDatabaseIds = capturedSelectedDatabaseIds();
-            }
-            if (newTab != null && newTab.getUserData() instanceof QueryTabState newState) {
-                applySelectedDatabaseIds(newState.selectedDatabaseIds);
-            }
-            // Cambian DOS encabezados a la vez (la pestaña que se deja pasa a mostrar su
-            // selección guardada, la que se activa pasa a seguir el árbol en vivo), así
-            // que se repintan todos en vez de rastrear cuáles.
-            refreshAllTabHeaders();
-        });
-
         // Restaura las pestañas de la sesión anterior (2026-08-28, pedido explícito
         // del usuario) — si connections.json no traía ninguna (primer arranque, o un
         // archivo de antes de este campo), cae al comportamiento de siempre: 1
         // pestaña en blanco.
         if (restoredQueryTabs.isEmpty()) {
-            addQueryTab("", null);
+            tabs.addQueryTab("", null, null);
         } else {
             for (SavedQueryTab saved : restoredQueryTabs) {
                 File savedFile = saved.filePath() != null ? new File(saved.filePath()) : null;
-                addQueryTab(saved.sql(), savedFile, new LinkedHashSet<>(saved.selectedDatabaseIds()));
+                tabs.addQueryTab(saved.sql(), savedFile, new LinkedHashSet<>(saved.selectedDatabaseIds()));
             }
         }
         findField.setOnKeyPressed(event -> {
@@ -540,7 +571,7 @@ public class MainController {
             if (event.getClickCount() == 2) {
                 String selected = historyListView.getSelectionModel().getSelectedItem();
                 if (selected != null) {
-                    addQueryTab(selected, null);
+                    tabs.addQueryTab(selected, null, null);
                 }
             }
         });
@@ -621,7 +652,7 @@ public class MainController {
         // diagnóstico en vivo (mismo criterio que el bug de visibilidad del scroll).
         scene.getRoot().applyCss();
         updateThemeToggleIcon();
-        applyEditorFontSize();
+        tabs.applyEditorFontSize();
         // La altura de fila del grid de resultados es fija (fixedCellSize, ver
         // ResultsTableFactory) — sin esto, mover el slider de tamaño de interfaz en
         // Preferencias deja el texto de las filas creciendo dentro de una altura que ya
@@ -733,367 +764,20 @@ public class MainController {
         runButton.setGraphic(runButtonGraphic());
     }
 
-    // ---- Pestañas de consulta ----
-
-    /** Estado de una pestaña de consulta — su editor, el archivo asociado (si ya se guardó/abrió) y si tiene cambios sin guardar. Guardado como userData del Tab. */
-    private static final class QueryTabState {
-        final CodeArea codeArea;
-        File file;
-        boolean dirty;
-        /**
-         * Bases marcadas en el árbol para ESTA pestaña (2026-08-28) — hallazgo real del
-         * usuario: antes, cuál base estaba marcada era un solo estado global compartido
-         * por TODAS las pestañas de consulta a la vez (las casillas del árbol, leídas
-         * directo por {@link #onRunQuery}). Abrir una pestaña nueva para una base, y
-         * después otra para una base distinta, dejaba la primera pestaña apuntando a la
-         * base equivocada al volver a ella — "de nada me sirve cambiar entre ventanas si
-         * no mantienen la BD que yo abrí en una ventana aparte". Ahora cada pestaña
-         * guarda su propio conjunto de ids de bases marcadas; cambiar de pestaña
-         * (ver el listener en {@link #initialize()}) guarda el estado de la pestaña que
-         * se deja y aplica el de la que se activa sobre las casillas reales del árbol —
-         * la pestaña activa sigue siendo la única fuente visual (un solo árbol), pero ya
-         * no se pisan entre sí.
-         */
-        Set<String> selectedDatabaseIds = new LinkedHashSet<>();
-        /**
-         * Nombre de la pestaña SIN el punto de "cambios sin guardar" — "Consulta N", o
-         * el nombre del archivo si se guardó/abrió uno.
-         *
-         * <p>Antes el nombre vivía en {@code tab.getText()} y el punto se concatenaba
-         * encima ({@code setText("● " + getText())}), lo que obligaba a deshacerlo con
-         * {@code replace("● ", "")} en dos sitios para recuperar el nombre real — frágil
-         * (un nombre de archivo que empezara con "● " se habría roto) y además imposible
-         * de combinar con un encabezado de 2 líneas. Ahora el nombre es un dato y el
-         * encabezado se pinta a partir de él, ver {@link #refreshTabHeader}.
-         */
-        String baseName = "";
-        /** Primera línea del encabezado — nombre + punto de cambios sin guardar. */
-        Label nameLabel;
-        /** Segunda línea — qué base(s) va a usar "Ejecutar" en esta pestaña. Ver {@link #describeSelection}. */
-        Label databaseLabel;
-
-        QueryTabState(CodeArea codeArea) {
-            this.codeArea = codeArea;
-        }
-    }
-
-    /**
-     * Crea una pestaña de consulta nueva con su propio {@code CodeArea}
-     * independiente y la selecciona. No se puede cerrar la última pestaña
-     * que quede — siempre debe haber al menos un editor abierto. Cerrar
-     * una pestaña con cambios sin guardar pide confirmación primero
-     * (ver {@link #confirmSaveOrDiscard}) — antes se perdían en silencio.
-     */
-    private Tab addQueryTab(String initialText, File file) {
-        return addQueryTab(initialText, file, null);
-    }
-
-    /**
-     * {@code initialSelectedDatabaseIds}: {@code null} hereda una COPIA de lo que la
-     * pestaña saliente tenga marcado ahora mismo en el árbol (comportamiento de
-     * siempre para Ctrl+T/"+" — abrir una pestaña nueva no debería dejar el árbol en
-     * blanco de la nada); un conjunto explícito (ej. {@code Set.of(db.id())}) fuerza
-     * esa selección exacta — usado por {@link #onNewQueryForDatabase}/
-     * {@code ScriptGeneratorCoordinator} para asociar la pestaña nueva a UNA base sin
-     * tocar las casillas de la pestaña que se está dejando (si mutaran el árbol
-     * ANTES de crear la pestaña, como hacía el código viejo, el listener de cambio de
-     * pestaña de más abajo guardaría esa mutación como si fuera la selección real de
-     * la pestaña saliente — bug real que este orden evita).
-     */
-    private Tab addQueryTab(String initialText, File file, Set<String> initialSelectedDatabaseIds) {
-        CodeArea codeArea = SqlEditorFactory.create();
-        if (initialText != null && !initialText.isEmpty()) {
-            codeArea.replaceText(initialText);
-        }
-        codeArea.setStyle("-fx-font-size: " + preferences.editorFontSize() + "px;");
-        // Ctrl+Plus/Ctrl+Minus/Ctrl+0 — SOLO el tamaño de fuente de este editor (todas las
-        // pestañas comparten un único valor, ver applyEditorFontSize), a propósito distinto
-        // del "zoom global" que se probó 3 veces y se quitó por completo el 2026-08-22 (ese
-        // escalaba TODA la interfaz: menús, botones, árbol). Filtro puesto directo en el
-        // CodeArea (no un acelerador de menú global) para que solo dispare con el editor
-        // enfocado, igual que documenta demo_html (agrupado bajo "Editor SQL", no global).
-        codeArea.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
-            if (!event.isControlDown()) {
-                return;
-            }
-            KeyCode code = event.getCode();
-            if (code == KeyCode.PLUS || code == KeyCode.EQUALS || code == KeyCode.ADD) {
-                preferences.setEditorFontSize(preferences.editorFontSize() + 1);
-                applyEditorFontSize();
-                event.consume();
-            } else if (code == KeyCode.MINUS || code == KeyCode.SUBTRACT) {
-                preferences.setEditorFontSize(preferences.editorFontSize() - 1);
-                applyEditorFontSize();
-                event.consume();
-            } else if (code == KeyCode.DIGIT0 || code == KeyCode.NUMPAD0) {
-                preferences.setEditorFontSize(14);
-                applyEditorFontSize();
-                event.consume();
-            }
-        });
-        // Ctrl+rueda del mouse/trackpad — pedido explícito del usuario (2026-08-26). Antes
-        // se había dejado fuera a propósito ("riesgo real de interferir con el scroll propio
-        // de RichTextFX sin poder probarlo en una ventana real") — mismo riesgo real hoy, pero
-        // mitigado: sin Ctrl, el evento nunca se toca (return temprano, el scroll normal del
-        // editor sigue exactamente igual); con Ctrl, se consume SIEMPRE (incluso si el tamaño
-        // ya está en el límite de AppPreferences#setEditorFontSize, 10-24px) — sin esto, un
-        // Ctrl+scroll en el límite dejaría pasar el evento sin consumir, y RichTextFX movería
-        // el scroll vertical A LA VEZ que "no" hace zoom, justo el efecto doble que se quería
-        // evitar desde el principio. 1px por evento (mismo paso que Ctrl+Plus/Minus) — un
-        // acumulador para promediar gestos de trackpad (muchos eventos chicos por swipe) sería
-        // más suave, pero es complejidad real sin poder probarla en vivo; mejor esfuerzo, no
-        // bloqueante, mismo criterio que el resto de esta función.
-        codeArea.addEventFilter(ScrollEvent.SCROLL, event -> {
-            if (!event.isControlDown()) {
-                return;
-            }
-            preferences.setEditorFontSize(preferences.editorFontSize() + (event.getDeltaY() > 0 ? 1 : -1));
-            applyEditorFontSize();
-            event.consume();
-        });
-
-        QueryTabState state = new QueryTabState(codeArea);
-        state.file = file;
-        state.selectedDatabaseIds = initialSelectedDatabaseIds != null
-                ? new LinkedHashSet<>(initialSelectedDatabaseIds)
-                : capturedSelectedDatabaseIds();
-
-        Tab tab = new Tab();
-        state.baseName = file != null ? file.getName() : "Consulta " + (++queryTabCounter);
-        tab.setContent(new VirtualizedScrollPane<>(codeArea));
-        tab.setUserData(state);
-        // Encabezado de 2 líneas (2026-09-10, pedido del usuario: la pestaña no decía
-        // contra qué base iba a correr, y el único aviso —"su casilla ya quedó
-        // marcada"— vivía en la barra de estado de ABAJO, donde nadie está mirando
-        // mientras escribe SQL arriba).
-        tab.setGraphic(buildTabHeader(state));
-        refreshTabHeader(tab);
-
-        // Agregado DESPUÉS de replaceText() de arriba — si no, cargar el
-        // texto inicial (ej. un archivo abierto) marcaría la pestaña como
-        // "con cambios sin guardar" apenas se crea, lo cual sería falso.
-        //
-        // plainTextChanges(), NO textProperty() (2026-09-07, hallazgo #5 de
-        // AUDITORIA_BUGS_RENDIMIENTO.md): en RichTextFX el texto no es un campo, es un
-        // valor derivado del documento — tener un listener puesto en textProperty()
-        // obliga a materializar el documento COMPLETO como un String nuevo en cada
-        // cambio, o sea en cada tecla (y dos veces, porque el listener también recibe el
-        // valor anterior). Con un script grande pegado en la pestaña eso son megabytes
-        // de basura por pulsación, y se siente como latencia al escribir. La propia
-        // documentación de RichTextFX advierte esto y recomienda plainTextChanges(), que
-        // entrega solo el cambio puntual sin armar el texto entero. La suscripción vive
-        // lo que viva el CodeArea (muere con la pestaña, sin fuga) y el cuerpo es
-        // trivial: en cuanto la pestaña ya está sucia no hace nada más.
-        codeArea.plainTextChanges().subscribe(change -> {
-            if (!state.dirty) {
-                state.dirty = true;
-                refreshTabHeader(tab);
-            }
-        });
-
-        tab.setOnCloseRequest(event -> {
-            if (queryTabPane.getTabs().size() <= 1) {
-                event.consume();
-                return;
-            }
-            if (state.dirty && !confirmSaveOrDiscard(tab, state)) {
-                event.consume();
-            }
-        });
-
-        queryTabPane.getTabs().add(tab);
-        queryTabPane.getSelectionModel().select(tab);
-        return tab;
-    }
-
-    /**
-     * Encabezado de 2 líneas de una pestaña de consulta: el nombre arriba y, debajo
-     * y en chico, contra qué base(s) va a correr "Ejecutar".
-     *
-     * <p>Se eligió 2 líneas y no "Consulta 1 · bodega" en una sola para que las
-     * pestañas no se alarguen: con varias abiertas, un nombre de base largo (los
-     * reales del usuario son del tipo {@code bodegamuebles.30001}) empujaría la barra
-     * hasta necesitar sus flechas de scroll. La barra queda más alta, no más ancha.
-     */
-    private Node buildTabHeader(QueryTabState state) {
-        Label name = new Label();
-        name.getStyleClass().add("query-tab-name");
-        Label database = new Label();
-        database.getStyleClass().add("query-tab-database");
-        state.nameLabel = name;
-        state.databaseLabel = database;
-        VBox header = new VBox(0, name, database);
-        header.setAlignment(Pos.CENTER_LEFT);
-        return header;
-    }
-
-    /**
-     * Repinta las 2 líneas del encabezado de {@code tab}.
-     *
-     * <p>Para la pestaña ACTIVA la segunda línea sale de las casillas reales del
-     * árbol, no de {@code state.selectedDatabaseIds} — ese campo solo se actualiza al
-     * CAMBIAR de pestaña (ver el listener de {@link #initialize()}), así que usarlo
-     * acá dejaría la línea desactualizada justo en el caso que importa: el usuario
-     * marcando y desmarcando bases para la consulta que está escribiendo ahora.
-     */
-    private void refreshTabHeader(Tab tab) {
-        if (!(tab.getUserData() instanceof QueryTabState state) || state.nameLabel == null) {
-            return;
-        }
-        state.nameLabel.setText((state.dirty ? "● " : "") + state.baseName);
-        boolean isActive = queryTabPane.getSelectionModel().getSelectedItem() == tab;
-        if (isActive && connectionTree.getRoot() != null) {
-            // Directo desde el árbol, sin pasar por ids (2026-09-12): antes esto hacía
-            // capturedSelectedDatabaseIds() —recorrido del árbol + un LinkedHashSet— y
-            // después describeSelection buscaba el alias recorriendo registry.allDatabases(),
-            // que además construye una lista nueva con TODAS las bases. Dos recorridos y
-            // dos colecciones por cada casilla que se marca o desmarca; con "Todas" sobre
-            // decenas de bases eso se multiplica por cada una. Acá el alias ya viene en el
-            // objeto, no hay nada que buscar.
-            state.databaseLabel.setText(describeSelection(selectedDatabases()));
-        } else {
-            state.databaseLabel.setText(describeSelectionByIds(state.selectedDatabaseIds));
-        }
-    }
-
-    /** Repinta el encabezado de TODAS las pestañas — al cambiar de pestaña cambian dos (la que se deja y la que se activa), y es más simple y barato recorrerlas que rastrear cuáles. */
-    private void refreshAllTabHeaders() {
-        for (Tab tab : queryTabPane.getTabs()) {
-            refreshTabHeader(tab);
-        }
-    }
-
-    /** Igual que {@link #refreshAllTabHeaders()} pero solo para la activa — lo que se llama al marcar/desmarcar una casilla del árbol, donde las demás pestañas no cambian. */
-    private void refreshActiveTabHeader() {
-        Tab active = queryTabPane.getSelectionModel().getSelectedItem();
-        if (active != null) {
-            refreshTabHeader(active);
-        }
-    }
-
-    /**
-     * Segunda línea del encabezado: el alias de la base cuando hay exactamente una
-     * marcada, el conteo cuando hay varias, y un aviso explícito cuando no hay
-     * ninguna — ese último caso es el que antes solo se descubría al presionar
-     * "Ejecutar" y recibir "Selecciona al menos una base de datos" abajo.
-     */
-    private String describeSelection(List<DatabaseEntry> selected) {
-        if (selected.isEmpty()) {
-            return "sin base seleccionada";
-        }
-        return selected.size() > 1 ? selected.size() + " bases" : selected.get(0).alias();
-    }
-
-    /**
-     * Igual que {@link #describeSelection}, pero partiendo de ids guardados — es lo
-     * único que tiene una pestaña que NO está activa: su selección vive como ids desde
-     * la última vez que se la dejó, no como objetos del árbol de ahora.
-     */
-    private String describeSelectionByIds(Set<String> ids) {
-        if (ids.isEmpty()) {
-            return "sin base seleccionada";
-        }
-        if (ids.size() > 1) {
-            return ids.size() + " bases";
-        }
-        String id = ids.iterator().next();
-        return registry.allDatabases().stream()
-                .filter(db -> db.id().equals(id))
-                .map(DatabaseEntry::alias)
-                .findFirst()
-                // Una base que ya no existe (se borró mientras la pestaña la tenía
-                // guardada) — no se inventa un nombre ni se deja la línea en blanco.
-                .orElse("base no encontrada");
-    }
-
-    /**
-     * Reaplica {@code preferences.editorFontSize()} a TODAS las pestañas de
-     * consulta abiertas (una sola preferencia compartida, no una por
-     * pestaña) — llamado al arrancar, cada vez que se abre una pestaña
-     * nueva (ver {@link #addQueryTab}, que ya lo pone en la suya al
-     * crearla, esto cubre las que YA estaban abiertas), desde
-     * Preferencias → Apariencia al guardar, y desde los atajos
-     * Ctrl+Plus/Ctrl+Minus/Ctrl+0 del editor mismo.
-     */
-    private void applyEditorFontSize() {
-        String style = "-fx-font-size: " + preferences.editorFontSize() + "px;";
-        for (Tab tab : queryTabPane.getTabs()) {
-            if (tab.getUserData() instanceof QueryTabState state) {
-                state.codeArea.setStyle(style);
-            }
-        }
-    }
-
-    /**
-     * Pregunta qué hacer al cerrar una pestaña con cambios sin guardar —
-     * Guardar / Descartar / Cancelar. Devuelve {@code true} si está bien
-     * seguir cerrando la pestaña (se guardó, o el usuario decidió
-     * descartar), {@code false} si hay que vetar el cierre (canceló, o
-     * el guardado en sí falló/se canceló a mitad de camino).
-     */
-    private boolean confirmSaveOrDiscard(Tab tab, QueryTabState state) {
-        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("Cambios sin guardar");
-        alert.setHeaderText("La pestaña \"" + state.baseName + "\" tiene cambios sin guardar.");
-        alert.setContentText("¿Qué quieres hacer antes de cerrarla?");
-        ButtonType saveType = new ButtonType("Guardar", ButtonBar.ButtonData.OK_DONE);
-        ButtonType discardType = new ButtonType("Descartar cambios");
-        ButtonType cancelType = new ButtonType("Cancelar", ButtonBar.ButtonData.CANCEL_CLOSE);
-        alert.getButtonTypes().setAll(saveType, discardType, cancelType);
-        alert.initOwner(connectionTree.getScene().getWindow());
-        applyThemeToAlert(alert);
-
-        Optional<ButtonType> choice = alert.showAndWait();
-        if (choice.isEmpty() || choice.get() == cancelType) {
-            return false;
-        }
-        if (choice.get() == discardType) {
-            return true;
-        }
-
-        File file = state.file;
-        if (file == null) {
-            file = chooseSaveFile();
-            if (file == null) {
-                return false;
-            }
-            state.file = file;
-        }
-        writeScriptTo(tab, state, file);
-        return !state.dirty;
-    }
-
-    /**
-     * Llamado desde {@code Main#start} cuando el usuario intenta cerrar la
-     * ventana entera (la X del sistema operativo, no el botón de cerrar de
-     * una pestaña) — sin esto, cerrar la app con una pestaña con cambios
-     * sin guardar los perdía en silencio, el mismo problema que
-     * {@link #confirmSaveOrDiscard} ya resuelve por pestaña, así que lo
-     * reusa acá una vez por cada pestaña con cambios pendientes. Devuelve
-     * {@code false} en cuanto una de esas confirmaciones se cancela — el
-     * resto de pestañas dirty que quedaban por preguntar ya no se tocan.
-     */
-    boolean confirmCloseAllTabs() {
-        for (Tab tab : List.copyOf(queryTabPane.getTabs())) {
-            QueryTabState state = (QueryTabState) tab.getUserData();
-            if (state.dirty && !confirmSaveOrDiscard(tab, state)) {
-                return false;
-            }
-        }
-        return true;
-    }
+    // ---- Pestañas de consulta, buscar y formatear ----
+    //
+    // Todo vive en QueryTabManager (2026-09-18, tercer paso de C1). Acá quedan solo
+    // los manejadores @FXML, porque el FXML los enlaza por nombre al controlador.
 
     @FXML
     private void onNewQueryTab() {
-        addQueryTab("", null);
+        tabs.addQueryTab("", null, null);
     }
 
-    private QueryTabState currentTabState() {
-        Tab tab = queryTabPane.getSelectionModel().getSelectedItem();
-        return tab == null ? null : (QueryTabState) tab.getUserData();
+    /** Lo llama {@code Main} al cerrar la ventana — ver {@link QueryTabManager#confirmCloseAllTabs()}. */
+    boolean confirmCloseAllTabs() {
+        return tabs.confirmCloseAllTabs();
     }
-
-    // ---- Buscar en el script ----
 
     /** Muestra la barra de búsqueda (una sola, compartida entre pestañas — busca siempre en la pestaña activa) y le da foco. */
     @FXML
@@ -1109,111 +793,34 @@ public class MainController {
     private void onCloseFindBar() {
         findBar.setVisible(false);
         findBar.setManaged(false);
-        QueryTabState state = currentTabState();
-        if (state != null) {
-            state.codeArea.requestFocus();
-        }
+        tabs.focusCurrentEditor();
     }
 
     @FXML
     private void onFindNext() {
-        findInCurrentTab(true);
+        showFindOutcome(tabs.find(findField.getText(), true));
     }
 
     @FXML
     private void onFindPrevious() {
-        findInCurrentTab(false);
+        showFindOutcome(tabs.find(findField.getText(), false));
     }
 
-    /**
-     * Busca la siguiente/anterior aparición de {@code findField} en el
-     * {@code CodeArea} de la pestaña activa, insensible a mayúsculas, y la
-     * selecciona. Si no hay más ocurrencias en esa dirección desde el
-     * cursor, da la vuelta al principio/final del texto (búsqueda
-     * circular) — no un "sin resultados" apenas se pasa del final.
-     */
-    private void findInCurrentTab(boolean forward) {
-        QueryTabState state = currentTabState();
-        String needle = findField.getText();
-        if (state == null || needle.isEmpty()) {
-            return;
+    /** La barra de búsqueda vive en este FXML; {@link QueryTabManager#find} solo dice qué pasó. */
+    private void showFindOutcome(QueryTabManager.FindOutcome outcome) {
+        switch (outcome) {
+            case NOT_FOUND -> findStatusLabel.setText("Sin resultados");
+            case FOUND -> findStatusLabel.setText("");
+            case NOTHING_TO_SEARCH -> { }
         }
-        CodeArea codeArea = state.codeArea;
-        // Sin copia en minúsculas del documento entero (2026-09-07, hallazgo #9 de
-        // AUDITORIA_BUGS_RENDIMIENTO.md) — antes cada "buscar siguiente" hacía
-        // getText().toLowerCase(), o sea DOS copias completas del script por cada F3.
-        // Sobre un script grande, repetir F3 asignaba decenas de MB de basura solo para
-        // encontrar la siguiente coincidencia. indexOfIgnoreCase compara en el lugar con
-        // regionMatches(true, ...) — misma insensibilidad a mayúsculas, sin copiar nada.
-        String haystack = codeArea.getText();
-
-        int caret = codeArea.getCaretPosition();
-        int index;
-        if (forward) {
-            index = indexOfIgnoreCase(haystack, needle, caret, true);
-            if (index < 0) {
-                index = indexOfIgnoreCase(haystack, needle, 0, true);
-            }
-        } else {
-            int searchFrom = caret - needle.length() - 1;
-            index = searchFrom >= 0 ? indexOfIgnoreCase(haystack, needle, searchFrom, false) : -1;
-            if (index < 0) {
-                index = indexOfIgnoreCase(haystack, needle, haystack.length() - needle.length(), false);
-            }
-        }
-
-        if (index < 0) {
-            findStatusLabel.setText("Sin resultados");
-            return;
-        }
-        findStatusLabel.setText("");
-        codeArea.selectRange(index, index + needle.length());
-        codeArea.requestFollowCaret();
     }
 
-    /**
-     * Equivalente insensible a mayúsculas de {@code indexOf}/{@code lastIndexOf}
-     * SIN copiar el texto — {@code String#regionMatches(true, ...)} compara en el
-     * lugar, carácter por carácter, sobre el documento original (ver
-     * {@link #findInCurrentTab}). {@code forward=false} busca hacia atrás desde
-     * {@code from} inclusive, igual que {@code lastIndexOf}. Devuelve -1 si no hay
-     * ninguna coincidencia en esa dirección.
-     */
-    static int indexOfIgnoreCase(String haystack, String needle, int from, boolean forward) {
-        int lastPossibleStart = haystack.length() - needle.length();
-        if (needle.isEmpty() || lastPossibleStart < 0) {
-            return -1;
-        }
-        if (forward) {
-            for (int i = Math.max(0, from); i <= lastPossibleStart; i++) {
-                if (haystack.regionMatches(true, i, needle, 0, needle.length())) {
-                    return i;
-                }
-            }
-        } else {
-            for (int i = Math.min(from, lastPossibleStart); i >= 0; i--) {
-                if (haystack.regionMatches(true, i, needle, 0, needle.length())) {
-                    return i;
-                }
-            }
-        }
-        return -1;
-    }
-
-    /**
-     * Editar → Formatear SQL (Ctrl+L) — reescribe el texto de la pestaña
-     * activa con {@link SqlFormatter#format}. Marca la pestaña como "con
-     * cambios sin guardar" igual que cualquier otra edición, ya que sí
-     * cambia el texto real.
-     */
+    /** Editar → Formatear SQL (Ctrl+L) — ver {@link QueryTabManager#formatCurrent()}. */
     @FXML
     private void onFormatSql() {
-        QueryTabState state = currentTabState();
-        if (state == null) {
-            return;
+        if (tabs.formatCurrent()) {
+            log("SQL formateado.");
         }
-        state.codeArea.replaceText(SqlFormatter.format(state.codeArea.getText()));
-        log("SQL formateado.");
     }
 
     /**
@@ -1225,13 +832,13 @@ public class MainController {
      */
     @FXML
     private void onAutocomplete() {
-        QueryTabState state = currentTabState();
+        QueryTabManager.TabState state = tabs.current();
         if (state == null) {
             return;
         }
         List<DatabaseEntry> selected = selectedDatabases();
         DatabaseEntry activeDb = selected.isEmpty() ? null : selected.get(0);
-        SqlAutocomplete.show(state.codeArea, activeDb, credentials, pool);
+        SqlAutocomplete.show(state.codeArea(), activeDb, credentials, pool);
     }
 
     // ---- Diálogos ----
@@ -1732,7 +1339,7 @@ public class MainController {
         }
         try {
             String content = Files.readString(file.toPath());
-            addQueryTab(content, file);
+            tabs.addQueryTab(content, file, null);
             statusLabel.setText("Abierto: " + file.getName());
             logger.info("onOpenFile: {} ({} caracteres)", file.getAbsolutePath(), content.length());
         } catch (IOException e) {
@@ -1743,52 +1350,12 @@ public class MainController {
 
     @FXML
     private void onSaveFile() {
-        Tab tab = queryTabPane.getSelectionModel().getSelectedItem();
-        QueryTabState state = currentTabState();
-        if (tab == null || state == null) {
-            return;
-        }
-        if (state.file == null) {
-            onSaveFileAs();
-            return;
-        }
-        writeScriptTo(tab, state, state.file);
+        tabs.saveCurrent();
     }
 
     @FXML
     private void onSaveFileAs() {
-        Tab tab = queryTabPane.getSelectionModel().getSelectedItem();
-        QueryTabState state = currentTabState();
-        if (tab == null || state == null) {
-            return;
-        }
-        File file = chooseSaveFile();
-        if (file == null) {
-            return;
-        }
-        state.file = file;
-        writeScriptTo(tab, state, file);
-    }
-
-    private File chooseSaveFile() {
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle("Guardar script SQL");
-        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("SQL", "*.sql"));
-        return chooser.showSaveDialog(connectionTree.getScene().getWindow());
-    }
-
-    private void writeScriptTo(Tab tab, QueryTabState state, File file) {
-        try {
-            Files.writeString(file.toPath(), state.codeArea.getText());
-            state.baseName = file.getName();
-            state.dirty = false;
-            refreshTabHeader(tab);
-            statusLabel.setText("Guardado: " + file.getName());
-            log("Script guardado en " + file.getName());
-        } catch (IOException e) {
-            logger.warn("No se pudo guardar el script en {}", file.getAbsolutePath(), e);
-            statusLabel.setText("Error al guardar: " + e.getMessage());
-        }
+        tabs.saveCurrentAs();
     }
 
     @FXML
@@ -2011,9 +1578,9 @@ public class MainController {
      * sin tocar el resto del script, es un flujo de trabajo real, no un
      * caso raro.
      */
-    private static String sqlToRun(QueryTabState state) {
-        String selected = state.codeArea.getSelectedText();
-        return selected.isBlank() ? state.codeArea.getText() : selected;
+    private static String sqlToRun(QueryTabManager.TabState state) {
+        String selected = state.codeArea().getSelectedText();
+        return selected.isBlank() ? state.codeArea().getText() : selected;
     }
 
     /**
@@ -2035,7 +1602,7 @@ public class MainController {
         if (queryRunning) {
             return;
         }
-        QueryTabState state = currentTabState();
+        QueryTabManager.TabState state = tabs.current();
         if (state == null) {
             return;
         }
@@ -2044,7 +1611,7 @@ public class MainController {
             statusLabel.setText("Escribe una consulta primero.");
             return;
         }
-        lastExecutionTabLabel = state.baseName;
+        lastExecutionTabLabel = state.baseName();
 
         List<DatabaseEntry> selected = selectedDatabases();
         if (selected.isEmpty()) {
@@ -2301,11 +1868,11 @@ public class MainController {
 
     @FXML
     private void onSaveFavorite() {
-        QueryTabState state = currentTabState();
+        QueryTabManager.TabState state = tabs.current();
         if (state == null) {
             return;
         }
-        String sql = state.codeArea.getText();
+        String sql = state.codeArea().getText();
         if (sql.isBlank()) {
             statusLabel.setText("Escribe una consulta primero.");
             return;
@@ -2333,7 +1900,7 @@ public class MainController {
         if (selected == null) {
             return;
         }
-        addQueryTab(selected.sql(), null);
+        tabs.addQueryTab(selected.sql(), null, null);
         log("Favorito abierto: " + selected.name());
     }
 
@@ -2402,7 +1969,7 @@ public class MainController {
      */
     @FXML
     private void onExplainPlan() {
-        QueryTabState state = currentTabState();
+        QueryTabManager.TabState state = tabs.current();
         if (state == null) {
             return;
         }
@@ -2609,7 +2176,7 @@ public class MainController {
      * antes no existía ningún camino para quitar una base ya agregada.
      * Confirmación primero porque es una acción difícil de deshacer (no hay
      * papelera/undo en esta app) — mismo criterio que
-     * {@link #confirmSaveOrDiscard}, ninguno de los 2 botones queda como
+     * {@code QueryTabManager#confirmSaveOrDiscard}, ninguno de los 2 botones queda como
      * "default" (ni estilo primario ni Enter la dispara) para no arriesgar
      * un borrado accidental de un Enter de más.
      */
@@ -2651,7 +2218,7 @@ public class MainController {
      * genérico de Nueva consulta (sin ninguna base asociada de entrada).
      */
     private void onNewQueryForDatabase(DatabaseEntry db) {
-        addQueryTab("", null, Set.of(db.id()));
+        tabs.addQueryTab("", null, Set.of(db.id()));
         statusLabel.setText("Nueva consulta para " + db.alias() + " — su casilla ya quedó marcada.");
         log("Nueva consulta abierta para " + db.alias() + " (casilla marcada automáticamente).");
     }
@@ -2675,7 +2242,7 @@ public class MainController {
                 .toList();
     }
 
-    /** Ids de las bases marcadas AHORA MISMO en el árbol — lo que la pestaña activa "ve". Usado para que una pestaña nueva herede la selección de la que se está dejando (ver {@link #addQueryTab}) y para guardar el estado de una pestaña justo antes de dejarla (ver el listener de cambio de pestaña en {@link #initialize()}). */
+    /** Ids de las bases marcadas AHORA MISMO en el árbol — lo que la pestaña activa "ve". Usado para que una pestaña nueva herede la selección de la que se está dejando (ver {@link QueryTabManager#addQueryTab}) y para guardar el estado de una pestaña justo antes de dejarla (ver {@code QueryTabManager#syncTreeOnTabSwitch}). */
     private Set<String> capturedSelectedDatabaseIds() {
         return selectedDatabases().stream()
                 .map(DatabaseEntry::id)
@@ -2687,34 +2254,6 @@ public class MainController {
         for (CheckBoxTreeItem<Object> item : ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot())) {
             item.setSelected(ids.contains(((DatabaseEntry) item.getValue()).id()));
         }
-    }
-
-    /**
-     * Todas las pestañas de consulta abiertas ahora mismo, listas para persistir
-     * (autoguardado/cierre, ver {@link #autosave()}/{@link #shutdown()}) — texto
-     * real del editor (no solo la ruta del archivo, para no perder cambios sin
-     * guardar), archivo asociado si tiene, y su propia selección de bases.
-     * Sincroniza primero la pestaña ACTIVA con el árbol real — su
-     * {@code selectedDatabaseIds} guardado solo se actualiza al CAMBIAR de
-     * pestaña (ver el listener en {@link #initialize()}), así que sin este paso
-     * quedaría desactualizado si el usuario tocó casillas sin cambiar de pestaña
-     * antes de cerrar la app.
-     */
-    private List<SavedQueryTab> capturedQueryTabsForSave() {
-        QueryTabState activeState = currentTabState();
-        if (activeState != null) {
-            activeState.selectedDatabaseIds = capturedSelectedDatabaseIds();
-        }
-        List<SavedQueryTab> saved = new ArrayList<>();
-        for (Tab tab : queryTabPane.getTabs()) {
-            if (tab.getUserData() instanceof QueryTabState state) {
-                saved.add(new SavedQueryTab(
-                        state.codeArea.getText(),
-                        state.file != null ? state.file.getAbsolutePath() : null,
-                        List.copyOf(state.selectedDatabaseIds)));
-            }
-        }
-        return saved;
     }
 
     /**
@@ -3005,9 +2544,9 @@ public class MainController {
         // de CUÁL pestaña está activa). Los listeners mueren con estos TreeItem, que se
         // tiran enteros en la próxima reconstrucción del árbol — no se acumulan.
         for (Observable selectedProperty : selectedProperties) {
-            selectedProperty.addListener(observable -> refreshActiveTabHeader());
+            selectedProperty.addListener(observable -> tabs.refreshActiveTabHeader());
         }
-        refreshActiveTabHeader();
+        tabs.refreshActiveTabHeader();
     }
 
     /**
