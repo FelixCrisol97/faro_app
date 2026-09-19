@@ -257,6 +257,17 @@ src/main/resources/com/faro/app/
 src/test/java/  — tests JUnit 5
 ```
 
+**`MainController` delega en cuatro coordinadores** (2026-09-19, hallazgo C1 del análisis) en vez de hacerlo todo él:
+
+| Clase | De qué se encarga |
+|---|---|
+| `data/SessionPersistence` | Cargar la sesión anterior, el autoguardado cada 2 minutos y el guardado al cerrar. |
+| `ui/QueryTabManager` | Las pestañas de consulta: crearlas, su encabezado de dos líneas, guardar, buscar y formatear. |
+| `ui/ConnectionTreeCoordinator` | El estado del árbol que sobrevive a cada reconstrucción: qué bases están marcadas, qué filas quedaron abiertas, el scroll y el buscador. |
+| `ui/ScriptGeneratorCoordinator` | Las seis acciones "Generar…" del explorador de esquema. |
+
+El controlador se queda con lo que el FXML enlaza por nombre (los `@FXML`), los diálogos, y la ejecución de consultas con su exportación — esos dos últimos son los candidatos naturales para seguir dividiendo.
+
 ## Más contexto
 
 - `CONTEXTO_SESIONES.md` (raíz del repo) — historial completo de cómo se construyó/depuró cada función, decisiones de diseño con su razonamiento, y bugs encontrados con su causa real.

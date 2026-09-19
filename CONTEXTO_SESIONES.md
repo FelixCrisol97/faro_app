@@ -3755,3 +3755,113 @@ cambiarla.** Queda planteada la disyuntiva para que la decida:
 Mientras tanto se dejó registrado el cuidado que sí se tomó el 2026-09-14: la copia
 extraída se arrancó con `-Duser.home=<temporal>` para que no tocara el `~/.faro/`
 real del usuario, cosa que en la ronda del 09-11 **sí** había pasado.
+
+---
+
+## 2026-09-15/19 — C1: `MainController` se divide en cuatro, en la rama `refactor/dividir-main-controller`
+
+Pedido: *"ocupamos hacer refactor a la clase que tiene muchas líneas de código,
+creemos una nueva rama"*. Es el hallazgo **C1**, el refactor más grande del proyecto
+y el que llevaba tres rondas anotado como "abierto a propósito" — justamente porque
+no hay ninguna red de tests de UI debajo. Se hizo en una **rama propia y sin ningún
+arreglo funcional mezclado**, que era la condición que el análisis ponía: si algo se
+rompe, no hay dudas sobre cuál de los dos cambios fue.
+
+**Un commit por paso**, en el orden que el plan de §C1 ya proponía, para poder parar
+o revertir cualquiera por separado:
+
+| Paso | Clase nueva | Líneas | Tests nuevos | `MainController` |
+|---|---|---|---|---|
+| 1 | `data/SessionPersistence` | 337 | 10 | 3,344 → 3,209 |
+| 2 | `ui/ScriptGeneratorCoordinator` | 231 | 4 | 3,209 → 3,054 |
+| 3 | `ui/QueryTabManager` | 705 | 11 (4 mudados) | 3,054 → 2,593 |
+| 4 | `ui/ConnectionTreeCoordinator` | 441 | 11 | 2,593 → **2,309** |
+
+**190/190 tests** (eran 158), cero advertencias con `-Xlint:all`, recompilación desde
+cero en cada paso.
+
+### Lo que de verdad ganó, que no son las líneas
+
+Tres cosas que no se podían testear sin arrancar JavaFX y ahora tienen tests:
+
+- **El arreglo de A3** — la carrera entre el autoguardado y el cierre, el hallazgo de
+  peor consecuencia de todo el análisis (perder TODA la configuración del usuario), y
+  hasta ahora **sin una sola prueba automática**. Ahora tiene 10: la ida y vuelta del
+  guardado, el archivo corrupto que no debe tronar el arranque, el candado que impide
+  dos autoguardados solapados, la espera del cierre, y el fallo de escritura que tiene
+  que avisar **y** soltar el candado.
+- **La segunda línea del encabezado de cada pestaña** (el pedido del 2026-09-11, "que
+  diga contra qué BD va a correr"): 7 tests. Eran métodos de instancia privados del
+  controlador.
+- **La invariante del hallazgo #1 de `AUDITORIA_BUGS_RENDIMIENTO.md`**: ningún
+  recorrido del árbol le pide los hijos a una fila de base, porque eso abre una
+  conexión contra cada base registrada ("se llena de pool de conexiones si tengo
+  muchas BD"). **Verificado con una sonda**: rota la invariante a propósito, el test
+  falla; restaurada, pasa.
+
+### Tres decisiones de diseño, con su motivo
+
+- **El registro entra como `Supplier`, no como referencia** (en `SessionPersistence` y
+  en `ConnectionTreeCoordinator`). "Importar configuración…" lo **reemplaza** por otro
+  objeto: con una referencia guardada en el constructor, la clase habría seguido
+  guardando el registro viejo después de cada importación, en silencio y para siempre.
+  Hay un test que falla si alguien lo vuelve referencia.
+- **El cierre quedó en dos llamadas y no en una.** Fusionarlas era más cómodo pero
+  invertía el orden original (esperar el autoguardado → cerrar pools → guardar). Se
+  puede argumentar que guardar antes de cerrar pools es más seguro; da igual, eso es
+  cambiar comportamiento, no refactorizar, y no era la tarea.
+- **Las nueve dependencias de `QueryTabManager` entran por una interfaz de métodos con
+  nombre (`Host`), no como lambdas posicionales.** Dos serían `Consumer<String>` (la
+  barra de estado y el log de Diagnóstico) y cruzarlas **compila** y falla en vivo. Es
+  exactamente el riesgo que sigue anotado como abierto para `ConnectionTreeActions` —
+  así que ahora el patrón para cerrarlo ya existe en el código.
+
+### Cómo se verificó que no cambió lógica
+
+Los pasos 3 y 4 son UI de verdad y casi no tienen tests, así que la verificación fue
+**mecánica y en las dos direcciones**: cada sentencia del bloque original contra la
+clase nueva, y cada sentencia de la clase nueva contra el original tras aplicar los
+renombres. En los dos pasos, todas las diferencias resultaron ser renombres,
+andamiaje (declaraciones, accesores, constructor) o manejadores `@FXML` que se
+quedaron en el controlador a propósito. **Ni una línea de lógica inventada.**
+
+El recableado se hizo con un script que **falla si un fragmento no aparece
+exactamente una vez**, en vez de reemplazar a ciegas — y atrapó un caso real: la
+expresión regular que cambiaba las llamadas a `selectedDatabases()` alcanzó también
+la **declaración** del método en el `Host`, que habría quedado como
+`public List<DatabaseEntry> tree.selectedDatabases()`.
+
+### Lo que NO se hizo, y por qué
+
+**No llega a las ~1,650 líneas que prometía el plan.** El plan se escribió sobre un
+archivo de 2,621 líneas; al ejecutarlo tenía 3,344. Las ~720 que creció en el medio
+entraron casi todas a la sección `// ---- Diálogos ----`, que hoy tiene **993 líneas**
+y cuyo nombre ya no describe lo que contiene: además de diálogos están la ejecución de
+consultas (~286 líneas) y exportar CSV con la barra de estado (~220). Ninguno de los
+dos estaba en los cuatro pasos; son los candidatos naturales para seguir, en ese
+orden.
+
+**El paso 4 se cortó más angosto que en el plan.** El plan juntaba "árbol" con
+"edición de bases". Se movió el estado del árbol y los bindings; las **acciones**
+(agregar, editar, borrar, mover, renombrar) se quedaron en el controlador y le piden
+al coordinador `refresh()` o `revealDatabase()`. Moverlas habría arrastrado sus
+diálogos y convertido el coordinador en un segundo `MainController`.
+
+**C3 sigue abierto, y creció.** El análisis decía 12 `new Thread(...)` sueltos y que
+"varios se moverían solos al dividir C1". Hoy son **15** (los arreglos de rendimiento
+sumaron los suyos) y la predicción se cumplió a medias: 2 se mudaron, pero siguen
+igual de sueltos en su clase nueva, y en `MainController` quedan 5.
+
+### Lo que falta, y es del usuario
+
+**La prueba de humo del log.** Es la red de seguridad real que el propio §C1 propone y
+la única que cubre lo que los tests no: abrir la app, expandir una base, correr contra
+dos, exportar, cambiar de pestaña, cerrar, y comparar `logs/faro-app.log` contra el de
+antes. **No la corrió el asistente**: el punto 4 de los "Puntos obligatorios" lo
+prohíbe, y esa contradicción sigue pendiente de decisión (ver la entrada del
+2026-09-15).
+
+Un detalle para ese diff: las líneas de log que se mudaron de clase ahora salen con
+**otro nombre de logger** (`SessionPersistence`, `ScriptGeneratorCoordinator`,
+`QueryTabManager` en lugar de `MainController`). El diff las va a marcar aunque el
+comportamiento sea idéntico.
