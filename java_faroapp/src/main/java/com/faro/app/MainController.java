@@ -13,7 +13,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -55,6 +54,7 @@ import com.faro.app.query.SchemaIntrospector;
 import com.faro.app.ui.AddDatabaseDialog;
 import com.faro.app.ui.ConnectionTreeActions;
 import com.faro.app.ui.ConnectionTreeBuilder;
+import com.faro.app.ui.ConnectionTreeCoordinator;
 import com.faro.app.ui.ConnectionTreeCell;
 import com.faro.app.ui.CredentialsDialog;
 import com.faro.app.ui.CsvImportDialog;
@@ -74,7 +74,6 @@ import javafx.animation.PauseTransition;
 import javafx.animation.Interpolator;
 import javafx.animation.RotateTransition;
 import javafx.application.Platform;
-import javafx.beans.Observable;
 import javafx.beans.binding.Bindings;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -91,7 +90,6 @@ import javafx.scene.control.CheckBox;
 import javafx.scene.control.CheckBoxTreeItem;
 import javafx.scene.control.ChoiceDialog;
 import javafx.scene.control.Dialog;
-import javafx.scene.control.IndexedCell;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
@@ -104,7 +102,6 @@ import javafx.scene.control.TextInputDialog;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeView;
-import javafx.scene.control.skin.VirtualFlow;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
@@ -293,6 +290,8 @@ public class MainController {
     private ScriptGeneratorCoordinator scriptGenerator;
     /** Las pestañas de consulta, buscar y formatear — ver {@link QueryTabManager} (2026-09-18, tercer paso de C1). */
     private QueryTabManager tabs;
+    /** Selección, filas abiertas, scroll y buscador del árbol de conexiones — ver {@link ConnectionTreeCoordinator} (2026-09-19, cuarto paso de C1). */
+    private ConnectionTreeCoordinator tree;
     private final AppPreferences preferences = new AppPreferences();
     private final FavoritesStore favorites = new FavoritesStore();
     private final ObservableList<DiagnosticEntry> diagnosticLog = FXCollections.observableArrayList();
@@ -308,8 +307,6 @@ public class MainController {
     /** Alias de la base (o "N-bases" si la última corrida tocó varias) y texto SQL que produjeron el resultado que hay ahora mismo en {@link #resultsTable} — insumos para el nombre sugerido de {@link #onExportResultsCsv()}, ver {@link CsvFileNamer}. */
     private String lastResultDatabaseLabel = "";
     private String lastResultSql = "";
-    /** Texto actual del buscador de bases del árbol de conexiones — ver {@link #refreshTree()}/{@link ConnectionTreeBuilder#buildRoot(ConnectionRegistry, String)}. */
-    private String connectionFilterText = "";
     /** Hora en que arrancó la última corrida — se perdió al quitar los `log(...)` duplicados de {@link #onRunQuery()}, el usuario lo notó, se movió al encabezado de Ejecución en vez de repetirlo en el log. */
     private String lastExecutionStartTime = "";
     /**
@@ -363,8 +360,18 @@ public class MainController {
                 () -> registry, preferences, favorites, credentials,
                 () -> tabs.captureForSave(),
                 message -> log(LogLevel.ERROR, message));
+        // El árbol y las pestañas se construyen ACÁ, antes de la primera reconstrucción
+        // del árbol (tree.refresh(), más abajo). Se necesitan entre sí —el árbol avisa a
+        // las pestañas cuando cambia la selección y las pestañas le piden la selección al
+        // árbol— pero siempre a través de lambdas que leen el campo al invocarse, así que
+        // el orden entre los dos no importa; lo que importa es que ambos existan antes de
+        // esa primera reconstrucción.
+        tree = new ConnectionTreeCoordinator(
+                connectionTree, () -> registry, credentials, pool,
+                selectedCountLabel, selectAllDatabasesButton,
+                () -> tabs.refreshActiveTabHeader());
         // Las pestañas se construyen ACÁ, antes de la primera reconstrucción del árbol:
-        // refreshTree() ya repinta el encabezado de la pestaña activa, y aunque al
+        // tree.refresh() ya repinta el encabezado de la pestaña activa, y aunque al
         // arrancar todavía no haya ninguna, para "no hacer nada" necesita que tabs exista.
         // Ver el javadoc del constructor de QueryTabManager.
         tabs = new QueryTabManager(queryTabPane, preferences, new QueryTabManager.Host() {
@@ -375,22 +382,22 @@ public class MainController {
 
             @Override
             public List<DatabaseEntry> selectedDatabases() {
-                return MainController.this.selectedDatabases();
+                return tree.selectedDatabases();
             }
 
             @Override
             public Set<String> capturedSelectedDatabaseIds() {
-                return MainController.this.capturedSelectedDatabaseIds();
+                return tree.capturedSelectedDatabaseIds();
             }
 
             @Override
             public void applySelectedDatabaseIds(Set<String> ids) {
-                MainController.this.applySelectedDatabaseIds(ids);
+                tree.applySelectedDatabaseIds(ids);
             }
 
             @Override
             public boolean treeReady() {
-                return connectionTree.getRoot() != null;
+                return tree.isBuilt();
             }
 
             @Override
@@ -429,7 +436,7 @@ public class MainController {
                 this::onSetGroupSelection,
                 this::onMoveGroupInOrder,
                 this::onSortGroupDatabases);
-        connectionTree.setCellFactory(tree -> new ConnectionTreeCell(treeActions, preferences::fontScaleDelta));
+        connectionTree.setCellFactory(view -> new ConnectionTreeCell(treeActions, preferences::fontScaleDelta));
         // Ya no viene fijo en el FXML (2026-09-14, hallazgo A9) — se calcula igual que el
         // del grid de resultados y se reaplica al mover el slider, ver applyCurrentTheme.
         connectionTree.setFixedCellSize(ConnectionTreeCell.rowHeight(preferences.fontScaleDelta()));
@@ -463,12 +470,12 @@ public class MainController {
         // "bodega norte" eran 12 reconstrucciones completas para llegar al mismo
         // resultado que da la última. PauseTransition se reinicia con cada tecla, así que
         // solo corre cuando el usuario de verdad para de escribir.
-        filterDebounce.setOnFinished(event -> refreshTreeFromFilter());
+        filterDebounce.setOnFinished(event -> tree.refreshFromFilter());
         connectionFilterField.textProperty().addListener((obs, oldText, newText) -> {
-            connectionFilterText = newText;
+            tree.setFilterText(newText);
             filterDebounce.playFromStart();
         });
-        refreshTree();
+        tree.refresh();
         session.startAutosave(Platform::runLater);
         startStatusBarRefresh();
 
@@ -836,7 +843,7 @@ public class MainController {
         if (state == null) {
             return;
         }
-        List<DatabaseEntry> selected = selectedDatabases();
+        List<DatabaseEntry> selected = tree.selectedDatabases();
         DatabaseEntry activeDb = selected.isEmpty() ? null : selected.get(0);
         SqlAutocomplete.show(state.codeArea(), activeDb, credentials, pool);
     }
@@ -848,11 +855,11 @@ public class MainController {
         AddDatabaseDialog.showForAdd(connectionTree.getScene().getWindow(), credentials, preferences)
             .ifPresent(entry -> {
                 registry.ungroupedDatabases().add(entry);
-                refreshTree();
+                tree.refresh();
                 // Dejarla a la vista y seleccionada — antes el árbol se reconstruía y
                 // volvía al tope, así que con muchas bases registradas la recién creada
                 // quedaba fuera de pantalla sin ninguna pista de dónde había caído.
-                revealDatabase(entry);
+                tree.revealDatabase(entry);
                 log("Base agregada: " + entry.alias());
             });
     }
@@ -890,10 +897,10 @@ public class MainController {
                 DiscoverDialog.show(connectionTree.getScene().getWindow(), credentials, preferences, registry.allDatabases());
         if (!found.isEmpty()) {
             registry.ungroupedDatabases().addAll(found);
-            refreshTree();
+            tree.refresh();
             // Misma razón que en onAddDatabase — dejar a la vista la última agregada en
             // vez de mandar el árbol de vuelta al tope.
-            revealDatabase(found.get(found.size() - 1));
+            tree.revealDatabase(found.get(found.size() - 1));
             statusLabel.setText(found.size() + " base(s) agregada(s) desde el escaneo.");
             log(found.size() + " base(s) agregada(s) desde el escaneo de bases de datos.");
         }
@@ -987,7 +994,7 @@ public class MainController {
                     });
             target.databases().add(db);
         }
-        refreshTree();
+        tree.refresh();
         String label = targetGroupName.equals(UNGROUPED_CHOICE) ? "Sin grupo" : targetGroupName;
         statusLabel.setText(db.alias() + " movida a " + label + ".");
         log(db.alias() + ": movida al grupo \"" + label + "\".");
@@ -1011,7 +1018,7 @@ public class MainController {
      * es pedírselos a una fila de base.
      */
     private void onSetGroupSelection(Server server, boolean selected) {
-        TreeItem<Object> groupItem = findGroupItem(server);
+        TreeItem<Object> groupItem = tree.findGroupItem(server);
         if (groupItem == null) {
             return;
         }
@@ -1024,23 +1031,6 @@ public class MainController {
         }
         String label = server == null ? "Sin grupo" : server.name();
         statusLabel.setText((selected ? "Marcadas " : "Desmarcadas ") + touched + " base(s) de " + label + ".");
-    }
-
-    /** La fila del árbol que representa a {@code server}, o la de "Sin grupo" si es nulo. {@code null} si ese grupo no está visible ahora mismo (ej. filtrado por el buscador). */
-    private TreeItem<Object> findGroupItem(Server server) {
-        TreeItem<Object> root = connectionTree.getRoot();
-        if (root == null) {
-            return null;
-        }
-        for (TreeItem<Object> group : root.getChildren()) {
-            Object value = group.getValue();
-            if (server == null
-                    ? ConnectionTreeBuilder.UNGROUPED_HEADER.equals(value)
-                    : value == server) {
-                return group;
-            }
-        }
-        return null;
     }
 
     /** "Renombrar grupo…" — antes no existía ninguna forma de cambiarle el nombre a un grupo una vez creado. */
@@ -1060,7 +1050,7 @@ public class MainController {
         }
         String previous = server.name();
         server.setName(name.get().trim());
-        refreshTree();
+        tree.refresh();
         statusLabel.setText("Grupo renombrado: " + server.name());
         log("Grupo \"" + previous + "\" renombrado a \"" + server.name() + "\".");
     }
@@ -1076,8 +1066,8 @@ public class MainController {
             return;
         }
         if (registry.moveServer(server, delta)) {
-            refreshTree();
-            revealGroup(server);
+            tree.refresh();
+            tree.revealGroup(server);
         }
     }
 
@@ -1087,8 +1077,8 @@ public class MainController {
             return;
         }
         if (registry.moveDatabase(db, delta)) {
-            refreshTree();
-            revealDatabase(db);
+            tree.refresh();
+            tree.revealDatabase(db);
         }
     }
 
@@ -1108,7 +1098,7 @@ public class MainController {
      * dejar hacerlo.
      */
     private boolean reorderBlockedByFilter() {
-        if (connectionFilterText == null || connectionFilterText.isBlank()) {
+        if (!tree.isFilterActive()) {
             return false;
         }
         statusLabel.setText("Limpia el buscador para cambiar el orden — con un filtro puesto, mover afectaría filas que no estás viendo.");
@@ -1118,21 +1108,8 @@ public class MainController {
     /** "Ordenar A-Z" — las bases de un grupo, o las sueltas si {@code server} es nulo. */
     private void onSortGroupDatabases(Server server) {
         registry.sortDatabasesByAlias(server);
-        refreshTree();
+        tree.refresh();
         statusLabel.setText("Bases ordenadas A-Z en " + (server == null ? "Sin grupo" : server.name()) + ".");
-    }
-
-    /** Deja visible la fila de un grupo tras moverlo — mismo criterio que {@link #revealDatabase}: después de mover algo, verlo donde quedó. */
-    private void revealGroup(Server server) {
-        TreeItem<Object> groupItem = findGroupItem(server);
-        if (groupItem == null) {
-            return;
-        }
-        int row = connectionTree.getRow(groupItem);
-        if (row >= 0) {
-            connectionTree.getSelectionModel().select(row);
-            Platform.runLater(() -> connectionTree.scrollTo(row));
-        }
     }
 
     /**
@@ -1155,7 +1132,7 @@ public class MainController {
         }
         String trimmed = name.get().trim();
         registry.servers().add(new Server(trimmed));
-        refreshTree();
+        tree.refresh();
         statusLabel.setText("Grupo creado: " + trimmed);
         log("Grupo de conexiones creado: " + trimmed);
     }
@@ -1171,10 +1148,10 @@ public class MainController {
             // base de origen está suelta, las nuevas también.
             registry.addAllNextTo(db, found);
             Server group = registry.groupOf(db);
-            refreshTree();
+            tree.refresh();
             // Misma razón que en onAddDatabase — dejar a la vista la última agregada en
             // vez de mandar el árbol de vuelta al tope.
-            revealDatabase(found.get(found.size() - 1));
+            tree.revealDatabase(found.get(found.size() - 1));
             String where = group == null ? "Sin grupo" : group.name();
             statusLabel.setText(found.size() + " base(s) agregada(s) en " + where + ".");
             log(found.size() + " base(s) agregada(s) desde el escaneo de " + db.host() + " — en " + where + ".");
@@ -1257,11 +1234,11 @@ public class MainController {
     /**
      * Prueba la conexión de cada base registrada (no solo las marcadas) y
      * actualiza su punto de estado en el árbol. Usa
-     * {@code connectionTree.refresh()} en vez de {@link #refreshTree()} a
-     * propósito — {@code refreshTree()} reconstruye todo el árbol
-     * (`CheckBoxTreeItem` nuevos), lo que borraría cualquier casilla que
-     * el usuario ya haya marcado; `refresh()` solo repinta las celdas
-     * visibles con los datos actuales sin tocar la estructura.
+     * {@code connectionTree.refresh()} —el de {@code TreeView}, que solo repinta
+     * las celdas visibles con los datos actuales sin tocar la estructura— y NO
+     * {@link ConnectionTreeCoordinator#refresh()}, que tira y rearma todos los
+     * {@code CheckBoxTreeItem}. Para cambiar el color de un punto de estado no
+     * hace falta reconstruir nada.
      */
     @FXML
     private void onTestAllConnections() {
@@ -1613,7 +1590,7 @@ public class MainController {
         }
         lastExecutionTabLabel = state.baseName();
 
-        List<DatabaseEntry> selected = selectedDatabases();
+        List<DatabaseEntry> selected = tree.selectedDatabases();
         if (selected.isEmpty()) {
             statusLabel.setText("Selecciona al menos una base de datos.");
             return;
@@ -1978,7 +1955,7 @@ public class MainController {
             statusLabel.setText("Escribe una consulta primero.");
             return;
         }
-        List<DatabaseEntry> selected = selectedDatabases();
+        List<DatabaseEntry> selected = tree.selectedDatabases();
         if (selected.isEmpty()) {
             statusLabel.setText("Selecciona al menos una base de datos.");
             return;
@@ -2127,7 +2104,7 @@ public class MainController {
             // Ese es el punto de la feature: montar Faro en un equipo nuevo sin
             // recapturar 50 contraseñas a mano.
             registry = ConnectionRegistryStore.load(file.toPath(), preferences, favorites, credentials).registry();
-            refreshTree();
+            tree.refresh();
             refreshFavorites();
             statusLabel.setText("Configuración importada: " + file.getName());
             log("Configuración importada de " + file.getName() + " — reemplazó conexiones y favoritos actuales.");
@@ -2167,7 +2144,7 @@ public class MainController {
                 // de antes de editar — descartarlo para que la próxima ejecución
                 // arme uno nuevo con los datos actuales.
                 pool.evict(updated.id());
-                refreshTree();
+                tree.refresh();
             });
     }
 
@@ -2205,7 +2182,7 @@ public class MainController {
         // SchemaIntrospector hasta cerrar la app, sin que nadie lo pudiera alcanzar
         // ya. Fuga silenciosa, y peor si un id se reusara.
         SchemaIntrospector.invalidate(entry.id());
-        refreshTree();
+        tree.refresh();
         log("Base eliminada: " + entry.alias());
     }
 
@@ -2221,39 +2198,6 @@ public class MainController {
         tabs.addQueryTab("", null, Set.of(db.id()));
         statusLabel.setText("Nueva consulta para " + db.alias() + " — su casilla ya quedó marcada.");
         log("Nueva consulta abierta para " + db.alias() + " (casilla marcada automáticamente).");
-    }
-
-    /**
-     * Las bases marcadas AHORA MISMO en el árbol, en orden de árbol.
-     *
-     * <p>Existía copiada palabra por palabra en cuatro sitios
-     * ({@code onAutocomplete}, {@code onRunQuery}, {@code onExplainPlan},
-     * {@code onCompareObject}) — cuatro copias del mismo {@code stream} con el mismo
-     * cast sin chequear (2026-09-12, hallazgo C4.2 de
-     * {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}). El cast es una suposición del
-     * diseño que el javadoc de {@code SchemaTreeNode} documenta —los nodos de esquema
-     * NUNCA son {@code CheckBoxTreeItem}— y tenerla repetida significaba cuatro sitios
-     * que tocar si esa suposición cambiara.
-     */
-    private List<DatabaseEntry> selectedDatabases() {
-        return ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot()).stream()
-                .filter(CheckBoxTreeItem::isSelected)
-                .map(item -> (DatabaseEntry) item.getValue())
-                .toList();
-    }
-
-    /** Ids de las bases marcadas AHORA MISMO en el árbol — lo que la pestaña activa "ve". Usado para que una pestaña nueva herede la selección de la que se está dejando (ver {@link QueryTabManager#addQueryTab}) y para guardar el estado de una pestaña justo antes de dejarla (ver {@code QueryTabManager#syncTreeOnTabSwitch}). */
-    private Set<String> capturedSelectedDatabaseIds() {
-        return selectedDatabases().stream()
-                .map(DatabaseEntry::id)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-    }
-
-    /** Marca en el árbol EXACTAMENTE las bases cuyo id está en {@code ids} — desmarca cualquier otra. Contraparte de {@link #capturedSelectedDatabaseIds()}, usada al activar una pestaña para que el árbol refleje su selección guardada. */
-    private void applySelectedDatabaseIds(Set<String> ids) {
-        for (CheckBoxTreeItem<Object> item : ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot())) {
-            item.setSelected(ids.contains(((DatabaseEntry) item.getValue()).id()));
-        }
     }
 
     /**
@@ -2273,7 +2217,7 @@ public class MainController {
      * incluido "Exportar CSV", que funciona sin ningún camino nuevo.
      */
     private void onCompareObject(SchemaTreeNode.Item item) {
-        List<DatabaseEntry> selected = new ArrayList<>(selectedDatabases());
+        List<DatabaseEntry> selected = new ArrayList<>(tree.selectedDatabases());
         if (selected.stream().noneMatch(db -> db.id().equals(item.database().id()))) {
             selected.add(0, item.database());
         }
@@ -2319,234 +2263,6 @@ public class MainController {
         Thread thread = new Thread(task, "faro-schema-compare");
         thread.setDaemon(true);
         thread.start();
-    }
-
-    /**
-     * Reconstruye el árbol desde cero (siempre — no hay actualización
-     * incremental) aplicando el filtro de texto actual, si hay uno. Antes
-     * de tirar el árbol viejo, guarda qué bases estaban marcadas y las
-     * vuelve a marcar en el árbol nuevo — sin esto, cada tecleo en el
-     * buscador (que llama a este método) habría borrado la selección del
-     * usuario a medio armar una consulta masiva, un problema real que ya
-     * existía de forma más silenciosa en cualquier llamada a este método
-     * (ej. después de agregar una base), pero que con un buscador en vivo
-     * se hubiera notado en cada letra.
-     */
-    private void refreshTree() {
-        rebuildTree(true);
-    }
-
-    /**
-     * Rebuild disparado por el buscador de bases — igual que {@link #refreshTree()}
-     * salvo que NO reabre las filas de base que estaban expandidas. Ver
-     * {@link #rebuildTree(boolean)} para el motivo (cada tecla pasa por acá).
-     */
-    private void refreshTreeFromFilter() {
-        rebuildTree(false);
-    }
-
-    /**
-     * {@code restoreExpandedDatabases} — si además de los grupos hay que volver a
-     * abrir las filas de BASE que estaban expandidas.
-     *
-     * <p>Es {@code false} solo para el buscador, y por una razón concreta: expandir
-     * una fila de base dispara su carga perezosa de esquema y una conexión de prueba
-     * ({@code DatabaseTreeItem#requestSchema}). Restaurarlas en cada tecla del
-     * buscador sería exactamente el hallazgo #1 de
-     * {@code AUDITORIA_BUGS_RENDIMIENTO.md} otra vez ("se llena de pool de conexiones
-     * si tengo muchas BD"). Para todos los demás caminos (agregar/editar/borrar una
-     * base, moverla de grupo, descubrir, importar) sí se restauran: son acciones
-     * puntuales del usuario, no una ráfaga por pulsación.
-     */
-    private void rebuildTree(boolean restoreExpandedDatabases) {
-        TreeItem<Object> oldRoot = connectionTree.getRoot();
-        Set<String> selectedIds = oldRoot == null
-                ? Set.of()
-                : Set.copyOf(ConnectionTreeBuilder.collectDatabaseItems(oldRoot).stream()
-                        .filter(CheckBoxTreeItem::isSelected)
-                        .map(item -> ((DatabaseEntry) item.getValue()).id())
-                        .toList());
-        Set<Object> expandedGroups = capturedExpandedGroups();
-        Set<String> expandedDatabaseIds = restoreExpandedDatabases ? capturedExpandedDatabaseIds() : Set.of();
-        int firstRow = firstVisibleRow();
-
-        // oldRoot == null ⇒ primer armado (arranque): se le pasa null para que abra
-        // todos los grupos, el comportamiento de siempre. De ahí en adelante manda lo
-        // que el usuario haya dejado abierto o cerrado a mano.
-        connectionTree.setRoot(ConnectionTreeBuilder.buildRoot(
-                registry, connectionFilterText, credentials, pool, oldRoot == null ? null : expandedGroups));
-        bindSelectionDependentUi();
-
-        if (!selectedIds.isEmpty()) {
-            for (CheckBoxTreeItem<Object> item : ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot())) {
-                if (selectedIds.contains(((DatabaseEntry) item.getValue()).id())) {
-                    item.setSelected(true);
-                }
-            }
-        }
-        applyExpandedDatabaseIds(expandedDatabaseIds);
-        restoreScrollTo(firstRow);
-    }
-
-    /**
-     * Valores de las filas de AGRUPACIÓN abiertas ahora mismo — un {@link Server}, o
-     * la cadena {@code "Sin grupo"} del encabezado (ver
-     * {@link ConnectionTreeBuilder#UNGROUPED_HEADER}). Se recorre solo el primer
-     * nivel: {@code root.getChildren()} son los grupos, y pedirle los hijos a un
-     * grupo es gratis (son {@code TreeItem} planos, no los perezosos).
-     */
-    private Set<Object> capturedExpandedGroups() {
-        Set<Object> expanded = new HashSet<>();
-        TreeItem<Object> root = connectionTree.getRoot();
-        if (root == null) {
-            return expanded;
-        }
-        for (TreeItem<Object> group : root.getChildren()) {
-            if (group.isExpanded()) {
-                expanded.add(group.getValue());
-            }
-        }
-        return expanded;
-    }
-
-    /** Ids de las filas de BASE abiertas ahora mismo — solo se LEE {@code isExpanded()}, nunca {@code getChildren()} sobre ellas (eso dispararía su fetch de esquema). */
-    private Set<String> capturedExpandedDatabaseIds() {
-        Set<String> ids = new LinkedHashSet<>();
-        TreeItem<Object> root = connectionTree.getRoot();
-        if (root == null) {
-            return ids;
-        }
-        for (TreeItem<Object> group : root.getChildren()) {
-            for (TreeItem<Object> dbItem : group.getChildren()) {
-                if (dbItem.isExpanded() && dbItem.getValue() instanceof DatabaseEntry db) {
-                    ids.add(db.id());
-                }
-            }
-        }
-        return ids;
-    }
-
-    /** Contraparte de {@link #capturedExpandedDatabaseIds()} — {@code setExpanded(true)} acá SÍ dispara la carga perezosa de esa base, que es justo lo que se quiere: el usuario la tenía abierta. */
-    private void applyExpandedDatabaseIds(Set<String> ids) {
-        if (ids.isEmpty() || connectionTree.getRoot() == null) {
-            return;
-        }
-        for (TreeItem<Object> group : connectionTree.getRoot().getChildren()) {
-            for (TreeItem<Object> dbItem : group.getChildren()) {
-                if (dbItem.getValue() instanceof DatabaseEntry db && ids.contains(db.id())) {
-                    dbItem.setExpanded(true);
-                }
-            }
-        }
-    }
-
-    /**
-     * Índice de la primera fila visible del árbol, para poder dejar el scroll donde
-     * estaba después de reconstruirlo — {@code TreeView} no expone esto, hay que
-     * preguntarle al {@code VirtualFlow} de su skin. Devuelve -1 si todavía no hay
-     * skin (antes del primer layout) o si el árbol está vacío; en ese caso
-     * {@link #restoreScrollTo(int)} simplemente no hace nada, que es el
-     * comportamiento de siempre.
-     */
-    private int firstVisibleRow() {
-        if (connectionTree.lookup(".virtual-flow") instanceof VirtualFlow<?> flow) {
-            IndexedCell<?> firstCell = flow.getFirstVisibleCell();
-            if (firstCell != null) {
-                return firstCell.getIndex();
-            }
-        }
-        return -1;
-    }
-
-    /**
-     * Devuelve el scroll a donde estaba (2026-09-10, reporte del usuario: "estoy
-     * probando las conexiones de una nueva bd y le doy a ok, me lleva hasta el inicio
-     * de la primera BD"). {@code setRoot} deja siempre el árbol arriba del todo, y con
-     * ~50 bases registradas eso significa perder el lugar en cada cambio.
-     *
-     * <p>{@code Platform.runLater} porque {@code scrollTo} necesita que el árbol nuevo
-     * ya haya pasado por un layout — llamarlo en el mismo pulso no tiene efecto.
-     * Mejor esfuerzo: si no se pudo leer la fila (ver {@link #firstVisibleRow()}), no
-     * se toca nada.
-     */
-    private void restoreScrollTo(int row) {
-        if (row <= 0) {
-            return;
-        }
-        Platform.runLater(() -> connectionTree.scrollTo(row));
-    }
-
-    /**
-     * Deja la fila de {@code db} visible y seleccionada — se llama después de
-     * AGREGAR una base (a mano o por descubrimiento). Sin esto, el usuario acaba de
-     * crear una base y el árbol la deja fuera de pantalla, sin ninguna señal de dónde
-     * quedó: hay que ir a buscarla entre las 50 que ya había. Expande el grupo que la
-     * contiene aunque estuviera cerrado — acaba de meter algo ahí, esconderlo no
-     * ayudaría.
-     */
-    private void revealDatabase(DatabaseEntry db) {
-        TreeItem<Object> root = connectionTree.getRoot();
-        if (root == null) {
-            return;
-        }
-        for (TreeItem<Object> group : root.getChildren()) {
-            for (TreeItem<Object> dbItem : group.getChildren()) {
-                if (dbItem.getValue() == db) {
-                    group.setExpanded(true);
-                    int row = connectionTree.getRow(dbItem);
-                    if (row >= 0) {
-                        connectionTree.getSelectionModel().select(row);
-                        Platform.runLater(() -> connectionTree.scrollTo(row));
-                    }
-                    return;
-                }
-            }
-        }
-    }
-
-    /**
-     * Todo lo que depende de "qué bases están marcadas", con UN SOLO recorrido del
-     * árbol: el contador "N bases seleccionadas", el texto del botón
-     * Todas/Ninguna, y la segunda línea del encabezado de la pestaña activa.
-     *
-     * <p>Antes eran dos métodos gemelos ({@code bindSelectedCount} y
-     * {@code bindSelectAllButtonText}), idénticos salvo la propiedad destino y la
-     * lambda, cada uno con su propio recorrido completo y su propio
-     * {@code Observable[]} — o sea dos recorridos donde alcanza uno, en un método que
-     * corre en cada reconstrucción del árbol, incluida cada tecla del buscador
-     * (hallazgos B2 y C4 de {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}). Unificarlos
-     * era además el requisito para colgar acá el tercer consumidor sin sumar un
-     * recorrido más.
-     *
-     * <p>El texto del botón "Todas" reactivo viene de un hallazgo del usuario ("el
-     * texto no cambia entre todas y ninguna") y reacciona tanto al clic del botón
-     * como a marcar/desmarcar bases a mano.
-     */
-    private void bindSelectionDependentUi() {
-        List<CheckBoxTreeItem<Object>> databaseItems =
-            ConnectionTreeBuilder.collectDatabaseItems(connectionTree.getRoot());
-        Observable[] selectedProperties = databaseItems.stream()
-            .map(CheckBoxTreeItem::selectedProperty)
-            .toArray(Observable[]::new);
-
-        selectedCountLabel.textProperty().bind(Bindings.createStringBinding(() -> {
-            long selected = databaseItems.stream().filter(CheckBoxTreeItem::isSelected).count();
-            return selected == 1 ? "1 base seleccionada" : selected + " bases seleccionadas";
-        }, selectedProperties));
-
-        selectAllDatabasesButton.textProperty().bind(Bindings.createStringBinding(() -> {
-            boolean allSelected = !databaseItems.isEmpty() && databaseItems.stream().allMatch(CheckBoxTreeItem::isSelected);
-            return allSelected ? "Ninguna" : "Todas";
-        }, selectedProperties));
-
-        // Listener suelto y no un binding: el encabezado no es una propiedad de texto
-        // que se pueda atar (son dos Label dentro de un VBox, y además el valor depende
-        // de CUÁL pestaña está activa). Los listeners mueren con estos TreeItem, que se
-        // tiran enteros en la próxima reconstrucción del árbol — no se acumulan.
-        for (Observable selectedProperty : selectedProperties) {
-            selectedProperty.addListener(observable -> tabs.refreshActiveTabHeader());
-        }
-        tabs.refreshActiveTabHeader();
     }
 
     /**
