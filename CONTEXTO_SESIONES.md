@@ -3789,9 +3789,15 @@ Más `9df87d6`, que es la documentación de todo esto.
 **190/190 tests** (eran 158), cero advertencias con `-Xlint:all`, recompilación desde
 cero en cada paso.
 
-**Estado de la rama:** subida a `origin/refactor/dividir-main-controller`, **sin mezclar**
-(4 commits del refactor más los de documentación y el arreglo de A15) — a la espera de la prueba de humo del log (ver
-el final de esta entrada). `main` sigue en `62bbe09`.
+**Estado de la rama:** subida a `origin/refactor/dividir-main-controller` y **sin
+mezclar**, a la espera de la prueba de humo del log (ver el final de esta entrada).
+`main` sigue en `62bbe09`.
+
+> **Al 2026-09-20 esa rama ya no trae solo el refactor**: el trabajo de rendimiento de
+> A16 se consolidó ahí también (ver la entrada de ese día). Así que las 2.309 líneas de
+> la tabla de arriba son el resultado de C1 —correcto para esos cuatro commits— pero
+> `MainController` hoy tiene **2.374**: A16 le sumó el banner de resultado recortado y
+> la elección del camino de exportación.
 
 ### Lo que de verdad ganó, que no son las líneas
 
@@ -4050,12 +4056,14 @@ arreglo, el test nuevo falla; restaurado, pasa. Tests: 190 → **191**.
 
 ### Estado al cerrar la ronda — lo que espera decisión del usuario
 
-Tres cosas, y las tres son suyas, no del asistente:
+Cuatro cosas, y las cuatro son suyas, no del asistente. Las dos primeras son de
+**medir**, no de programar:
 
 | Qué | Dónde está escrito | Qué hace falta |
 |---|---|---|
-| **La prueba de humo del log** del refactor C1 | Esta entrada, "Lo que falta, y es del usuario" | Abrir la app, expandir una base, correr contra dos, exportar, cambiar de pestaña, cerrar, y comparar `logs/faro-app.log` con el de antes. Es la red de seguridad real del refactor |
-| **La rama `refactor/dividir-main-controller`** | Esta entrada, "Estado de la rama" | Está subida y **sin mezclar**. Falta decidir si se mezcla o se abre un PR — razonablemente, después de la prueba de humo |
+| **La prueba de humo del log** del refactor C1 | Esta entrada, "Lo que falta, y es del usuario" | Abrir la app, expandir una base, correr contra dos, exportar, cambiar de pestaña, cerrar, y comparar `logs/faro-app.log` con el de antes. Es la red de seguridad real del refactor, y ahí está el procedimiento con la trampa del archivo que rota por día |
+| **Medir el pico de memoria** de A16 | Entrada del 2026-09-20 | Contra `bodegas-test` con VisualVM, con una consulta que pase de las 200.000 filas, antes y después. Es lo único que confirma que el techo de verdad desapareció; pide una base con volumen, igual que el cursor de A13 |
+| **La rama `refactor/dividir-main-controller`** | Esta entrada, "Estado de la rama" | Está subida y **sin mezclar**, y hoy trae el refactor **y** A16. Falta decidir si se mezcla a `main` o se abre un PR — razonablemente, después de las dos mediciones de arriba |
 | **El punto 4 de los Puntos obligatorios** ("nunca correr la app") | Entrada del 2026-09-15, hueco 4 | Contradice lo que este archivo registra tres veces. O gana la regla y la verificación del empaquetado se limita a lo que se puede comprobar sin arrancar nada, o se le escribe una excepción angosta. **La regla es del usuario y solo él puede cambiarla** |
 
 Y un hallazgo abierto de código, ya numerado y con su fila en el análisis:
@@ -4065,7 +4073,7 @@ hay herramientas que no toleran el BOM.
 
 ---
 
-## 2026-09-20 — El techo de memoria de los resultados grandes, en la rama `perf/resultados-grandes`
+## 2026-09-20 — El techo de memoria de los resultados grandes (A16)
 
 Vino de una conversación, no de un pedido de código: *"¿qué lenguaje recomiendas
 para tener mejor rendimiento, o con Java está ok?"*, después *"¿cómo funcionan los
@@ -4167,10 +4175,22 @@ se mudaron con él.
 
 ### Verificación
 
+| Commit | Qué |
+|---|---|
+| `0e8380b` | Las dos piezas: `query/CsvExportService` (streaming) y el tope de filas, más `query/CsvWriter` con el escapado que salió de `MainController` |
+| `b8e4576` | El bug de las varias sentencias, encontrado revisando el código nuevo |
+| `2d7eb29` | La documentación de todo esto |
+
 **196/196 tests** (eran 191), cero advertencias, recompilación desde cero. Lo nuevo
-con test: `remainingCapacity` —la aritmética que corta la lectura, donde un signo
-cambiado no recortaría nada (y volvería el `OutOfMemoryError`) o recortaría todo (y
-el grid saldría vacío)— y `CsvWriter.appendRow`.
+con test: `remainingCapacity` en `QueryExecutionServiceTest` —la aritmética que corta
+la lectura, donde un signo cambiado no recortaría nada (y volvería el
+`OutOfMemoryError`) o recortaría todo (y el grid saldría vacío)— y
+`CsvWriter.appendRow` en el `CsvWriterTest` nuevo, adonde se mudaron además los 6
+casos del escapado que vivían en `MainControllerLogicTest`.
+
+**Lo que NO tiene test, y es honesto decirlo:** el bucle de streaming en sí. Necesita
+un `ResultSet` real, o sea una base, y la suite permanente no abre conexiones. Lo que
+sí se pudo aislar y fijar es la decisión aritmética que lo corta.
 
 Se reusó además la verificación del contrato con el FXML que salió de la iteración 6
 del refactor: se tocaron dos FXML, y eso **no falla al compilar** sino al abrir la
@@ -4184,15 +4204,35 @@ nunca miró `MainController`, que llamaba a la firma vieja. Es exactamente lo qu
 README advierte sobre el compilado incremental, y volvió a pasar. Desde ahí, cada
 verificación fue con `target/classes` borrado.
 
-### Estado de la rama
+### Dónde vive esto, y una vuelta en falso con las ramas
 
-`perf/resultados-grandes` sale de **`refactor/dividir-main-controller`**, no de
-`main` — la primera vez se creó desde `main` por error y se rehízo. Se verificó antes
-que las tres zonas que toca (`QueryExecutionService`, `ResultsTableFactory`, el
-exportador de `MainController`) eran **byte a byte idénticas** en las dos ramas, así
-que el trabajo no fabrica conflictos con el refactor.
+Este trabajo está en **`refactor/dividir-main-controller`**, junto con el refactor de
+C1. Llegar ahí costó dos correcciones de rumbo que vale la pena dejar escritas, porque
+las dos fueron malas decisiones mías sobre algo que el usuario tenía claro:
 
-**Sin mezclar**, como el refactor. Y lo que falta para cerrar esto **no es código**:
-medir el pico de memoria real contra `bodegas-test` con VisualVM, corriendo algo que
-pase de las 200.000 filas, antes y después. Igual que con el cursor de A13, esa
-medición pide una base con volumen y la corre el usuario.
+1. **Se creó `perf/resultados-grandes` desde `main`**, que no tiene el refactor. Eso
+   dejaba el trabajo sobre un `MainController` de 3.344 líneas y garantizaba
+   reconciliar dos ramas largas a mano después. El usuario lo detectó preguntando
+   *"¿en esta nueva rama sí tenemos los cambios del MainController?"* — y la respuesta
+   era **no**. Se rehízo la rama desde el refactor.
+2. **Aun rehecha, seguía siendo una rama aparte**, y lo que el usuario esperaba era que
+   todo fuera a la rama del MainController: *"se supone que debiste meter todo en la
+   rama de main controller"*. Como `perf` salía en línea recta del refactor, consolidar
+   fue un `fast-forward` limpio —sin fusionar nada ni resolver conflictos, solo mover
+   el puntero— y la rama extra se borró, local y en el remoto.
+
+**La lección, que es sobre cómo trabajar y no sobre git:** el contenido nunca estuvo
+separado —`perf` traía el refactor completo encima— pero *dos nombres de rama para un
+solo hilo de trabajo* ya fue suficiente para confundir dos veces. Cuando el usuario
+sigue una línea de trabajo, la rama sigue esa línea; abrir una nueva es una decisión
+que hay que plantearle, no tomar por él.
+
+Lo que sí se hizo bien antes de empezar: verificar que las tres zonas que este trabajo
+toca (`QueryExecutionService`, `ResultsTableFactory`, el exportador de
+`MainController`) eran **byte a byte idénticas** en `main` y en el refactor, así que
+ninguna de las dos ubicaciones fabricaba conflictos.
+
+**Sin mezclar a `main`.** Y lo que falta para cerrar A16 **no es código**: medir el
+pico de memoria real contra `bodegas-test` con VisualVM, corriendo algo que pase de las
+200.000 filas, antes y después. Igual que con el cursor de A13, esa medición pide una
+base con volumen y la corre el usuario.
