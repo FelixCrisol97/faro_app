@@ -3703,6 +3703,10 @@ uno, contado contra las tablas: 30 corregidos, 4 abiertos (C1/C2/C3 a propósito
 A14), y B11/B13/C10/C11 cerrados como decisión, documentación o error del propio
 documento.
 
+> **Ese conteo es el de ese día.** El 2026-09-19 C1 pasó a hecho, así que hoy son
+> **31 corregidos y 3 abiertos** (C2, C3 y A14). La fuente del conteo es siempre la
+> tabla de `ANALISIS_OPTIMIZACION_ESTRUCTURA.md`, no esta entrada.
+
 Las menciones a "36 hallazgos" de la entrada del 2026-09-08/11 **se dejan como
 están**: son un registro de lo que había ese día, no una afirmación sobre el presente
 — mismo criterio que §C11 estableció sobre los conteos de tests.
@@ -3906,6 +3910,28 @@ Un detalle para ese diff: las líneas de log que se mudaron de clase ahora salen
 `QueryTabManager` en lugar de `MainController`). El diff las va a marcar aunque el
 comportamiento sea idéntico.
 
+**Cómo conseguir el "antes", que es la parte que no es obvia.** Logback escribe
+siempre sobre el mismo `logs/faro-app.log` y solo rota **por día**, así que dos
+corridas del mismo día se mezclan en el mismo archivo. Hay que apartarlo entre una y
+otra:
+
+1. `git checkout main` → `mvn compile javafx:run` → hacer la secuencia de arriba →
+   cerrar la app → **copiar `logs/faro-app.log` a otro lado** (por ejemplo
+   `antes.log`).
+2. `git checkout refactor/dividir-main-controller` → `mvn compile javafx:run` → la
+   **misma** secuencia, en el mismo orden → cerrar.
+3. Comparar `antes.log` contra el `logs/faro-app.log` nuevo.
+
+Al comparar, tres clases de diferencia son esperadas y no son regresiones: las marcas
+de tiempo, los nombres de logger que cambiaron de clase (los de arriba), y el orden
+relativo de líneas que vienen de hilos distintos. Lo que sí importa es que **no falte
+ningún evento** y que no aparezca ninguna excepción que antes no estaba.
+
+`mvn compile` antes de `javafx:run` no es de adorno: `javafx:run` arranca con lo que
+haya en `target/classes` y no compila. Sin él se corre la versión anterior del código
+sin ningún aviso — y en una comparación así eso daría un "no hay diferencias"
+tranquilizador y falso.
+
 ### Tercera pasada de documentación (2026-09-19) — tres iteraciones, dos errores míos
 
 Pedido: *"documenta todo lo trabajado en el contexto, que no quede nada fuera, a
@@ -3946,6 +3972,40 @@ tenía **finales de línea mezclados** (3.710 CRLF y 157 LF sueltos, estos últi
 los bloques que se habían agregado con `cat`). Normalizado a CRLF; se comprobó que
 esa normalización sola produce **cero diff** en git, o sea que era solo del árbol de
 trabajo.
+
+### Cuarta y quinta pasada (2026-09-19) — dos contradicciones y un pendiente que no se podía ejecutar
+
+Pedido del usuario de repetir la verificación dos veces más. Se usaron dos ángulos que
+las tres primeras no habían cubierto.
+
+**Iteración 4 — cruce entre documentos y afirmaciones de comportamiento.** Las tres
+primeras miraron esta bitácora casi sola. Esta cruzó bitácora ↔ análisis ↔ README, y
+verificó contra el código las afirmaciones de comportamiento que los documentos hacen:
+que el cierre guarda **después** de cerrar los pools y en dos llamadas
+(`stopAutosaveAndWait` → `closeAllAndWait` → `saveNow`, en ese orden en el archivo),
+que los dos coordinadores se construyen antes de la primera reconstrucción del árbol
+(líneas 369 y 377 contra la 478), que el cursor se activa solo con PostgreSQL **y**
+todas las sentencias de solo lectura, y que la reconstrucción conserva la selección.
+Las cuatro se sostienen.
+
+Salió una contradicción: la entrada del 2026-09-15 declaraba "30 corregidos, 4
+abiertos" y hoy son 31 y 3, porque C1 se cerró después. Se resolvió como este archivo
+ya resolvió antes el pendiente de `fetchSize`: **un puntero hacia adelante, sin
+reescribir lo que se dijo ese día**, y dejando claro que la fuente del conteo es la
+tabla del análisis y no la entrada.
+
+También se comprobó que las referencias del **código** a tests y documentos resuelven
+(`SessionPersistence` → `SessionPersistenceTest`, etc.). `ScriptGeneratorCoordinator`
+era el único que no apuntaba al suyo; se le agregó el puntero.
+
+**Iteración 5 — actionabilidad.** No "¿está bien escrito?" sino "¿alguien que llega en
+frío puede ejecutarlo?". De los cuatro pendientes, tres estaban listos para actuar. El
+cuarto no: la prueba de humo decía "comparar contra el log de antes" **sin decir cómo
+conseguir ese antes** — y el detalle que lo hacía trampa es que Logback escribe siempre
+sobre el mismo `faro-app.log` y solo rota por día, así que las dos corridas se habrían
+mezclado en el mismo archivo. Quedó escrito el procedimiento de tres pasos, qué
+diferencias son esperadas al comparar, y por qué el `mvn compile` previo no es de
+adorno (sin él la comparación daría un "no hay diferencias" falso y tranquilizador).
 
 ### Estado al cerrar la ronda — lo que espera decisión del usuario
 

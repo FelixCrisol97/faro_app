@@ -212,6 +212,9 @@ public final class ScriptGeneratorCoordinator {
      * pedido justo después de un UPDATE sobre la misma tabla mientras el UPDATE seguía en
      * curso. Por {@code label} solo dedupa el caso real que importa: repetir la MISMA
      * acción sobre el MISMO objeto antes de que termine.
+     *
+     * <p>Es la única parte de esta clase que es lógica pura y no un adaptador, así que
+     * es la única con tests: ver {@code ScriptGeneratorCoordinatorTest}.
      */
     static String pendingKey(String label, SchemaTreeNode.Item item) {
         return label + ":" + item.database().id() + ":" + item.name();
