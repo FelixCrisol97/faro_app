@@ -4236,3 +4236,89 @@ ninguna de las dos ubicaciones fabricaba conflictos.
 pico de memoria real contra `bodegas-test` con VisualVM, corriendo algo que pase de las
 200.000 filas, antes y después. Igual que con el cursor de A13, esa medición pide una
 base con volumen y la corre el usuario.
+
+---
+
+## 2026-09-20 (cierre) — Qué entra a `main` en este merge
+
+Resumen de la rama `refactor/dividir-main-controller` completa, escrito para el
+momento de mezclarla. El detalle de cada cosa está en las entradas de arriba; acá va
+lo que alguien necesita saber **sin leerlas todas**.
+
+**13 commits · 27 archivos · +4.085 / −1.396 · tests 158 → 196.**
+
+### Las tres cosas que entran
+
+**1. C1 — `MainController` dividido en cuatro** (commits `c93b429`, `90b6517`,
+`f16c8e0`, `037d30d`). De 3.344 a 2.309 líneas, un commit por paso:
+
+| Clase nueva | De qué se encarga |
+|---|---|
+| `data/SessionPersistence` | Cargar la sesión, autoguardar cada 2 minutos, guardar al cerrar |
+| `ui/ScriptGeneratorCoordinator` | Las seis acciones "Generar…" del explorador de esquema |
+| `ui/QueryTabManager` | Pestañas de consulta: crearlas, encabezado de 2 líneas, guardar, buscar, formatear |
+| `ui/ConnectionTreeCoordinator` | El estado del árbol que sobrevive a cada reconstrucción: selección, filas abiertas, scroll, buscador |
+
+Lo que ganó, además de líneas: **tres cosas que no se podían testear sin arrancar
+JavaFX ahora tienen tests** — el arreglo de A3 (el de peor consecuencia del análisis,
+que no tenía ni una prueba), la segunda línea del encabezado de cada pestaña, y la
+invariante de que recorrer el árbol nunca le pide los hijos a una base.
+
+**2. A15 — el candado del autoguardado** (`f9138dd`). Bug **preexistente**, encontrado
+revisando el código movido: si la captura de pestañas lanzaba, el candado quedaba
+trabado para siempre y la app dejaba de autoguardar el resto de la sesión avisándolo
+solo en `DEBUG`. Lo que el refactor cambió no es que el bug existiera, sino que se
+pudiera ver y testear.
+
+**3. A16 — el techo de memoria de los resultados grandes** (`0e8380b`, `b8e4576`). El
+grid carga como mucho 200.000 filas y avisa arriba cuando recortó; "Exportar CSV" baja
+el resultado **completo** leyéndolo de la base y escribiéndolo directo al archivo, sin
+que exista en memoria. Cierra el techo estructural de `OPTIMIZACION_RENDIMIENTO.md`
+§5.1 y la causa del `OutOfMemoryError` real.
+
+### Cómo se verificó, y qué NO cubre esa verificación
+
+- **196/196 tests**, cero advertencias con `-Xlint:all`, recompilación desde cero en
+  cada paso.
+- **Comparación mecánica en las dos direcciones** para los pasos 3 y 4 de C1 (los de
+  UI, casi sin tests): cada sentencia del original contra la clase nueva y al revés.
+  Todas las diferencias resultaron ser renombres, andamiaje o `@FXML` que se quedaron
+  a propósito.
+- **El contrato con el FXML**: los 38 manejadores y 44 `fx:id` de `main-view.fxml`
+  resuelven, más los de los cinco diálogos. Es el punto ciego del refactor — FXML
+  enlaza por nombre en tiempo de ejecución, no falla al compilar.
+- **Sondas** que rompen a propósito lo que el test protege, para confirmar que el test
+  falla: la invariante del árbol, el candado de A15 y las reglas CSS de
+  `StyleClassCoverageTest`.
+
+**Lo que esto NO cubre, y hay que decirlo al mezclar:** ningún test abre una ventana ni
+una conexión. Quedan sin verificar en vivo el comportamiento de la UI tras el refactor
+y el bucle de streaming de A16, que necesita un `ResultSet` real.
+
+### Lo que sigue pendiente después del merge
+
+Las dos primeras son de **medir**, y las dos piden una base con volumen:
+
+1. **La prueba de humo del log** (C1) — el procedimiento está en la entrada del
+   2026-09-15/19, con la trampa incluida: Logback escribe siempre sobre el mismo
+   `faro-app.log` y solo rota por día, así que hay que apartar el archivo entre las dos
+   corridas o se mezclan.
+2. **El pico de memoria** (A16) — contra `bodegas-test` con VisualVM, con una consulta
+   que pase de las 200.000 filas, antes y después.
+3. **A14** — el CSV exportado sin BOM, que Excel en español abre con `Ã±`. Sin
+   arreglar a propósito: es una línea, pero cambia los bytes de todos los archivos
+   exportados.
+4. **El punto 4 de los "Puntos obligatorios"** ("nunca correr la app"), que sigue
+   contradiciendo lo que este archivo registra tres veces.
+
+Y en el análisis quedan **C2** (los 7 mapas estáticos de `SchemaIntrospector`) y **C3**
+(los 15 `new Thread` sueltos) abiertos a propósito, con su razón escrita.
+
+### Por qué se mezcla antes de esas mediciones
+
+Porque son mediciones **sobre la app corriendo**, y la app se corre desde `main`. Dejar
+la rama esperando indefinidamente tiene su propio costo: `MainController` ya creció
+720 líneas entre que se escribió el plan de C1 y se ejecutó, y cada día sin mezclar es
+otro día de divergencia. Si alguna medición sale mal, el historial está en 13 commits
+separados y revertir cualquiera por su cuenta es posible — esa fue justamente la razón
+de hacerlos así.
