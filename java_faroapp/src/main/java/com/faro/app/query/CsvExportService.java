@@ -25,6 +25,7 @@ import org.slf4j.LoggerFactory;
 
 import com.faro.app.data.CredentialStore;
 import com.faro.app.model.DatabaseEntry;
+import com.faro.app.model.DbEngine;
 
 import javafx.concurrent.Task;
 
@@ -155,27 +156,49 @@ public final class CsvExportService {
 
         StringBuilder batch = new StringBuilder(64 * 1024);
         long written = 0;
-        try (Connection conn = pool.getConnection(db, creds.get());
-                Statement jdbcStatement = conn.createStatement(
-                        ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY)) {
-            jdbcStatement.setQueryTimeout(db.queryTimeoutSeconds());
-            jdbcStatement.setFetchSize(fetchSize);
+        try (Connection conn = pool.getConnection(db, creds.get())) {
             // Cursor real en PostgreSQL: exportar es por definición de solo lectura, así
             // que aplica siempre acá — al revés que en una corrida, donde depende del
             // script. Ver QueryExecutionService#shouldUseCursor para por qué hace falta
             // desactivar el autocommit.
-            boolean cursor = db.engine() == com.faro.app.model.DbEngine.POSTGRES;
+            boolean cursor = db.engine() == DbEngine.POSTGRES;
             if (cursor) {
                 conn.setAutoCommit(false);
             }
             try {
-                for (String statement : statements) {
-                    if (!jdbcStatement.execute(statement)) {
-                        continue;
+                // SOLO se exporta el resultado de la ÚLTIMA sentencia que devuelva uno —
+                // el mismo criterio con el que QueryExecutionService decide qué mostrar en
+                // el grid. Si se exportaran todas concatenadas, un script con dos SELECT
+                // de columnas distintas produciría un CSV corrupto: filas de dos formas
+                // bajo un solo encabezado. Y aunque coincidieran, el archivo no sería lo
+                // que el usuario vio en pantalla.
+                //
+                // Por eso un Statement POR sentencia y no uno reusado: ejecutar sobre el
+                // mismo Statement invalida el ResultSet anterior, así que no habría forma
+                // de llegar al final sabiendo cuál era el último sin haberlo leído ya.
+                // Cada ResultSet es un cursor, no un buffer — tenerlos abiertos un momento
+                // no carga filas en memoria.
+                Statement lastStatement = null;
+                ResultSet lastResultSet = null;
+                try {
+                    for (String statement : statements) {
+                        Statement jdbcStatement = conn.createStatement(
+                                ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+                        jdbcStatement.setQueryTimeout(db.queryTimeoutSeconds());
+                        jdbcStatement.setFetchSize(fetchSize);
+                        if (jdbcStatement.execute(statement)) {
+                            closeQuietly(lastResultSet, lastStatement);
+                            lastResultSet = jdbcStatement.getResultSet();
+                            lastStatement = jdbcStatement;
+                        } else {
+                            jdbcStatement.close();
+                        }
                     }
-                    try (ResultSet rs = jdbcStatement.getResultSet()) {
-                        written += streamResultSet(rs, db, writer, batch, headerWritten, cancelled);
+                    if (lastResultSet != null) {
+                        written = streamResultSet(lastResultSet, db, writer, batch, headerWritten, cancelled);
                     }
+                } finally {
+                    closeQuietly(lastResultSet, lastStatement);
                 }
             } finally {
                 if (cursor) {
@@ -188,6 +211,24 @@ public final class CsvExportService {
         } catch (SQLException | IOException | RuntimeException e) {
             log.warn("[{}] Falló la exportación", db.alias(), e);
             errors.add(db.alias() + ": " + e.getMessage());
+        }
+    }
+
+    /** Cierra el par cursor/sentencia sin tapar el error original si algo ya venía fallando. */
+    private static void closeQuietly(ResultSet rs, Statement statement) {
+        try {
+            if (rs != null) {
+                rs.close();
+            }
+        } catch (SQLException e) {
+            log.debug("No se pudo cerrar el ResultSet de la exportación", e);
+        }
+        try {
+            if (statement != null) {
+                statement.close();
+            }
+        } catch (SQLException e) {
+            log.debug("No se pudo cerrar el Statement de la exportación", e);
         }
     }
 
