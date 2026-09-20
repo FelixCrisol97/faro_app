@@ -172,12 +172,13 @@ implementado siguen abiertos.
 
 ---
 
-## Resumen — 38 hallazgos
+## Resumen — 40 hallazgos
 
-Contados contra las tablas de abajo, no de memoria: **14 de §A + 13 de §B + 11 de
-§C**. De los 38, **30 corregidos**; C10 documentado; B13 cerrado como decisión
+Contados contra las tablas de abajo, no de memoria: **16 de §A + 13 de §B + 11 de
+§C**. De los 40, **33 corregidos** (C1 y A15 el 2026-09-19; A16 el 2026-09-20, todos en la rama
+`refactor/dividir-main-controller`); C10 documentado; B13 cerrado como decisión
 consciente; B11 descartado; C11 sin acción (era un error de este mismo documento);
-y **4 abiertos** — C1, C2 y C3 a propósito (ver el final del documento) y A14, que
+y **3 abiertos** — C2 y C3 a propósito (ver el final del documento) y A14, que
 apareció al revisar la documentación el 2026-09-15. §D se cuenta aparte, son otros
 7.
 
@@ -198,7 +199,9 @@ apareció al revisar la documentación el 2026-09-15. §D se cuenta aparte, son 
 | A11 | Baja | `inUse` puede quedar prendido para siempre si el `Task` muere antes de que las bases reporten | `MainController:1673` | **Corregido** |
 | A12 | Baja | `Main.stop()` truena con NPE si `start()` falló | `Main:78` | **Corregido** |
 | A13 | **Alta** | `fetchSize` no tiene efecto en PostgreSQL: sin `autoCommit = false` el driver materializa el resultado completo — salió del uso real, no de este análisis | `QueryExecutionService:runOne` | **Corregido** — cursor solo en scripts de solo lectura |
-| A14 | Baja | El CSV **exportado** va en UTF-8 **sin BOM**, así que Excel en español lo abre mostrando `Ã±` en vez de `ñ` — es el otro lado de A8, y estaba escrito solo en prosa dentro de ese hallazgo, sin figurar en ninguna tabla | `MainController:1832` | **Abierto** — decisión de producto, ver abajo |
+| A14 | Baja | El CSV **exportado** va en UTF-8 **sin BOM**, así que Excel en español lo abre mostrando `Ã±` en vez de `ñ` — es el otro lado de A8, y estaba escrito solo en prosa dentro de ese hallazgo, sin figurar en ninguna tabla | `MainController:1390` (era :1832 antes de dividir la clase el 2026-09-19) | **Abierto** — decisión de producto, ver abajo |
+| A16 | **Alta** | El techo de memoria del grid: `TableView` virtualiza qué se RENDERIZA, no qué se GUARDA, así que el resultado completo vivía en el heap — la causa del `OutOfMemoryError` con 6 bodegas × 500.000 filas. Es el techo estructural de `OPTIMIZACION_RENDIMIENTO.md` §5.1 | `QueryExecutionService`, `MainController#onExportResultsCsv` | **Corregido** — tope de filas en pantalla + exportación en streaming |
+| A15 | Media | El candado del autoguardado quedaba trabado **para siempre** si la captura de pestañas lanzaba antes de arrancar el hilo de fondo: la app dejaba de autoguardar el resto de la sesión avisándolo solo en `DEBUG`. Preexistente (idéntico en `62bbe09`); encontrado al revisar el código del refactor de C1 | `SessionPersistence:autosave` | **Corregido** — `try/finally` y un test con sonda |
 
 ### Rendimiento (§B)
 
@@ -222,9 +225,9 @@ apareció al revisar la documentación el 2026-09-15. §D se cuenta aparte, son 
 
 | # | Qué | Estado |
 |---|---|---|
-| C1 | `MainController`: **3,344** líneas (eran 2,621 al abrir el análisis), 14 responsabilidades — plan de división concreto | **Abierto a propósito** — refactor grande sin red de tests de UI, ver "Lo que queda documentado, no hecho" |
+| C1 | `MainController`: **3,344** líneas (eran 2,621 al abrir el análisis), 14 responsabilidades — plan de división concreto | **Hecho, los 4 pasos del plan** (rama `refactor/dividir-main-controller`, 2026-09-15/19) — 3,344 → **2,309** líneas. No llega a las ~1,650 que prometía el plan: ver §C1, "Cómo quedó" |
 | C2 | `SchemaIntrospector`: 7 mapas estáticos mutables como estado global de la app | **Abierto a propósito** — ídem |
-| C3 | 12 `new Thread(...)` sueltos, sin un punto común | **Abierto a propósito** — ídem |
+| C3 | 12 `new Thread(...)` sueltos, sin un punto común | **Abierto a propósito** — hoy son **15**; 2 se mudaron con C1 y en `MainController` quedan 5 |
 | C4 | Duplicación real: 5 líneas repetidas 6 veces, 5 copias del mismo `stream`, 2 métodos gemelos | **Corregido** — C4.1 (con A2), C4.2 (`selectedDatabases()`) y C4.3 (`bindSelectionDependentUi`) |
 | C5 | Imports totalmente cualificados en línea, inconsistente con el resto | **Corregido** — verificado: no queda ninguno en todo `src/main` |
 | C6 | Código y recursos muertos: 51 KB de CSS sin usar + 3 métodos/constructores sin llamador | **Corregido** |
@@ -1341,6 +1344,71 @@ detecta una regresión estructural mucho mejor que revisar pantalla por pantalla
 Es la técnica que ya se usó para verificar el arreglo del #1 ("Corrida real de
 la app, con el log como evidencia, 2026-09-07 23:09").
 
+### Cómo quedó (2026-09-15/19, rama `refactor/dividir-main-controller`)
+
+Los cuatro pasos, en el orden del plan y **un commit por paso**, para poder parar o
+revertir cualquiera por separado:
+
+| Paso | Clase nueva | Líneas | Tests nuevos | `MainController` |
+|---|---|---|---|---|
+| 1 | `data/SessionPersistence` | 337 | 10 | 3,344 → 3,209 |
+| 2 | `ui/ScriptGeneratorCoordinator` | 231 | 4 | 3,209 → 3,054 |
+| 3 | `ui/QueryTabManager` | 705 | 11 (4 mudados) | 3,054 → 2,593 |
+| 4 | `ui/ConnectionTreeCoordinator` | 441 | 11 | 2,593 → **2,309** |
+
+Suite: 158 → **190**, cero advertencias con `-Xlint:all`, recompilación desde cero
+en cada paso.
+
+**Lo que ganó la división, además de líneas.** Tres cosas que antes no se podían
+testear sin arrancar JavaFX y ahora tienen tests: el arreglo de **A3** (el de peor
+consecuencia de todo el análisis, que hasta ahora no tenía ni una prueba), la
+segunda línea del encabezado de cada pestaña (el pedido del 2026-09-11), y la
+invariante del hallazgo #1 de `AUDITORIA_BUGS_RENDIMIENTO.md` —ningún recorrido del
+árbol le pide los hijos a una base—, verificada con una sonda que la rompe a
+propósito.
+
+**Por qué no llega a las ~1,650 líneas del plan.** El plan se escribió sobre un
+archivo de 2,621 líneas; al ejecutarlo tenía 3,344. Las ~720 que creció en el medio
+entraron casi todas a la sección `// ---- Diálogos ----`, que hoy tiene **993
+líneas** y cuyo nombre ya no describe lo que tiene: además de diálogos, contiene la
+ejecución de consultas (`onRunQuery`, cancelar, resúmenes, insignias, historial,
+~286 líneas) y exportar CSV con la barra de estado (~220). Ninguno de los dos estaba
+en los cuatro pasos. Son los candidatos naturales para seguir, en ese orden.
+
+**Un corte más angosto que el del plan en el paso 4.** El plan juntaba los bloques
+"Árbol y edición de bases" y "`refreshTree` + bindings". Se movió el estado del árbol
+(selección, filas abiertas, scroll, buscador) y los bindings; **las acciones**
+—agregar, editar, borrar, mover, renombrar— se quedaron en el controlador y le piden
+al coordinador `refresh()` o `revealDatabase()`. Mover las acciones habría arrastrado
+sus diálogos y convertido el coordinador en un segundo `MainController`.
+
+**Tres decisiones de diseño que el código documenta:**
+
+- `SessionPersistence` recibe el registro como `Supplier` y no como referencia:
+  "Importar configuración…" lo **reemplaza** por otro objeto, y con una referencia
+  fija habría seguido guardando el viejo para siempre. Hay un test que lo fija. Lo
+  mismo en `ConnectionTreeCoordinator`.
+- El cierre de `SessionPersistence` son dos llamadas y no una: fusionarlas invertía el
+  orden original (esperar → cerrar pools → guardar), y eso es cambiar comportamiento,
+  no refactorizar.
+- `QueryTabManager` recibe sus nueve dependencias por una interfaz de **métodos con
+  nombre** (`Host`) y no como lambdas posicionales: dos serían `Consumer<String>`, y
+  cruzarlas compila y falla en vivo — el mismo riesgo que sigue abierto en
+  `ConnectionTreeActions`.
+
+**Cómo se verificó que no cambió lógica.** Pasos 3 y 4 (los de UI, casi sin tests)
+con una comparación mecánica en dos direcciones: cada sentencia del bloque original
+contra la clase nueva, y cada sentencia de la clase nueva contra el original tras
+aplicar los renombres. Todas las diferencias resultaron ser renombres, andamiaje o
+manejadores `@FXML` que se quedaron a propósito. Ni una línea de lógica inventada.
+
+**Lo que falta, y es del usuario:** la prueba de humo del log que describe el párrafo
+de arriba. El punto 4 de los "Puntos obligatorios" de `CONTEXTO_SESIONES.md` impide
+que la corra el asistente. Un detalle para ese diff: las líneas de log que se mudaron
+de clase ahora salen con otro nombre de logger (`SessionPersistence`,
+`ScriptGeneratorCoordinator`, `QueryTabManager` en vez de `MainController`), así que
+el diff las va a marcar aunque el comportamiento sea idéntico.
+
 ---
 
 ## C2. `SchemaIntrospector` — estado global de la aplicación en `static`
@@ -2053,10 +2121,10 @@ completo.
 
 | # | Qué falta | Por qué no se hizo |
 |---|---|---|
-| **C1** | Dividir `MainController` (**3,344** líneas, 14 responsabilidades). El plan de 4 pasos está escrito en §C1 | Es el refactor más grande del proyecto y **no hay ninguna red de tests de UI** que lo cubra: la suite permanente no arranca JavaFX a propósito. La única verificación real sería comparar `logs/faro-app.log` paso a paso antes y después. Hacerlo en la misma ronda que 15 arreglos funcionales habría hecho imposible saber cuál de los dos rompió qué |
+| ~~**C1**~~ | ~~Dividir `MainController`~~ — **hecho el 2026-09-15/19** en la rama `refactor/dividir-main-controller`, un commit por paso. **Queda pendiente la prueba de humo del log**, que es del usuario: ver §C1, "Cómo quedó" | Se hizo en una ronda propia, sin arreglos funcionales mezclados, justo por el motivo que figuraba acá |
 | **C2** | Los 7 mapas estáticos de `SchemaIntrospector` | Es la causa raíz de A4 (los cachés que no se invalidaban) y lo que impide testear esos cachés. Conviene hacerlo **la próxima vez que haya que tocar esa clase por otro motivo**, no como cambio suelto |
-| **C3** | Los 12 `new Thread(...)` sueltos | Sin techo común de recursos. Está acoplado a C1: varios de esos hilos nacen dentro de `MainController` y se moverían solos al dividirlo |
-| **Riesgo de `ConnectionTreeActions`** | 13 componentes posicionales, seis de ellos `Consumer<DatabaseEntry>` | Ver la sección de arriba. Verificado correcto hoy; cerrarlo de verdad pide tipos distintos por acción |
+| **C3** | Los `new Thread(...)` sueltos — **15** hoy, no 12 | Sin techo común de recursos. La predicción de que "se moverían solos al dividir C1" se cumplió a medias: 2 se mudaron (a `SessionPersistence` y `ScriptGeneratorCoordinator`), pero siguen igual de sueltos en su clase nueva, y en `MainController` quedan 5 |
+| **Riesgo de `ConnectionTreeActions`** | 13 componentes posicionales, seis de ellos `Consumer<DatabaseEntry>` | Ver la sección de arriba. Verificado correcto hoy. **El patrón para cerrarlo ya existe en el código**: `QueryTabManager.Host` (paso 3 de C1) resolvió el mismo problema con una interfaz de métodos con nombre en vez de lambdas posicionales |
 | **A14** | El BOM del CSV exportado | Apareció al revisar la documentación el 2026-09-15: estaba descrito dentro del cuerpo de A8 pero no figuraba en ninguna tabla, así que A8 marcado como corregido daba a entender que el tema del CSV estaba cerrado de los dos lados. **No lo está.** El arreglo es una línea, pero **cambia los bytes de todos los archivos exportados**: hay herramientas que no toleran el BOM, así que es decisión del usuario y no un arreglo que deba entrar solo |
 
 Y dos que se cierran **descartándolos**, con su razón escrita arriba en las

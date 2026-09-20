@@ -3655,6 +3655,9 @@ anterior: los **dos** drivers JDBC concatenados en
 el zip extraído en otra carpeta**. Comprimido con `tar.exe` (bsdtar), no con el
 compresor de Explorer contra el que advierte el README. Copiado al escritorio con
 SHA-256 comparado, porque `target/` está en `.gitignore` y VS Code lo oculta.
+(Al 2026-09-19 la copia del escritorio ya no está —el usuario la movió o la borró—
+pero el original sigue en `java_faroapp/target/dist/Faro-0.1.0-portable.zip`, con las
+mismas 386 entradas.)
 
 **Lo que cambió respecto de la vez pasada:** probar el `.exe` había escrito en el
 `~/.faro/` real del usuario. Esta vez la copia extraída se arrancó con
@@ -3700,6 +3703,10 @@ uno, contado contra las tablas: 30 corregidos, 4 abiertos (C1/C2/C3 a propósito
 A14), y B11/B13/C10/C11 cerrados como decisión, documentación o error del propio
 documento.
 
+> **Ese conteo es el de ese día.** El 2026-09-19 C1 pasó a hecho, así que hoy son
+> **31 corregidos y 3 abiertos** (C2, C3 y A14). La fuente del conteo es siempre la
+> tabla de `ANALISIS_OPTIMIZACION_ESTRUCTURA.md`, no esta entrada.
+
 Las menciones a "36 hallazgos" de la entrada del 2026-09-08/11 **se dejan como
 están**: son un registro de lo que había ese día, no una afirmación sobre el presente
 — mismo criterio que §C11 estableció sobre los conteos de tests.
@@ -3710,8 +3717,8 @@ entradas esperado —386, de las cuales 380 bajo `runtime/`— porque contarlas 
 confiable que mirar el tamaño del archivo.
 
 **Comiteado y subido:** `3e94f19` a `origin/main` — el arco completo del
-2026-09-08 al 09-15, que llevaba siete días de trabajo sin comitear (47 archivos,
-+3,895/−406). `.vscode/settings.json` se dejó **fuera** a propósito: solo tiene una
+2026-09-08 al 09-15, que llevaba siete días de trabajo sin comitear (**54 archivos,
++6,798/−1,851**). `.vscode/settings.json` se dejó **fuera** a propósito: solo tiene una
 ruta absoluta de esta máquina apuntando al CMake de `flutter_faroapp`.
 
 ### Segunda pasada sobre esta misma bitácora — cuatro huecos, uno de ellos serio
@@ -3755,3 +3762,563 @@ cambiarla.** Queda planteada la disyuntiva para que la decida:
 Mientras tanto se dejó registrado el cuidado que sí se tomó el 2026-09-14: la copia
 extraída se arrancó con `-Duser.home=<temporal>` para que no tocara el `~/.faro/`
 real del usuario, cosa que en la ronda del 09-11 **sí** había pasado.
+
+---
+
+## 2026-09-15/19 — C1: `MainController` se divide en cuatro, en la rama `refactor/dividir-main-controller`
+
+Pedido: *"ocupamos hacer refactor a la clase que tiene muchas líneas de código,
+creemos una nueva rama"*. Es el hallazgo **C1**, el refactor más grande del proyecto
+y el que llevaba tres rondas anotado como "abierto a propósito" — justamente porque
+no hay ninguna red de tests de UI debajo. Se hizo en una **rama propia y sin ningún
+arreglo funcional mezclado**, que era la condición que el análisis ponía: si algo se
+rompe, no hay dudas sobre cuál de los dos cambios fue.
+
+**Un commit por paso**, en el orden que el plan de §C1 ya proponía, para poder parar
+o revertir cualquiera por separado:
+
+| Paso | Commit | Clase nueva | Líneas | Tests nuevos | `MainController` |
+|---|---|---|---|---|---|
+| 1 | `c93b429` | `data/SessionPersistence` | 337 | 10 — `data/SessionPersistenceTest` | 3,344 → 3,209 |
+| 2 | `90b6517` | `ui/ScriptGeneratorCoordinator` | 231 | 4 — `ui/ScriptGeneratorCoordinatorTest` | 3,209 → 3,054 |
+| 3 | `f16c8e0` | `ui/QueryTabManager` | 705 | 11 — `ui/QueryTabManagerTest` (4 mudados de `MainControllerLogicTest`) | 3,054 → 2,593 |
+| 4 | `037d30d` | `ui/ConnectionTreeCoordinator` | 441 | 11 — `ui/ConnectionTreeCoordinatorTest` | 2,593 → **2,309** |
+
+Más `9df87d6`, que es la documentación de todo esto.
+
+**190/190 tests** (eran 158), cero advertencias con `-Xlint:all`, recompilación desde
+cero en cada paso.
+
+**Estado de la rama:** subida a `origin/refactor/dividir-main-controller` y **sin
+mezclar**, a la espera de la prueba de humo del log (ver el final de esta entrada).
+`main` sigue en `62bbe09`.
+
+> **Al 2026-09-20 esa rama ya no trae solo el refactor**: el trabajo de rendimiento de
+> A16 se consolidó ahí también (ver la entrada de ese día). Así que las 2.309 líneas de
+> la tabla de arriba son el resultado de C1 —correcto para esos cuatro commits— pero
+> `MainController` hoy tiene **2.374**: A16 le sumó el banner de resultado recortado y
+> la elección del camino de exportación.
+
+### Lo que de verdad ganó, que no son las líneas
+
+Tres cosas que no se podían testear sin arrancar JavaFX y ahora tienen tests:
+
+- **El arreglo de A3** — la carrera entre el autoguardado y el cierre, el hallazgo de
+  peor consecuencia de todo el análisis (perder TODA la configuración del usuario), y
+  hasta ahora **sin una sola prueba automática**. Ahora tiene 10: la ida y vuelta del
+  guardado, el archivo corrupto que no debe tronar el arranque, el candado que impide
+  dos autoguardados solapados, la espera del cierre, y el fallo de escritura que tiene
+  que avisar **y** soltar el candado.
+- **La segunda línea del encabezado de cada pestaña** (el pedido del 2026-09-11, "que
+  diga contra qué BD va a correr"): 7 tests. Eran métodos de instancia privados del
+  controlador.
+- **La invariante del hallazgo #1 de `AUDITORIA_BUGS_RENDIMIENTO.md`**: ningún
+  recorrido del árbol le pide los hijos a una fila de base, porque eso abre una
+  conexión contra cada base registrada ("se llena de pool de conexiones si tengo
+  muchas BD"). **Verificado con una sonda**: rota la invariante a propósito, el test
+  falla; restaurada, pasa.
+
+### Tres decisiones de diseño, con su motivo
+
+- **El registro entra como `Supplier`, no como referencia** (en `SessionPersistence` y
+  en `ConnectionTreeCoordinator`). "Importar configuración…" lo **reemplaza** por otro
+  objeto: con una referencia guardada en el constructor, la clase habría seguido
+  guardando el registro viejo después de cada importación, en silencio y para siempre.
+  Hay un test que falla si alguien lo vuelve referencia.
+- **El cierre quedó en dos llamadas y no en una.** Fusionarlas era más cómodo pero
+  invertía el orden original (esperar el autoguardado → cerrar pools → guardar). Se
+  puede argumentar que guardar antes de cerrar pools es más seguro; da igual, eso es
+  cambiar comportamiento, no refactorizar, y no era la tarea.
+- **Las nueve dependencias de `QueryTabManager` entran por una interfaz de métodos con
+  nombre (`Host`), no como lambdas posicionales.** Dos serían `Consumer<String>` (la
+  barra de estado y el log de Diagnóstico) y cruzarlas **compila** y falla en vivo. Es
+  exactamente el riesgo que sigue anotado como abierto para `ConnectionTreeActions` —
+  así que ahora el patrón para cerrarlo ya existe en el código.
+
+### Dos cosas que solo se ven al hacerlo
+
+**El orden de construcción resultó ser una restricción real, no un detalle.** La
+primera reconstrucción del árbol (`refreshTree()`, al arrancar) ya repinta el
+encabezado de la pestaña activa. Al arrancar no hay ninguna pestaña y por eso no hace
+nada — pero para "no hacer nada" necesita que el gestor de pestañas **exista**.
+Construirlo donde estaba su código (bastante más abajo en `initialize()`) habría sido
+un `NullPointerException` en el arranque, y ningún test lo habría atrapado porque
+ninguno arranca la ventana. Por eso los dos coordinadores nuevos se construyen
+temprano, con un comentario que explica por qué están ahí y no donde uno los pondría.
+
+**Un comentario que afirmaba algo falso.** El javadoc de "Probar todas las conexiones"
+explicaba que usa `connectionTree.refresh()` y no la reconstrucción completa porque
+esta última "borraría cualquier casilla que el usuario ya haya marcado". **Eso ya no
+era cierto**: la reconstrucción conserva la selección desde que se agregó el buscador.
+Se reescribió con el motivo que sí se sostiene —para cambiar el color de un punto de
+estado no hace falta rearmar todos los `CheckBoxTreeItem`— en vez de arrastrar la
+afirmación vieja solo porque estaba escrita.
+
+### Cómo se verificó que no cambió lógica
+
+Los pasos 3 y 4 son UI de verdad y casi no tienen tests, así que la verificación fue
+**mecánica y en las dos direcciones**: cada sentencia del bloque original contra la
+clase nueva, y cada sentencia de la clase nueva contra el original tras aplicar los
+renombres. En los dos pasos, todas las diferencias resultaron ser renombres,
+andamiaje (declaraciones, accesores, constructor) o manejadores `@FXML` que se
+quedaron en el controlador a propósito. **Ni una línea de lógica inventada.**
+
+El recableado se hizo con un script que **falla si un fragmento no aparece
+exactamente una vez**, en vez de reemplazar a ciegas — y atrapó un caso real: la
+expresión regular que cambiaba las llamadas a `selectedDatabases()` alcanzó también
+la **declaración** del método en el `Host`, que habría quedado como
+`public List<DatabaseEntry> tree.selectedDatabases()`.
+
+Dos limpiezas más de cada paso, que no se ven en el resultado pero sí en el diff: los
+**imports que quedaron huérfanos** al mudarse el código (nueve en total entre los
+cuatro pasos) y los **`{@link #...}` a métodos que ya no están en el controlador**.
+Ninguno de los dos los marca el compilador, así que se buscaron a mano contando usos
+por símbolo.
+
+Y una advertencia la introdujo el propio test nuevo: el ayudante que arma la raíz del
+árbol recibía `TreeItem<Object>...` y se lo reenviaba a `List.of(...)`, que es
+justamente lo que `-Xlint` marca como posible contaminación del heap. Se arregló
+recorriendo el arreglo en vez de reenviarlo — no suprimiendo la advertencia. El build
+vuelve a estar en cero.
+
+### Lo que NO se hizo, y por qué
+
+**No llega a las ~1,650 líneas que prometía el plan.** El plan se escribió sobre un
+archivo de 2,621 líneas; al ejecutarlo tenía 3,344. Las ~720 que creció en el medio
+entraron casi todas a la sección `// ---- Diálogos ----`, que hoy tiene **993 líneas**
+y cuyo nombre ya no describe lo que contiene: además de diálogos están la ejecución de
+consultas (~286 líneas) y exportar CSV con la barra de estado (~220). Ninguno de los
+dos estaba en los cuatro pasos; son los candidatos naturales para seguir, en ese
+orden.
+
+**El paso 4 se cortó más angosto que en el plan.** El plan juntaba "árbol" con
+"edición de bases". Se movió el estado del árbol y los bindings; las **acciones**
+(agregar, editar, borrar, mover, renombrar) se quedaron en el controlador y le piden
+al coordinador `refresh()` o `revealDatabase()`. Moverlas habría arrastrado sus
+diálogos y convertido el coordinador en un segundo `MainController`.
+
+**C3 sigue abierto, y creció.** El análisis decía 12 `new Thread(...)` sueltos y que
+"varios se moverían solos al dividir C1". Hoy son **15** (los arreglos de rendimiento
+sumaron los suyos) y la predicción se cumplió a medias: 2 se mudaron, pero siguen
+igual de sueltos en su clase nueva, y en `MainController` quedan 5.
+
+### Lo que falta, y es del usuario
+
+**La prueba de humo del log.** Es la red de seguridad real que el propio §C1 propone y
+la única que cubre lo que los tests no: abrir la app, expandir una base, correr contra
+dos, exportar, cambiar de pestaña, cerrar, y comparar `logs/faro-app.log` contra el de
+antes. **No la corrió el asistente**: el punto 4 de los "Puntos obligatorios" lo
+prohíbe, y esa contradicción sigue pendiente de decisión (ver la entrada del
+2026-09-15).
+
+Un detalle para ese diff: las líneas de log que se mudaron de clase ahora salen con
+**otro nombre de logger** (`SessionPersistence`, `ScriptGeneratorCoordinator`,
+`QueryTabManager` en lugar de `MainController`). El diff las va a marcar aunque el
+comportamiento sea idéntico.
+
+**Cómo conseguir el "antes", que es la parte que no es obvia.** Logback escribe
+siempre sobre el mismo `logs/faro-app.log` y solo rota **por día**, así que dos
+corridas del mismo día se mezclan en el mismo archivo. Hay que apartarlo entre una y
+otra:
+
+1. `git checkout main` → `mvn compile javafx:run` → hacer la secuencia de arriba →
+   cerrar la app → **copiar `logs/faro-app.log` a otro lado** (por ejemplo
+   `antes.log`).
+2. `git checkout refactor/dividir-main-controller` → `mvn compile javafx:run` → la
+   **misma** secuencia, en el mismo orden → cerrar.
+3. Comparar `antes.log` contra el `logs/faro-app.log` nuevo.
+
+Al comparar, tres clases de diferencia son esperadas y no son regresiones: las marcas
+de tiempo, los nombres de logger que cambiaron de clase (los de arriba), y el orden
+relativo de líneas que vienen de hilos distintos. Lo que sí importa es que **no falte
+ningún evento** y que no aparezca ninguna excepción que antes no estaba.
+
+`mvn compile` antes de `javafx:run` no es de adorno: `javafx:run` arranca con lo que
+haya en `target/classes` y no compila. Sin él se corre la versión anterior del código
+sin ningún aviso — y en una comparación así eso daría un "no hay diferencias"
+tranquilizador y falso.
+
+### Tercera pasada de documentación (2026-09-19) — tres iteraciones, dos errores míos
+
+Pedido: *"documenta todo lo trabajado en el contexto, que no quede nada fuera, a
+detalle, harás 3 iteraciones para verificar"*. Se hicieron con un criterio distinto
+cada una, para que no fueran la misma revisión repetida.
+
+**Iteración 1 — cobertura.** Cruzar el inventario real (los 7 commits de la ronda y
+los 13 archivos nuevos, sacados de `git`) contra lo que la bitácora nombra. Seis
+huecos, todos de continuidad y no de contenido: las clases de test no se nombraban
+(solo se decía "10 tests"), no había ningún hash de commit por paso, no se decía que
+la rama está subida y **sin mezclar**, y faltaban tres detalles que solo se ven al
+hacerlo — el orden de construcción, el comentario que afirmaba algo falso, y la
+advertencia que introdujo el propio test nuevo. Todo agregado.
+
+**Iteración 2 — veracidad.** Cada cifra contra el código y el `git` reales, no contra
+otro documento (punto 2 de los Puntos obligatorios). Se verificaron una por una: las
+2,309 líneas de `MainController`, las 337/231/705/441 de las clases nuevas, los
+10/4/11/11 tests, las 993 líneas de la sección "Diálogos", la progresión completa
+3,344 → 3,209 → 3,054 → 2,593 → 2,309 **commit por commit**, los 158 → 190 tests,
+los 5 commits de la rama, y las 386 entradas del zip con 380 bajo `runtime/`. Todas
+correctas salvo dos:
+
+1. **A14 apuntaba a `MainController:1832`; hoy está en la 1390.** Lo movió el propio
+   refactor de esta ronda. Es la única referencia `archivo:línea` de un hallazgo
+   **abierto**, o sea la única que alguien iba a usar de verdad. Corregida, dejando
+   anotado de dónde venía.
+2. **El commit `3e94f19` estaba mal medido.** La bitácora decía "47 archivos,
+   +3,895/−406"; el commit real es **54 archivos, +6,798/−1,851**. El número salió de
+   un `git diff --stat` que no contaba ni los archivos nuevos (sin trackear todavía)
+   ni los borrados ya preparados — o sea, una cifra tomada de un comando que no medía
+   lo que yo decía que medía. Corregida.
+
+**Iteración 3 — integridad estructural.** Jerarquía de encabezados (ningún `###`
+huérfano, ningún encabezado con fecha colgando en nivel 3 — el arreglo del 09-15 se
+sostiene), tablas bien formadas, referencias a otros documentos que resuelven,
+codificación sin mojibake, y finales de línea. Acá salió una tercera cosa: el archivo
+tenía **finales de línea mezclados** (3.710 CRLF y 157 LF sueltos, estos últimos en
+los bloques que se habían agregado con `cat`). Normalizado a CRLF; se comprobó que
+esa normalización sola produce **cero diff** en git, o sea que era solo del árbol de
+trabajo.
+
+### Cuarta y quinta pasada (2026-09-19) — dos contradicciones y un pendiente que no se podía ejecutar
+
+Pedido del usuario de repetir la verificación dos veces más. Se usaron dos ángulos que
+las tres primeras no habían cubierto.
+
+**Iteración 4 — cruce entre documentos y afirmaciones de comportamiento.** Las tres
+primeras miraron esta bitácora casi sola. Esta cruzó bitácora ↔ análisis ↔ README, y
+verificó contra el código las afirmaciones de comportamiento que los documentos hacen:
+que el cierre guarda **después** de cerrar los pools y en dos llamadas
+(`stopAutosaveAndWait` → `closeAllAndWait` → `saveNow`, en ese orden en el archivo),
+que los dos coordinadores se construyen antes de la primera reconstrucción del árbol
+(líneas 369 y 377 contra la 478), que el cursor se activa solo con PostgreSQL **y**
+todas las sentencias de solo lectura, y que la reconstrucción conserva la selección.
+Las cuatro se sostienen.
+
+Salió una contradicción: la entrada del 2026-09-15 declaraba "30 corregidos, 4
+abiertos" y hoy son 31 y 3, porque C1 se cerró después. Se resolvió como este archivo
+ya resolvió antes el pendiente de `fetchSize`: **un puntero hacia adelante, sin
+reescribir lo que se dijo ese día**, y dejando claro que la fuente del conteo es la
+tabla del análisis y no la entrada.
+
+También se comprobó que las referencias del **código** a tests y documentos resuelven
+(`SessionPersistence` → `SessionPersistenceTest`, etc.). `ScriptGeneratorCoordinator`
+era el único que no apuntaba al suyo; se le agregó el puntero.
+
+**Iteración 5 — actionabilidad.** No "¿está bien escrito?" sino "¿alguien que llega en
+frío puede ejecutarlo?". De los cuatro pendientes, tres estaban listos para actuar. El
+cuarto no: la prueba de humo decía "comparar contra el log de antes" **sin decir cómo
+conseguir ese antes** — y el detalle que lo hacía trampa es que Logback escribe siempre
+sobre el mismo `faro-app.log` y solo rota por día, así que las dos corridas se habrían
+mezclado en el mismo archivo. Quedó escrito el procedimiento de tres pasos, qué
+diferencias son esperadas al comparar, y por qué el `mvn compile` previo no es de
+adorno (sin él la comparación daría un "no hay diferencias" falso y tranquilizador).
+
+### Sexta y séptima pasada (2026-09-19) — el código, no los documentos
+
+Pedido del usuario de revisar dos veces más. Las cinco pasadas anteriores habían
+revisado **documentos**; estas dos revisaron el **código del refactor**, que es donde
+un error costaría de verdad.
+
+**Iteración 6 — el contrato con el FXML.** Es el punto ciego exacto de este refactor:
+FXML enlaza `onAction="#metodo"` y `fx:id` **por nombre y en tiempo de ejecución**. Si
+un método que el FXML nombra se movió o se renombró, no falla al compilar, no lo
+atrapa ningún test (la suite no arranca JavaFX) y revienta al abrir la ventana. Se
+cruzaron los **38 manejadores** y los **44 `fx:id`** de `main-view.fxml` contra
+`MainController`, más los manejadores de los otros cinco FXML contra su propio
+controlador. **Todos resuelven.** Los dos `fx:id` sin campo (`root` y
+`railToggleGroup`) son legales —un `fx:id` sin campo solo entra al espacio de
+nombres, y el segundo se usa como `$railToggleGroup`— y ese archivo no lo tocó el
+refactor. Pasada limpia, sin hallazgos.
+
+**Iteración 7 — ciclo de vida, y un bug real.** Primero el riesgo que ni el compilador
+ni los tests ven: que una lambda dispare cuando el campo que lee todavía es `null`. Se
+trazó el arranque: los coordinadores se construyen en las líneas 369 y 377, la primera
+llamada real a `tree` es la 478 y a `tabs` la 487, y lo que hay en medio son cuerpos de
+lambda que solo corren con el usuario. Correcto.
+
+Y ahí salió un **bug real, anterior al refactor**:
+
+> `autosave()` toma el candado `autosaveInProgress` y recién después captura las
+> pestañas y arranca el hilo de fondo. **Si la captura truena, el candado queda en
+> `true` para siempre**: el hilo que normalmente lo suelta nunca llegó a existir. A
+> partir de ahí la app deja de autoguardar el resto de la sesión avisándolo solo en
+> `DEBUG` —o sea, en silencio— y encima cada cierre pasa a esperar los 5 segundos
+> completos de `awaitAutosave()`. Es justo el modo de fallo que A3 existe para evitar.
+
+**Se verificó que es preexistente y no lo introdujo el refactor**: la estructura es
+idéntica en el `MainController` del commit `62bbe09`. Lo que cambió es que ahora se
+puede ver y, sobre todo, **testear**.
+
+Arreglado con un `try/finally` que suelta el candado solo si el hilo nunca llegó a
+tomarlo, conservando la propagación de la excepción como antes y avisando al usuario
+igual que en el fallo de escritura. **Verificado con una sonda**: revertido el
+arreglo, el test nuevo falla; restaurado, pasa. Tests: 190 → **191**.
+
+### Estado al cerrar la ronda — lo que espera decisión del usuario
+
+Cuatro cosas, y las cuatro son suyas, no del asistente. Las dos primeras son de
+**medir**, no de programar:
+
+| Qué | Dónde está escrito | Qué hace falta |
+|---|---|---|
+| **La prueba de humo del log** del refactor C1 | Esta entrada, "Lo que falta, y es del usuario" | Abrir la app, expandir una base, correr contra dos, exportar, cambiar de pestaña, cerrar, y comparar `logs/faro-app.log` con el de antes. Es la red de seguridad real del refactor, y ahí está el procedimiento con la trampa del archivo que rota por día |
+| **Medir el pico de memoria** de A16 | Entrada del 2026-09-20 | Contra `bodegas-test` con VisualVM, con una consulta que pase de las 200.000 filas, antes y después. Es lo único que confirma que el techo de verdad desapareció; pide una base con volumen, igual que el cursor de A13 |
+| **La rama `refactor/dividir-main-controller`** | Esta entrada, "Estado de la rama" | Está subida y **sin mezclar**, y hoy trae el refactor **y** A16. Falta decidir si se mezcla a `main` o se abre un PR — razonablemente, después de las dos mediciones de arriba |
+| **El punto 4 de los Puntos obligatorios** ("nunca correr la app") | Entrada del 2026-09-15, hueco 4 | Contradice lo que este archivo registra tres veces. O gana la regla y la verificación del empaquetado se limita a lo que se puede comprobar sin arrancar nada, o se le escribe una excepción angosta. **La regla es del usuario y solo él puede cambiarla** |
+
+Y un hallazgo abierto de código, ya numerado y con su fila en el análisis:
+**A14**, el CSV exportado sin BOM que Excel en español abre con `Ã±`. No se arregló a
+propósito: es una línea, pero cambia los bytes de **todos** los archivos exportados y
+hay herramientas que no toleran el BOM.
+
+---
+
+## 2026-09-20 — El techo de memoria de los resultados grandes (A16)
+
+Vino de una conversación, no de un pedido de código: *"¿qué lenguaje recomiendas
+para tener mejor rendimiento, o con Java está ok?"*, después *"¿cómo funcionan los
+editores SQL?, hay uno llamado Beekeeper"*, y al final *"quiero que tenga buen
+rendimiento en todo como los editores SQL famosos"*.
+
+**La respuesta sobre el lenguaje fue que Java está bien**, con la evidencia de este
+mismo proyecto: en las tres rondas de optimización, **ni un solo hallazgo real fue
+"el JVM es lento"**. Todos fueron copias duplicadas en memoria, trabajo pesado en el
+hilo de UI, una condición mal puesta en el driver y recorridos redundantes. Un Faro
+en C++ con los mismos bugs habría tenido los mismos síntomas. Además esta app es
+**I/O-bound** (red contra los motores), no CPU-bound, y cambiar de lenguaje reabriría
+justo el problema que motivó salir de Flutter: los drivers maduros para los dos
+motores.
+
+Como "rendimiento en todo" no es un solo interruptor, se le plantearon cuatro áreas
+concretas con su estado real y eligió: **el grid de resultados grandes**.
+
+### El reencuadre, y la complicación que Faro tiene y los famosos no
+
+Los editores conocidos **tampoco** dejan scrollear libremente por 3 millones de
+filas: DBeaver trae ~200 y pide más, DataGrip pagina, pgAdmin y TablePlus también.
+Paginar no es el premio de consolación frente a ellos — **es lo que ellos hacen**.
+
+Pero hay algo que el consejo genérico no cubre: el cursor de PostgreSQL **exige una
+transacción abierta** (`autoCommit=false`, lo que activó A13). Sostener el cursor
+mientras el usuario navega deja un `idle in transaction` contra la base del cliente,
+que bloquea `VACUUM` y retiene locks. Ellos atacan **una** base a la vez; Faro ataca
+seis en paralelo. Por eso **se descartó el fetch incremental por scroll**, que es el
+más vistoso, y se eligieron las otras dos salidas de §5.1 de
+`OPTIMIZACION_RENDIMIENTO.md`.
+
+El razonamiento que decidió cuáles: mirando el uso real que documenta todo este
+historial, **el caso de 3 millones de filas siempre es un caso de exportar, no de
+mirar**. Nadie lee 3M filas en pantalla — se corre contra las bodegas, se revisa si
+cuadra, y se exporta.
+
+### Lo que se hizo
+
+**Las dos piezas van juntas porque están acopladas**: el tope solo es seguro porque
+exportar dejó de depender de lo que está en pantalla. Si hubiera entrado primero el
+tope, "Exportar" habría empezado a entregar archivos incompletos sin avisar.
+
+**1. Exportación en streaming** (`query/CsvExportService`) — lee del `ResultSet` y
+escribe al archivo fila por fila, sin lista intermedia. La memoria queda **plana** sin
+importar si son mil filas o treinta millones. Tres decisiones dentro:
+
+- **En paralelo**, no una base tras otra: secuencial habría multiplicado por 6 el
+  tiempo de una exportación que ya es larga.
+- **Por lotes de 512 filas bajo candado**: tomar el candado por fila sería la
+  operación más cara de todo el proceso con millones de filas. El costo en memoria
+  sigue acotado — un lote por hilo, no un resultado por hilo.
+- **El encabezado lo escribe el primer hilo que llega, dentro del mismo bloque
+  sincronizado que su lote.** Si fuera aparte, otro hilo podría colar filas antes del
+  encabezado.
+
+**2. Tope de filas en pantalla** (`AppPreferences#maxDisplayRows`, 200.000 por
+defecto, configurable en Preferencias → Rendimiento). Al alcanzarlo la app **deja de
+leer**, así que el resto de las filas ni siquiera viaja por la red: **cortar es
+además más rápido**. A propósito **no se cuenta cuántas quedaron fuera** — saberlo
+exigiría traerlas, que es justo lo que se evita. El aviso dice "hay más", no un total
+inventado.
+
+**Nunca en silencio.** El aviso va en un banner **arriba del grid**, no en la barra
+de estado de abajo, porque el usuario ya señaló una vez que los mensajes de abajo no
+se leen ("dime quién lee eso hasta abajo"). Y dice explícitamente que Exportar CSV sí
+baja el resultado completo.
+
+### Un bug que encontré en mi propio código antes de que corriera
+
+El streaming recorría **todas** las sentencias del script y escribía las filas de
+cada `ResultSet` concatenadas bajo un solo encabezado. `QueryExecutionService`, en
+cambio, se queda solo con el resultado de la **última** sentencia que devuelve uno —
+que es lo que el grid muestra. Dos consecuencias:
+
+- Un script con dos `SELECT` de columnas distintas habría producido un CSV
+  **corrupto**: filas de dos formas bajo un encabezado que solo describe una.
+- Y aunque coincidieran, el archivo no habría sido lo que el usuario vio.
+
+El arreglo necesita un `Statement` **por** sentencia y no uno reusado: ejecutar sobre
+el mismo `Statement` invalida el `ResultSet` anterior, así que no hay forma de llegar
+al final del script sabiendo cuál era el último sin haberlo leído ya. Cada
+`ResultSet` es un cursor, no un buffer, así que tenerlos abiertos un momento no carga
+filas en memoria.
+
+### Dos cosas que ya estaban mal y salieron al pasar por ahí
+
+- **Las dos exportaciones escribían finales de línea distintos.** La vieja cerraba
+  con `writer.newLine()` (CRLF en Windows) y la nueva con `\n`: el mismo resultado
+  habría salido distinto según el camino. Ahora las dos pasan por
+  `CsvWriter.appendRow`.
+- **El texto de ayuda de Preferencias mentía**: decía que fetch size "solo funciona
+  en SQL Server — en PostgreSQL todavía no tiene efecto", falso desde A13
+  (2026-09-14).
+
+El escapado CSV salió de `MainController` a `query/CsvWriter`, junto a `CsvParser`:
+es una regla del formato, no del controlador, y ahora hay dos escritores. Sus 6 tests
+se mudaron con él.
+
+### Verificación
+
+| Commit | Qué |
+|---|---|
+| `0e8380b` | Las dos piezas: `query/CsvExportService` (streaming) y el tope de filas, más `query/CsvWriter` con el escapado que salió de `MainController` |
+| `b8e4576` | El bug de las varias sentencias, encontrado revisando el código nuevo |
+| `2d7eb29` | La documentación de todo esto |
+
+**196/196 tests** (eran 191), cero advertencias, recompilación desde cero. Lo nuevo
+con test: `remainingCapacity` en `QueryExecutionServiceTest` —la aritmética que corta
+la lectura, donde un signo cambiado no recortaría nada (y volvería el
+`OutOfMemoryError`) o recortaría todo (y el grid saldría vacío)— y
+`CsvWriter.appendRow` en el `CsvWriterTest` nuevo, adonde se mudaron además los 6
+casos del escapado que vivían en `MainControllerLogicTest`.
+
+**Lo que NO tiene test, y es honesto decirlo:** el bucle de streaming en sí. Necesita
+un `ResultSet` real, o sea una base, y la suite permanente no abre conexiones. Lo que
+sí se pudo aislar y fijar es la decisión aritmética que lo corta.
+
+Se reusó además la verificación del contrato con el FXML que salió de la iteración 6
+del refactor: se tocaron dos FXML, y eso **no falla al compilar** sino al abrir la
+ventana. Los `fx:id` y manejadores nuevos resuelven. Y el propio
+`StyleClassCoverageTest` validó la clase CSS nueva del banner, que es justo para lo
+que se escribió.
+
+**Un tropiezo del proceso, con su lección repetida:** un `mvn -o compile` dio
+`BUILD SUCCESS` con el código roto. Maven solo recompiló los dos archivos tocados y
+nunca miró `MainController`, que llamaba a la firma vieja. Es exactamente lo que el
+README advierte sobre el compilado incremental, y volvió a pasar. Desde ahí, cada
+verificación fue con `target/classes` borrado.
+
+### Dónde vive esto, y una vuelta en falso con las ramas
+
+Este trabajo está en **`refactor/dividir-main-controller`**, junto con el refactor de
+C1. Llegar ahí costó dos correcciones de rumbo que vale la pena dejar escritas, porque
+las dos fueron malas decisiones mías sobre algo que el usuario tenía claro:
+
+1. **Se creó `perf/resultados-grandes` desde `main`**, que no tiene el refactor. Eso
+   dejaba el trabajo sobre un `MainController` de 3.344 líneas y garantizaba
+   reconciliar dos ramas largas a mano después. El usuario lo detectó preguntando
+   *"¿en esta nueva rama sí tenemos los cambios del MainController?"* — y la respuesta
+   era **no**. Se rehízo la rama desde el refactor.
+2. **Aun rehecha, seguía siendo una rama aparte**, y lo que el usuario esperaba era que
+   todo fuera a la rama del MainController: *"se supone que debiste meter todo en la
+   rama de main controller"*. Como `perf` salía en línea recta del refactor, consolidar
+   fue un `fast-forward` limpio —sin fusionar nada ni resolver conflictos, solo mover
+   el puntero— y la rama extra se borró, local y en el remoto.
+
+**La lección, que es sobre cómo trabajar y no sobre git:** el contenido nunca estuvo
+separado —`perf` traía el refactor completo encima— pero *dos nombres de rama para un
+solo hilo de trabajo* ya fue suficiente para confundir dos veces. Cuando el usuario
+sigue una línea de trabajo, la rama sigue esa línea; abrir una nueva es una decisión
+que hay que plantearle, no tomar por él.
+
+Lo que sí se hizo bien antes de empezar: verificar que las tres zonas que este trabajo
+toca (`QueryExecutionService`, `ResultsTableFactory`, el exportador de
+`MainController`) eran **byte a byte idénticas** en `main` y en el refactor, así que
+ninguna de las dos ubicaciones fabricaba conflictos.
+
+**Sin mezclar a `main`.** Y lo que falta para cerrar A16 **no es código**: medir el
+pico de memoria real contra `bodegas-test` con VisualVM, corriendo algo que pase de las
+200.000 filas, antes y después. Igual que con el cursor de A13, esa medición pide una
+base con volumen y la corre el usuario.
+
+---
+
+## 2026-09-20 (cierre) — Qué entra a `main` en este merge
+
+Resumen de la rama `refactor/dividir-main-controller` completa, escrito para el
+momento de mezclarla. El detalle de cada cosa está en las entradas de arriba; acá va
+lo que alguien necesita saber **sin leerlas todas**.
+
+**13 commits · 27 archivos · +4.085 / −1.396 · tests 158 → 196.**
+
+### Las tres cosas que entran
+
+**1. C1 — `MainController` dividido en cuatro** (commits `c93b429`, `90b6517`,
+`f16c8e0`, `037d30d`). De 3.344 a 2.309 líneas, un commit por paso:
+
+| Clase nueva | De qué se encarga |
+|---|---|
+| `data/SessionPersistence` | Cargar la sesión, autoguardar cada 2 minutos, guardar al cerrar |
+| `ui/ScriptGeneratorCoordinator` | Las seis acciones "Generar…" del explorador de esquema |
+| `ui/QueryTabManager` | Pestañas de consulta: crearlas, encabezado de 2 líneas, guardar, buscar, formatear |
+| `ui/ConnectionTreeCoordinator` | El estado del árbol que sobrevive a cada reconstrucción: selección, filas abiertas, scroll, buscador |
+
+Lo que ganó, además de líneas: **tres cosas que no se podían testear sin arrancar
+JavaFX ahora tienen tests** — el arreglo de A3 (el de peor consecuencia del análisis,
+que no tenía ni una prueba), la segunda línea del encabezado de cada pestaña, y la
+invariante de que recorrer el árbol nunca le pide los hijos a una base.
+
+**2. A15 — el candado del autoguardado** (`f9138dd`). Bug **preexistente**, encontrado
+revisando el código movido: si la captura de pestañas lanzaba, el candado quedaba
+trabado para siempre y la app dejaba de autoguardar el resto de la sesión avisándolo
+solo en `DEBUG`. Lo que el refactor cambió no es que el bug existiera, sino que se
+pudiera ver y testear.
+
+**3. A16 — el techo de memoria de los resultados grandes** (`0e8380b`, `b8e4576`). El
+grid carga como mucho 200.000 filas y avisa arriba cuando recortó; "Exportar CSV" baja
+el resultado **completo** leyéndolo de la base y escribiéndolo directo al archivo, sin
+que exista en memoria. Cierra el techo estructural de `OPTIMIZACION_RENDIMIENTO.md`
+§5.1 y la causa del `OutOfMemoryError` real.
+
+### Cómo se verificó, y qué NO cubre esa verificación
+
+- **196/196 tests**, cero advertencias con `-Xlint:all`, recompilación desde cero en
+  cada paso.
+- **Comparación mecánica en las dos direcciones** para los pasos 3 y 4 de C1 (los de
+  UI, casi sin tests): cada sentencia del original contra la clase nueva y al revés.
+  Todas las diferencias resultaron ser renombres, andamiaje o `@FXML` que se quedaron
+  a propósito.
+- **El contrato con el FXML**: los 38 manejadores y 44 `fx:id` de `main-view.fxml`
+  resuelven, más los de los cinco diálogos. Es el punto ciego del refactor — FXML
+  enlaza por nombre en tiempo de ejecución, no falla al compilar.
+- **Sondas** que rompen a propósito lo que el test protege, para confirmar que el test
+  falla: la invariante del árbol, el candado de A15 y las reglas CSS de
+  `StyleClassCoverageTest`.
+
+**Lo que esto NO cubre, y hay que decirlo al mezclar:** ningún test abre una ventana ni
+una conexión. Quedan sin verificar en vivo el comportamiento de la UI tras el refactor
+y el bucle de streaming de A16, que necesita un `ResultSet` real.
+
+### Lo que sigue pendiente después del merge
+
+Las dos primeras son de **medir**, y las dos piden una base con volumen:
+
+1. **La prueba de humo del log** (C1) — el procedimiento está en la entrada del
+   2026-09-15/19, con la trampa incluida: Logback escribe siempre sobre el mismo
+   `faro-app.log` y solo rota por día, así que hay que apartar el archivo entre las dos
+   corridas o se mezclan.
+2. **El pico de memoria** (A16) — contra `bodegas-test` con VisualVM, con una consulta
+   que pase de las 200.000 filas, antes y después.
+3. **A14** — el CSV exportado sin BOM, que Excel en español abre con `Ã±`. Sin
+   arreglar a propósito: es una línea, pero cambia los bytes de todos los archivos
+   exportados.
+4. **El punto 4 de los "Puntos obligatorios"** ("nunca correr la app"), que sigue
+   contradiciendo lo que este archivo registra tres veces.
+
+Y en el análisis quedan **C2** (los 7 mapas estáticos de `SchemaIntrospector`) y **C3**
+(los 15 `new Thread` sueltos) abiertos a propósito, con su razón escrita.
+
+### Por qué se mezcla antes de esas mediciones
+
+Porque son mediciones **sobre la app corriendo**, y la app se corre desde `main`. Dejar
+la rama esperando indefinidamente tiene su propio costo: `MainController` ya creció
+720 líneas entre que se escribió el plan de C1 y se ejecutó, y cada día sin mezclar es
+otro día de divergencia. Si alguna medición sale mal, el historial está en 13 commits
+separados y revertir cualquiera por su cuenta es posible — esa fue justamente la razón
+de hacerlos así.

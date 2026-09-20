@@ -36,6 +36,31 @@ public final class AppPreferences {
      * nadie pidió.
      */
     private int fetchSize = 500;
+    /**
+     * Tope de filas que se CARGAN EN MEMORIA para mostrar en el grid de Resultados
+     * (2026-09-20). No es un tope de la consulta: es hasta dónde lee la app.
+     *
+     * <p><b>Por qué existe.</b> {@code TableView} virtualiza qué se <i>renderiza</i>, no
+     * qué se <i>guarda</i>: el resultado completo vive en el heap. Una corrida contra 6
+     * bodegas × 500.000 filas son 3 millones de {@code Object[]} vivos a la vez, que es
+     * el {@code OutOfMemoryError} que el usuario reportó de verdad. Es el techo
+     * estructural que documentaba {@code OPTIMIZACION_RENDIMIENTO.md} §5.1.
+     *
+     * <p><b>Y por qué cortar es además más rápido:</b> al llegar al tope la app deja de
+     * leer el {@code ResultSet}, así que el resto de las filas ni siquiera viajan por la
+     * red. No se cuenta cuántas quedaron fuera a propósito — contarlas exigiría traerlas
+     * igual, que es justo lo que se quiere evitar; el aviso dice "hay más", no un total
+     * inventado.
+     *
+     * <p><b>Nunca se recorta en silencio.</b> El grid avisa cuando pasó, y "Exportar CSV"
+     * no depende de este tope: exporta el resultado COMPLETO leyéndolo de nuevo de la
+     * base y escribiéndolo directo a disco (ver {@code CsvExportService}).
+     *
+     * <p>Los 200.000 por defecto salen de la cuenta de memoria real: ~250 bytes por fila
+     * de 10 columnas de texto corto son unos 50 MB, holgado dentro del {@code -Xmx4g} del
+     * empaquetado. Es configurable en Preferencias → Rendimiento.
+     */
+    private int maxDisplayRows = 200_000;
     /** Uno de {@link AccentPalette#NAMES} — ver Preferencias → Apariencia. */
     private String accentName = "indigo";
     /** Tamaño de fuente del editor SQL, en px — SOLO el editor, aparte del resto de la interfaz (ver {@link #fontScaleDelta}). Mismo valor que estaba fijo en `.sql-editor` de app.css antes de esto. */
@@ -105,6 +130,19 @@ public final class AppPreferences {
 
     public void setFetchSize(int value) {
         fetchSize = Math.max(1, value);
+    }
+
+    public int maxDisplayRows() {
+        return maxDisplayRows;
+    }
+
+    /**
+     * Piso de 1.000 filas: un tope más chico haría el grid inútil sin que el usuario
+     * entienda por qué, y el riesgo de memoria que esto cubre no empieza hasta cientos
+     * de miles de filas.
+     */
+    public void setMaxDisplayRows(int value) {
+        maxDisplayRows = Math.max(1_000, value);
     }
 
     public String accentName() {

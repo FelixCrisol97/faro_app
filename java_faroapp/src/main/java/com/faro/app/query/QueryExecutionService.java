@@ -15,6 +15,8 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -100,17 +102,33 @@ public final class QueryExecutionService {
      * en modo {@code READ_ONLY}: es una propiedad del SCRIPT, no de la base, y con
      * varias bodegas protegidas marcadas se recalculaba idéntico una vez por cada una.
      */
-    record RunPlan(List<String> statements, boolean allStatementsReadOnly, int fetchSize) {
+    record RunPlan(List<String> statements, boolean allStatementsReadOnly, int fetchSize, int maxDisplayRows) {
 
-        RunPlan(List<String> statements, int fetchSize) {
-            this(statements, statements.stream().allMatch(QueryExecutionService::isReadOnlyStatement), fetchSize);
+        RunPlan(List<String> statements, int fetchSize, int maxDisplayRows) {
+            this(statements, statements.stream().allMatch(QueryExecutionService::isReadOnlyStatement),
+                    fetchSize, maxDisplayRows);
         }
+    }
+
+    /**
+     * Cuántas filas más caben antes del tope de {@link RunPlan#maxDisplayRows}, dado
+     * cuántas se llevan leídas entre TODAS las bases.
+     *
+     * <p>El tope es del resultado <b>combinado</b>, no por base: lo que puede tumbar la
+     * app es lo que termina junto en el grid. Por eso el contador se comparte entre los
+     * hilos y esta cuenta se hace contra ese total, no contra el avance de cada base.
+     *
+     * <p>Devuelve 0 cuando ya no cabe ninguna — es la señal de cortar la lectura del
+     * {@code ResultSet}, que además evita que el resto de las filas viajen por la red.
+     */
+    static int remainingCapacity(int alreadyCollected, int maxDisplayRows) {
+        return Math.max(0, maxDisplayRows - alreadyCollected);
     }
 
     public static Task<QueryResult> execute(
             List<DatabaseEntry> databases, CredentialStore credentials, ConnectionPoolManager pool,
             Map<String, ExecutionStatus> statusByDatabaseId, String sql, int maxConcurrentDatabases,
-            int fetchSize, Map<DbEngine, String> engineVersions) {
+            int fetchSize, int maxDisplayRows, Map<DbEngine, String> engineVersions) {
         return new Task<>() {
             @Override
             protected QueryResult call() throws InterruptedException {
@@ -118,6 +136,10 @@ public final class QueryExecutionService {
                 AtomicReference<List<String>> columnsRef = new AtomicReference<>();
                 List<Object[]> rows = Collections.synchronizedList(new ArrayList<>());
                 List<String> errors = Collections.synchronizedList(new ArrayList<>());
+                // Compartidos entre las bases: el tope es del resultado COMBINADO, que es
+                // lo que termina junto en el grid. Ver remainingCapacity().
+                AtomicInteger collectedRows = new AtomicInteger();
+                AtomicBoolean truncated = new AtomicBoolean();
 
                 // UNA sola vez por corrida, no una por base (2026-09-10, hallazgo B4 de
                 // ANALISIS_OPTIMIZACION_ESTRUCTURA.md). Partir el script es un escaneo
@@ -129,7 +151,7 @@ public final class QueryExecutionService {
                 // depende SI aplica.
                 RunPlan plan = new RunPlan(
                         SqlStatementSplitter.split(sql),
-                        fetchSize);
+                        fetchSize, maxDisplayRows);
                 int poolSize = Math.min(Math.max(1, databases.size()), Math.max(1, maxConcurrentDatabases));
                 log.info("Ejecutando consulta contra {} base(s), concurrencia={}, fetchSize={}, sql.length={}, sentencias={}",
                         databases.size(), poolSize, fetchSize, sql.length(), plan.statements().size());
@@ -138,6 +160,7 @@ public final class QueryExecutionService {
                     List<Callable<Void>> jobs = databases.stream()
                         .<Callable<Void>>map(db -> () -> {
                             runOne(db, credentials, pool, plan, statusByDatabaseId.get(db.id()), columnsRef, rows, errors,
+                                    collectedRows, truncated,
                                     engineVersions);
                             return null;
                         })
@@ -154,7 +177,8 @@ public final class QueryExecutionService {
                 // new ArrayList<>(rows) copia solo la lista de NIVEL SUPERIOR (un array de
                 // referencias) para salir de Collections.synchronizedList — cada fila real
                 // (Object[]) NO se copia, sigue siendo la misma instancia. Ver QueryResult.
-                return new QueryResult(columns == null ? List.of() : columns, new ArrayList<>(rows), new ArrayList<>(errors));
+                return new QueryResult(columns == null ? List.of() : columns, new ArrayList<>(rows),
+                        new ArrayList<>(errors), truncated.get());
             }
         };
     }
@@ -260,6 +284,7 @@ public final class QueryExecutionService {
             DatabaseEntry db, CredentialStore credentials, ConnectionPoolManager pool, RunPlan plan,
             ExecutionStatus status, AtomicReference<List<String>> columnsRef,
             List<Object[]> rows, List<String> errors,
+            AtomicInteger collectedRows, AtomicBoolean truncated,
             Map<DbEngine, String> engineVersions) {
         long startedAt = System.currentTimeMillis();
         log.debug("[{}] Iniciando ejecución ({})", db.alias(), db.engine());
@@ -347,14 +372,24 @@ public final class QueryExecutionService {
                         columnNames.add(meta.getColumnLabel(i));
                     }
 
+                    // Se para al llegar al tope COMBINADO — ver remainingCapacity(). Cortar
+                    // acá no solo acota la memoria: deja de pedirle filas al servidor, así
+                    // que el resto del resultado ni siquiera viaja por la red.
                     List<Object[]> theseRows = new ArrayList<>();
-                    while (rs.next()) {
+                    while (remainingCapacity(collectedRows.get(), plan.maxDisplayRows()) > 0 && rs.next()) {
                         Object[] row = new Object[columnCount + 1];
                         row[0] = db.alias();
                         for (int i = 1; i <= columnCount; i++) {
                             row[i] = rs.getObject(i);
                         }
                         theseRows.add(row);
+                        collectedRows.incrementAndGet();
+                    }
+                    // Quedó algo sin leer: el tope se alcanzó y todavía hay filas.
+                    if (remainingCapacity(collectedRows.get(), plan.maxDisplayRows()) == 0 && rs.next()) {
+                        truncated.set(true);
+                        log.info("[{}] Lectura cortada en el tope de {} fila(s) en memoria — hay más.",
+                                db.alias(), plan.maxDisplayRows());
                     }
                     lastColumnNames = columnNames;
                     lastRows = theseRows;

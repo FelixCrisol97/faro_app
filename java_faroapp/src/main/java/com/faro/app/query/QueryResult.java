@@ -19,5 +19,26 @@ import java.util.List;
  * con millones de filas combinadas ese overhead solo, multiplicado, ya es
  * varias decenas de MB que no cumplen ningún propósito real.
  */
-public record QueryResult(List<String> columns, List<Object[]> rows, List<String> errors) {
+public record QueryResult(List<String> columns, List<Object[]> rows, List<String> errors, boolean truncated) {
+
+    /**
+     * {@code truncated} — la lectura se cortó al llegar al tope de filas en memoria
+     * ({@code AppPreferences#maxDisplayRows}), así que {@code rows} <b>no</b> es el
+     * resultado completo de la consulta (2026-09-20).
+     *
+     * <p>Deliberadamente <b>no</b> se acompaña de un "total real": saberlo exigiría
+     * seguir leyendo todas las filas restantes, que es justo el trabajo —y la memoria—
+     * que el tope existe para no hacer. El aviso dice "hay más", no un número inventado.
+     *
+     * <p>Quien muestre esto <b>tiene que avisarlo</b>: recortar en silencio es peor que
+     * no recortar. Y "Exportar CSV" no debe leer de acá cuando está en {@code true} —
+     * exporta el resultado completo releyéndolo de la base, ver {@link CsvExportService}.
+     */
+    public QueryResult {
+    }
+
+    /** Resultado completo, sin recorte — el caso normal. */
+    public QueryResult(List<String> columns, List<Object[]> rows, List<String> errors) {
+        this(columns, rows, errors, false);
+    }
 }

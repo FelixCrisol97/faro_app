@@ -45,9 +45,14 @@
 
                     <Label text="Fetch size (filas por bloque al leer resultados)" styleClass="field-label" GridPane.rowIndex="3" GridPane.columnIndex="0"/>
                     <TextField fx:id="fetchSizeField" styleClass="text-field" GridPane.rowIndex="3" GridPane.columnIndex="1"/>
+
+                    <Label text="Tope de filas a mostrar en Resultados" styleClass="field-label" GridPane.rowIndex="4" GridPane.columnIndex="0"/>
+                    <TextField fx:id="maxDisplayRowsField" styleClass="text-field" GridPane.rowIndex="4" GridPane.columnIndex="1"/>
                 </GridPane>
                 <Label styleClass="muted" wrapText="true"
-                       text="Fetch size: cuántas filas se traen en una consulta SQL al leer resultados grandes, en vez de esperar a que llegue todo junto. Por ahora solo funciona en SQL Server — en PostgreSQL todavía no tiene efecto."/>
+                       text="Fetch size: cuántas filas se traen por bloque al leer resultados grandes, en vez de esperar a que llegue todo junto. Funciona en los dos motores; en PostgreSQL aplica a los scripts de solo lectura."/>
+                <Label styleClass="muted" wrapText="true"
+                       text="Tope de filas: hasta cuántas filas se cargan en memoria para mostrarlas en Resultados. Si una corrida lo alcanza, el grid lo avisa arriba. No limita la consulta ni la exportación: Exportar CSV siempre baja el resultado completo, leyéndolo de la base y escribiéndolo directo al archivo."/>
             </VBox>
         </Tab>
         <Tab text="Atajos">

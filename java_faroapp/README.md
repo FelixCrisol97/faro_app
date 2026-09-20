@@ -167,11 +167,17 @@ Barra de menú completa (Archivo/Editar/Consulta/Conexiones/Ver/Herramientas/Ayu
 - **Cancelación real** — botón por fila o "Consulta → Cancelar ejecución" (menú), vía `Statement.cancel()`, con respaldo real `KILL <spid>` (SQL Server) / `pg_cancel_backend(pid)` (PostgreSQL) para cuando `cancel()` no alcanza a interrumpir la consulta en el servidor. El respaldo necesita una conexión libre en el pool de esa base — se recomienda `poolSize >= 2` si se depende de él.
 - **Modo solo lectura** — una base marcada como tal rechaza cualquier sentencia que no empiece con SELECT/WITH/SHOW/EXPLAIN/DESCRIBE, antes de tocar la base. Es una heurística por primera palabra clave, no un parser SQL completo.
 - **Explicar plan de ejecución** ("Consulta → Explicar plan…") corre solo contra la primera base marcada — un plan es específico de una base/motor. `EXPLAIN` en PostgreSQL, `SET SHOWPLAN_ALL` en SQL Server.
-- **Fetch size configurable** (Preferencias → Rendimiento) — cuántas filas se traen por bloque al leer resultados grandes. **SQL Server** siempre lo respetó. **PostgreSQL** lo respeta desde el 2026-09-14, pero **solo en scripts de solo lectura**: el driver únicamente abre cursor con el autocommit desactivado, y desactivarlo en un script que escribe lo convertiría en una transacción todo-o-nada (ver "Limitaciones conocidas" para el detalle).
+- **Fetch size configurable** (Preferencias → Rendimiento) — cuántas filas se traen por bloque al leer resultados grandes. Aparte está el **tope de filas a mostrar** (ver "Resultados"), que es cuántas se cargan en memoria; son cosas distintas. **SQL Server** siempre lo respetó. **PostgreSQL** lo respeta desde el 2026-09-14, pero **solo en scripts de solo lectura**: el driver únicamente abre cursor con el autocommit desactivado, y desactivarlo en un script que escribe lo convertiría en una transacción todo-o-nada (ver "Limitaciones conocidas" para el detalle).
 
 ## Resultados
 
 `TableView` de columnas dinámicas (no se conocen hasta que corre la consulta) — con una columna inicial "Base de datos" cuando se consultó más de una a la vez, para poder rastrear el origen de cada fila. "Exportar CSV" corre en segundo plano (no bloquea la ventana), con el mismo criterio de escape de comillas/comas al leer un CSV con "Importar CSV a una tabla". La altura de fila sigue el tamaño de fuente efectivo de la interfaz (ver "Apariencia").
+
+**Resultados grandes** (2026-09-20) — el grid carga hasta **200.000 filas** (Preferencias → Rendimiento). Si una corrida llega a ese tope, la app **deja de leer** ahí: las filas restantes ni siquiera viajan por la red, así que cortar es además más rápido. Un aviso aparece **arriba del grid**, no en la barra de abajo, porque recortar sin que se note sería peor que recortar.
+
+No dice cuántas filas quedaron fuera a propósito: averiguarlo exigiría traerlas, que es justo lo que se evita. Dice "hay más".
+
+**"Exportar CSV" no está atado a ese tope.** Cuando el resultado quedó recortado, exportar **vuelve a leer de las bases y escribe fila por fila al archivo**, sin que el resultado exista en memoria en ningún momento — el tamaño del CSV no tiene relación con la RAM disponible. Corre las bases en paralelo sobre un solo archivo. Como vuelve a consultar, el archivo refleja la base **en ese momento**, que puede diferir de lo que quedó en pantalla si los datos cambiaron en medio.
 
 ## Diálogos
 
@@ -237,7 +243,7 @@ El compilador además corre con `-Xlint:all` (`-serial` y `-this-escape` excluid
 - Sin inferencia de tipo en Importar CSV; sin soporte de campos multilínea entre comillas. La **codificación sí se detecta sola** (2026-09-14): se intenta UTF-8 y, si el archivo no lo es, se relee con la codificación del sistema —la que usa Excel en Windows, normalmente `windows-1252`— y el diálogo dice con cuál lo leyó. Antes fallaba con `MalformedInputException` ante cualquier acento o `ñ`.
 - **Fetch size en PostgreSQL solo aplica a scripts de solo lectura.** Hasta el 2026-09-14 no tenía **ningún** efecto ahí: el driver solo usa cursor si el autocommit está desactivado, y la app nunca lo desactivaba, así que en una consulta de 500,000 filas el driver materializaba el resultado completo antes de retornar y al terminar el bucle el resultado vivía dos veces en memoria. Ahora los scripts de solo lectura contra PostgreSQL sí abren cursor. **Los que escriben siguen en autocommit a propósito**: desactivarlo convertiría un script de varias sentencias en una transacción todo-o-nada, y un fallo en la tercera desharía las dos primeras — un cambio de comportamiento que nadie pidió. SQL Server siempre respetó `fetchSize` y no necesitó nada.
 - **El CSV exportado va en UTF-8 sin BOM**, así que Excel en español lo abre mostrando `Ã±` donde va `ñ` (abrirlo con "Datos → Desde texto" eligiendo UTF-8 sí funciona). Es el lado inverso de la detección al importar, y sigue abierto a propósito: agregar el BOM arregla Excel pero cambia los bytes de **todos** los archivos exportados, y hay herramientas que no lo toleran.
-- El **grid de resultados** no se puede ordenar por columna ni filtrar; el resultado completo se carga en memoria (el `TableView` solo virtualiza qué se dibuja, no qué se guarda). Ver §5.1 de `OPTIMIZACION_RENDIMIENTO.md` para las tres salidas posibles, todas con decisión de producto de por medio.
+- El **grid de resultados** no se puede ordenar por columna ni filtrar. Lo que sí dejó de ser un problema (2026-09-20) es el tamaño: el grid carga como mucho **200.000 filas** (configurable en Preferencias → Rendimiento) y avisa arriba cuando recortó, mientras que **"Exportar CSV" baja el resultado COMPLETO** leyéndolo de la base y escribiéndolo directo al archivo, sin pasar por memoria. Era el techo estructural de §5.1 de `OPTIMIZACION_RENDIMIENTO.md`.
 - Al editor le faltan atajos habituales: comentar/descomentar selección, duplicar línea, ir a línea.
 - ~~El alto de fila del árbol es fijo y no escala con el tamaño de fuente.~~ **Corregido el 2026-09-14**: ahora se calcula igual que el del grid de resultados, a partir del tamaño de fuente efectivo. La fórmula está calibrada para que en el tamaño por defecto siga dando **exactamente los 44px** de antes — ese alto ya se había ajustado a mano tres veces y no debía cambiar; lo que cambia es que en el extremo del slider (+5) las dos líneas de una fila de base ya no se cortan.
 - Ningún test cubre el mecanismo de tamaño de fuente en vivo ni el layout de JavaFX en general — es comportamiento visual, verificado a mano en la app real (o con sondas, ver "Tests automatizados").
@@ -256,6 +262,17 @@ src/main/resources/com/faro/app/
   app.css, theme-light.css, theme-dark.css, fonts/
 src/test/java/  — tests JUnit 5
 ```
+
+**`MainController` delega en cuatro coordinadores** (2026-09-19, hallazgo C1 del análisis) en vez de hacerlo todo él:
+
+| Clase | De qué se encarga |
+|---|---|
+| `data/SessionPersistence` | Cargar la sesión anterior, el autoguardado cada 2 minutos y el guardado al cerrar. |
+| `ui/QueryTabManager` | Las pestañas de consulta: crearlas, su encabezado de dos líneas, guardar, buscar y formatear. |
+| `ui/ConnectionTreeCoordinator` | El estado del árbol que sobrevive a cada reconstrucción: qué bases están marcadas, qué filas quedaron abiertas, el scroll y el buscador. |
+| `ui/ScriptGeneratorCoordinator` | Las seis acciones "Generar…" del explorador de esquema. |
+
+El controlador se queda con lo que el FXML enlaza por nombre (los `@FXML`), los diálogos, y la ejecución de consultas con su exportación — esos dos últimos son los candidatos naturales para seguir dividiendo.
 
 ## Más contexto
 

@@ -39,6 +39,7 @@ public class PreferencesDialogController {
     @FXML private TextField poolSizeField;
     @FXML private TextField queryTimeoutField;
     @FXML private TextField fetchSizeField;
+    @FXML private TextField maxDisplayRowsField;
     @FXML private ComboBox<String> themeCombo;
     @FXML private HBox accentSwatchesBox;
     @FXML private Spinner<Integer> editorFontSizeSpinner;
@@ -62,6 +63,7 @@ public class PreferencesDialogController {
         poolSizeField.setText(String.valueOf(preferences.defaultPoolSize()));
         queryTimeoutField.setText(String.valueOf(preferences.defaultQueryTimeoutSeconds()));
         fetchSizeField.setText(String.valueOf(preferences.fetchSize()));
+        maxDisplayRowsField.setText(String.valueOf(preferences.maxDisplayRows()));
 
         bindPerformanceField(maxConcurrentField, "Bases en paralelo al ejecutar",
                 preferences::setMaxConcurrentDatabases, null);
@@ -71,6 +73,11 @@ public class PreferencesDialogController {
                 preferences::setDefaultQueryTimeoutSeconds, null);
         bindPerformanceField(fetchSizeField, "Fetch size",
                 preferences::setFetchSize, null);
+        // El piso de 1.000 lo aplica AppPreferences#setMaxDisplayRows igual; acá se avisa
+        // en vez de corregir en silencio, para que no parezca que el valor no se guardó.
+        bindPerformanceField(maxDisplayRowsField, "Tope de filas",
+                preferences::setMaxDisplayRows,
+                value -> value < 1_000 ? "el mínimo es 1.000 filas" : null);
 
         themeCombo.getItems().setAll(THEME_LIGHT, THEME_DARK);
         themeCombo.getSelectionModel().select(preferences.isDarkTheme() ? THEME_DARK : THEME_LIGHT);

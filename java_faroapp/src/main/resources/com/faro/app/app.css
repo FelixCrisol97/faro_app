@@ -1409,3 +1409,17 @@
     -fx-padding: 5 9 5 9;
     -fx-font-size: 11.5px;
 }
+
+/* Aviso de resultado recortado (2026-09-20) — aparece sobre el grid cuando la
+   corrida alcanzó el tope de filas en memoria (AppPreferences#maxDisplayRows).
+   Va ARRIBA del grid y no en la barra de estado de abajo a propósito: el
+   usuario ya señaló una vez que los avisos de abajo no se leen ("dime quién
+   lee eso hasta abajo"), y recortar sin que se note sería peor que recortar.
+   Mismos tokens warn-soft que .tree-unrestricted-badge, que es el otro aviso
+   no-bloqueante de la app. */
+.results-truncated-banner {
+    -fx-font-size: 11px;
+    -fx-text-fill: -token-warn-soft-text;
+    -fx-background-color: -token-warn-soft;
+    -fx-padding: 6 10 6 10;
+}

@@ -193,7 +193,13 @@
             <StackPane>
                 <TabPane styleClass="results-tabs" tabClosingPolicy="UNAVAILABLE">
                     <Tab fx:id="resultsTab" text="Resultados">
-                        <StackPane fx:id="resultsContainer"/>
+                        <!-- VBox y no StackPane (2026-09-20): el aviso de resultado
+                             recortado va ARRIBA del grid, no encima. Un StackPane lo
+                             superpondría tapando las primeras filas. -->
+                        <VBox fx:id="resultsContainer" spacing="0">
+                            <Label fx:id="resultsTruncatedBanner" styleClass="results-truncated-banner"
+                                   maxWidth="Infinity" wrapText="true" visible="false" managed="false"/>
+                        </VBox>
                     </Tab>
                     <Tab fx:id="executionTab" text="Ejecución">
                         <StackPane fx:id="executionContainer"/>
