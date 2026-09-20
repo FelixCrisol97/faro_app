@@ -278,6 +278,27 @@ Cualquiera de las tres es un cambio de UX que te toca decidir a ti, no algo
 que se pueda "optimizar" sin tu decisión — por eso quedan como
 recomendación, no como código ya hecho.
 
+> **Cerrado el 2026-09-20** (rama `perf/resultados-grandes`, hallazgo A16 de
+> `ANALISIS_OPTIMIZACION_ESTRUCTURA.md`). El usuario eligió, y se implementaron
+> **dos de las tres** juntas, porque una sola no alcanzaba:
+>
+> - **La segunda** (tope configurable antes de cargar en memoria): 200.000 filas
+>   por defecto, y al alcanzarlo la app **deja de leer** — las filas restantes ni
+>   siquiera viajan por la red. La pregunta que quedaba abierta acá ("¿el usuario
+>   pierde datos sin darse cuenta?") se responde con un aviso **arriba del grid**,
+>   no en la barra de abajo, que además dice que exportar sí trae todo.
+> - **La tercera** (exportar en streaming desde el `ResultSet`): no como un botón
+>   aparte, sino como el camino que toma "Exportar CSV" cuando el resultado quedó
+>   recortado. Así la respuesta a "¿exporta solo la página visible?" es **no,
+>   exporta todo**, sin que el usuario tenga que elegir un flujo distinto.
+>
+> **La primera (paginar con siguiente/anterior) se descartó**, y no por costo: los
+> editores conocidos sí paginan, pero lo hacen sosteniendo un cursor abierto
+> mientras el usuario navega. En PostgreSQL eso exige mantener la transacción
+> abierta, o sea dejar `idle in transaction` contra la base del cliente —
+> multiplicado por cada bodega marcada. Ese riesgo no existe en una herramienta
+> que ataca una base a la vez, pero sí en esta.
+
 ### 5.2 `CsvImportService` carga el CSV completo en memoria antes de insertar
 
 `CsvParser.parse(file)` lee el archivo entero a `List<List<String>>` antes de

@@ -172,10 +172,10 @@ implementado siguen abiertos.
 
 ---
 
-## Resumen — 39 hallazgos
+## Resumen — 40 hallazgos
 
-Contados contra las tablas de abajo, no de memoria: **15 de §A + 13 de §B + 11 de
-§C**. De los 39, **32 corregidos** (C1 y A15 se sumaron el 2026-09-19, en la rama
+Contados contra las tablas de abajo, no de memoria: **16 de §A + 13 de §B + 11 de
+§C**. De los 40, **33 corregidos** (C1 y A15 el 2026-09-19; A16 el 2026-09-20, en la rama
 `refactor/dividir-main-controller`); C10 documentado; B13 cerrado como decisión
 consciente; B11 descartado; C11 sin acción (era un error de este mismo documento);
 y **3 abiertos** — C2 y C3 a propósito (ver el final del documento) y A14, que
@@ -200,6 +200,7 @@ apareció al revisar la documentación el 2026-09-15. §D se cuenta aparte, son 
 | A12 | Baja | `Main.stop()` truena con NPE si `start()` falló | `Main:78` | **Corregido** |
 | A13 | **Alta** | `fetchSize` no tiene efecto en PostgreSQL: sin `autoCommit = false` el driver materializa el resultado completo — salió del uso real, no de este análisis | `QueryExecutionService:runOne` | **Corregido** — cursor solo en scripts de solo lectura |
 | A14 | Baja | El CSV **exportado** va en UTF-8 **sin BOM**, así que Excel en español lo abre mostrando `Ã±` en vez de `ñ` — es el otro lado de A8, y estaba escrito solo en prosa dentro de ese hallazgo, sin figurar en ninguna tabla | `MainController:1390` (era :1832 antes de dividir la clase el 2026-09-19) | **Abierto** — decisión de producto, ver abajo |
+| A16 | **Alta** | El techo de memoria del grid: `TableView` virtualiza qué se RENDERIZA, no qué se GUARDA, así que el resultado completo vivía en el heap — la causa del `OutOfMemoryError` con 6 bodegas × 500.000 filas. Es el techo estructural de `OPTIMIZACION_RENDIMIENTO.md` §5.1 | `QueryExecutionService`, `MainController#onExportResultsCsv` | **Corregido** — tope de filas en pantalla + exportación en streaming (rama `perf/resultados-grandes`) |
 | A15 | Media | El candado del autoguardado quedaba trabado **para siempre** si la captura de pestañas lanzaba antes de arrancar el hilo de fondo: la app dejaba de autoguardar el resto de la sesión avisándolo solo en `DEBUG`. Preexistente (idéntico en `62bbe09`); encontrado al revisar el código del refactor de C1 | `SessionPersistence:autosave` | **Corregido** — `try/finally` y un test con sonda |
 
 ### Rendimiento (§B)

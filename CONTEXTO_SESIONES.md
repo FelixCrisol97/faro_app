@@ -4062,3 +4062,137 @@ Y un hallazgo abierto de código, ya numerado y con su fila en el análisis:
 **A14**, el CSV exportado sin BOM que Excel en español abre con `Ã±`. No se arregló a
 propósito: es una línea, pero cambia los bytes de **todos** los archivos exportados y
 hay herramientas que no toleran el BOM.
+
+---
+
+## 2026-09-20 — El techo de memoria de los resultados grandes, en la rama `perf/resultados-grandes`
+
+Vino de una conversación, no de un pedido de código: *"¿qué lenguaje recomiendas
+para tener mejor rendimiento, o con Java está ok?"*, después *"¿cómo funcionan los
+editores SQL?, hay uno llamado Beekeeper"*, y al final *"quiero que tenga buen
+rendimiento en todo como los editores SQL famosos"*.
+
+**La respuesta sobre el lenguaje fue que Java está bien**, con la evidencia de este
+mismo proyecto: en las tres rondas de optimización, **ni un solo hallazgo real fue
+"el JVM es lento"**. Todos fueron copias duplicadas en memoria, trabajo pesado en el
+hilo de UI, una condición mal puesta en el driver y recorridos redundantes. Un Faro
+en C++ con los mismos bugs habría tenido los mismos síntomas. Además esta app es
+**I/O-bound** (red contra los motores), no CPU-bound, y cambiar de lenguaje reabriría
+justo el problema que motivó salir de Flutter: los drivers maduros para los dos
+motores.
+
+Como "rendimiento en todo" no es un solo interruptor, se le plantearon cuatro áreas
+concretas con su estado real y eligió: **el grid de resultados grandes**.
+
+### El reencuadre, y la complicación que Faro tiene y los famosos no
+
+Los editores conocidos **tampoco** dejan scrollear libremente por 3 millones de
+filas: DBeaver trae ~200 y pide más, DataGrip pagina, pgAdmin y TablePlus también.
+Paginar no es el premio de consolación frente a ellos — **es lo que ellos hacen**.
+
+Pero hay algo que el consejo genérico no cubre: el cursor de PostgreSQL **exige una
+transacción abierta** (`autoCommit=false`, lo que activó A13). Sostener el cursor
+mientras el usuario navega deja un `idle in transaction` contra la base del cliente,
+que bloquea `VACUUM` y retiene locks. Ellos atacan **una** base a la vez; Faro ataca
+seis en paralelo. Por eso **se descartó el fetch incremental por scroll**, que es el
+más vistoso, y se eligieron las otras dos salidas de §5.1 de
+`OPTIMIZACION_RENDIMIENTO.md`.
+
+El razonamiento que decidió cuáles: mirando el uso real que documenta todo este
+historial, **el caso de 3 millones de filas siempre es un caso de exportar, no de
+mirar**. Nadie lee 3M filas en pantalla — se corre contra las bodegas, se revisa si
+cuadra, y se exporta.
+
+### Lo que se hizo
+
+**Las dos piezas van juntas porque están acopladas**: el tope solo es seguro porque
+exportar dejó de depender de lo que está en pantalla. Si hubiera entrado primero el
+tope, "Exportar" habría empezado a entregar archivos incompletos sin avisar.
+
+**1. Exportación en streaming** (`query/CsvExportService`) — lee del `ResultSet` y
+escribe al archivo fila por fila, sin lista intermedia. La memoria queda **plana** sin
+importar si son mil filas o treinta millones. Tres decisiones dentro:
+
+- **En paralelo**, no una base tras otra: secuencial habría multiplicado por 6 el
+  tiempo de una exportación que ya es larga.
+- **Por lotes de 512 filas bajo candado**: tomar el candado por fila sería la
+  operación más cara de todo el proceso con millones de filas. El costo en memoria
+  sigue acotado — un lote por hilo, no un resultado por hilo.
+- **El encabezado lo escribe el primer hilo que llega, dentro del mismo bloque
+  sincronizado que su lote.** Si fuera aparte, otro hilo podría colar filas antes del
+  encabezado.
+
+**2. Tope de filas en pantalla** (`AppPreferences#maxDisplayRows`, 200.000 por
+defecto, configurable en Preferencias → Rendimiento). Al alcanzarlo la app **deja de
+leer**, así que el resto de las filas ni siquiera viaja por la red: **cortar es
+además más rápido**. A propósito **no se cuenta cuántas quedaron fuera** — saberlo
+exigiría traerlas, que es justo lo que se evita. El aviso dice "hay más", no un total
+inventado.
+
+**Nunca en silencio.** El aviso va en un banner **arriba del grid**, no en la barra
+de estado de abajo, porque el usuario ya señaló una vez que los mensajes de abajo no
+se leen ("dime quién lee eso hasta abajo"). Y dice explícitamente que Exportar CSV sí
+baja el resultado completo.
+
+### Un bug que encontré en mi propio código antes de que corriera
+
+El streaming recorría **todas** las sentencias del script y escribía las filas de
+cada `ResultSet` concatenadas bajo un solo encabezado. `QueryExecutionService`, en
+cambio, se queda solo con el resultado de la **última** sentencia que devuelve uno —
+que es lo que el grid muestra. Dos consecuencias:
+
+- Un script con dos `SELECT` de columnas distintas habría producido un CSV
+  **corrupto**: filas de dos formas bajo un encabezado que solo describe una.
+- Y aunque coincidieran, el archivo no habría sido lo que el usuario vio.
+
+El arreglo necesita un `Statement` **por** sentencia y no uno reusado: ejecutar sobre
+el mismo `Statement` invalida el `ResultSet` anterior, así que no hay forma de llegar
+al final del script sabiendo cuál era el último sin haberlo leído ya. Cada
+`ResultSet` es un cursor, no un buffer, así que tenerlos abiertos un momento no carga
+filas en memoria.
+
+### Dos cosas que ya estaban mal y salieron al pasar por ahí
+
+- **Las dos exportaciones escribían finales de línea distintos.** La vieja cerraba
+  con `writer.newLine()` (CRLF en Windows) y la nueva con `\n`: el mismo resultado
+  habría salido distinto según el camino. Ahora las dos pasan por
+  `CsvWriter.appendRow`.
+- **El texto de ayuda de Preferencias mentía**: decía que fetch size "solo funciona
+  en SQL Server — en PostgreSQL todavía no tiene efecto", falso desde A13
+  (2026-09-14).
+
+El escapado CSV salió de `MainController` a `query/CsvWriter`, junto a `CsvParser`:
+es una regla del formato, no del controlador, y ahora hay dos escritores. Sus 6 tests
+se mudaron con él.
+
+### Verificación
+
+**196/196 tests** (eran 191), cero advertencias, recompilación desde cero. Lo nuevo
+con test: `remainingCapacity` —la aritmética que corta la lectura, donde un signo
+cambiado no recortaría nada (y volvería el `OutOfMemoryError`) o recortaría todo (y
+el grid saldría vacío)— y `CsvWriter.appendRow`.
+
+Se reusó además la verificación del contrato con el FXML que salió de la iteración 6
+del refactor: se tocaron dos FXML, y eso **no falla al compilar** sino al abrir la
+ventana. Los `fx:id` y manejadores nuevos resuelven. Y el propio
+`StyleClassCoverageTest` validó la clase CSS nueva del banner, que es justo para lo
+que se escribió.
+
+**Un tropiezo del proceso, con su lección repetida:** un `mvn -o compile` dio
+`BUILD SUCCESS` con el código roto. Maven solo recompiló los dos archivos tocados y
+nunca miró `MainController`, que llamaba a la firma vieja. Es exactamente lo que el
+README advierte sobre el compilado incremental, y volvió a pasar. Desde ahí, cada
+verificación fue con `target/classes` borrado.
+
+### Estado de la rama
+
+`perf/resultados-grandes` sale de **`refactor/dividir-main-controller`**, no de
+`main` — la primera vez se creó desde `main` por error y se rehízo. Se verificó antes
+que las tres zonas que toca (`QueryExecutionService`, `ResultsTableFactory`, el
+exportador de `MainController`) eran **byte a byte idénticas** en las dos ramas, así
+que el trabajo no fabrica conflictos con el refactor.
+
+**Sin mezclar**, como el refactor. Y lo que falta para cerrar esto **no es código**:
+medir el pico de memoria real contra `bodegas-test` con VisualVM, corriendo algo que
+pase de las 200.000 filas, antes y después. Igual que con el cursor de A13, esa
+medición pide una base con volumen y la corre el usuario.
