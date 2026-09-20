@@ -351,3 +351,173 @@ la tabla y las píldoras. No cubre: el estado vacío (antes de ejecutar), el est
 importar CSV) ni el panel de Diagnóstico/Ejecución en detalle — esos ya tienen su propio
 tratamiento visual en `app.css` (`.exec-*`, `.diagnostic-*`) y no se tocaron aquí; si el
 equipo quiere que se detallen con el mismo nivel de precisión, es un documento aparte.
+
+---
+
+## 10. Guía de implementación en `java_faroapp` — dónde toca cada cambio
+
+Las secciones 1-9 dicen **qué** debe verse. Esta dice **dónde**, contra el código real de
+`java_faroapp` tal como está hoy (`ConnectionTreeCell.java`, `AccentPalette.java`,
+`app.css`, `theme-light.css`/`theme-dark.css`), para que nadie tenga que adivinar en qué
+archivo entra cada regla. Verificado leyendo esas clases, no supuesto.
+
+### 10.1 Tokens de color por motor — `theme-light.css` / `theme-dark.css`
+Agregar al bloque `.root` de cada archivo, con el mismo patrón que ya usan
+`-token-success-soft`/`-token-success-soft-text`:
+
+```css
+/* theme-light.css */
+-token-engine-pg-bg: rgba(51,103,145,.12);
+-token-engine-pg-text: #2C5877;
+-token-engine-mssql-bg: rgba(204,41,39,.12);
+-token-engine-mssql-text: #B91C1C;
+
+/* theme-dark.css */
+-token-engine-pg-bg: rgba(96,165,250,.18);
+-token-engine-pg-text: #93C5FD;
+-token-engine-mssql-bg: rgba(248,113,113,.18);
+-token-engine-mssql-text: #FCA5A5;
+```
+
+### 10.2 Insignia de motor a color — corrección importante sobre el mockup
+El mockup dibuja la insignia como un cuadrito fijo de 22×22 con una letra ("Pg"/"MS").
+**Eso no coincide con el dato real**: `DbEngine.badge()` (`model/DbEngine.java`) devuelve
+`"PG"` o `"MSSQL"` — 5 caracteres, no entran en un cuadrado fijo — y
+`ConnectionTreeCell.updateDatabaseRow()` ya hace `engineBadge.setText(db.engine().badge())`
+tal cual. **No cambien el texto del badge** (sería un cambio de producto, no de estilo):
+mantengan `.tree-engine-badge` como una píldora de ancho automático (como ya es hoy) y
+solo agréguenle color por motor. En `app.css`, donde hoy está:
+
+```css
+.tree-engine-badge {
+    -fx-background-color: -token-surface-alt;
+    /* ... */
+}
+```
+
+agregar dos clases nuevas junto a esa:
+
+```css
+.tree-engine-badge-postgres {
+    -fx-background-color: -token-engine-pg-bg;
+    -fx-text-fill: -token-engine-pg-text;
+}
+.tree-engine-badge-mssql {
+    -fx-background-color: -token-engine-mssql-bg;
+    -fx-text-fill: -token-engine-mssql-text;
+}
+```
+
+Y en `ConnectionTreeCell.updateDatabaseRow()` (cerca de la línea 922, junto a
+`engineBadge.setText(...)`), alternar la clase igual que ya hace el candado con
+`tree-mode-icon-unrestricted` (línea ~942-949 — copiar ese mismo patrón de "solo mutar si
+cambió", no reescribir la lista de estilos en cada repintado):
+
+```java
+boolean isPostgres = db.engine() == DbEngine.POSTGRES;
+String engineStyleClass = isPostgres ? "tree-engine-badge-postgres" : "tree-engine-badge-mssql";
+// quitar la clase contraria si estaba puesta, agregar la que corresponde — solo si cambió
+```
+
+### 10.3 Orden de la insignia en la fila — decisión pendiente del equipo
+El mockup pone la insignia junto al punto de estado, **antes** del nombre. El código
+actual la pone en `trailingIconsBox`, **después** del nombre, junto al candado y los
+botones de editar/eliminar (`ConnectionTreeCell.java`, línea ~425:
+`trailingIconsBox = new HBox(6, modeIcon, engineBadge, editButton, deleteButton)`).
+Dos caminos, ambos válidos:
+- **Igualar el mockup**: mover `engineBadge` a `leadingIconsBox` (línea ~423):
+  `leadingIconsBox = new HBox(6, checkBox, statusDot, engineBadge);` y sacarlo de
+  `trailingIconsBox`. Cambio de una línea.
+- **Dejarlo donde está**: aplicar solo el color (10.2) sin mover el nodo — más barato,
+  cero riesgo de romper el alineado ya calibrado a mano (ver los comentarios de
+  `leadingIconsBox`/`trailingIconsBox` en esa misma clase, que documentan varias rondas
+  de ajuste fino de alineación).
+
+Que decida el equipo — el mockup muestra la intención, no es obligatorio mover el nodo
+para "seguirlo al pie de la letra" en este punto puntual.
+
+### 10.4 Candado siempre visible con color según el modo — ya está hecho
+Este punto del rediseño **ya existe tal cual en el código actual**
+(`modeIcon` + clase `tree-mode-icon-unrestricted`, `ConnectionTreeCell.java` líneas
+940-949, con sus tokens ya en `app.css`). No hace falta ningún cambio acá — es la única
+pieza del mockup que el código de hoy iguala al 100%, se las señalo para que no le
+dediquen tiempo de más.
+
+### 10.5 Revelar editar/eliminar solo al pasar el mouse
+Hoy `editButton`/`deleteButton` son siempre visibles (`.tree-edit-button` en `app.css`,
+sin ninguna regla de hover a nivel de fila).
+
+**Camino recomendado — CSS puro, sin tocar `ConnectionTreeCell.java`.** JavaFX sí soporta
+selectores de pseudo-clase + descendiente (ya lo usan en este mismo archivo:
+`.rail-button:selected .icon-stroke`), así que alcanza con agregar a `app.css`:
+
+```css
+.tree-edit-button {
+    -fx-opacity: 0;
+}
+.connection-tree .tree-cell:filled:hover .tree-edit-button {
+    -fx-opacity: 1;
+}
+```
+
+**Limitación real a comunicar al equipo:** JavaFX no tiene `transition` declarativo en
+CSS — con la regla de arriba el ícono aparece y desaparece de golpe, no con el fundido de
+120ms del mockup. Para el fundido habría que agregar un `FadeTransition` en Java sobre
+`editButton`/`deleteButton`, enganchado a `databaseRow.setOnMouseEntered`/
+`setOnMouseExited` — el mismo patrón que ya existe en esta clase para `inUsePulse`
+(líneas 228 y 1009-1019, cópienlo de ahí). Mi recomendación: arrancar con la versión
+CSS-only (≈15 minutos, ya da el 90% del efecto) y dejar el fundido como mejora opcional
+después, no como parte de un primer corte.
+
+Nota de tamaño: `.tree-edit-button` hoy mide 20×20px con radio 5; el mockup lo dibujó a
+22×22 con radio 6. Diferencia mínima, no vale la pena tocarla solo por esto.
+
+### 10.6 Tarjetas con sombra (panel de Consulta / Resultados)
+Es el cambio más grande del rediseño y el único que toca FXML, no solo CSS: hoy el
+contenido central es superficie plana contra `-token-background`, sin ningún contenedor
+de tarjeta.
+
+1. En `main-view.fxml`, envolver el bloque del editor SQL y el bloque de resultados —
+   cada uno por separado — en un `VBox` (o `StackPane`) nuevo con `styleClass="query-card"`
+   / `styleClass="results-card"`.
+2. En `app.css`, agregar:
+   ```css
+   .query-card, .results-card {
+       -fx-background-color: -token-surface;
+       -fx-background-radius: 14; /* --radius-container */
+       -fx-effect: dropshadow(gaussian, rgba(15,23,42,0.06), 12, 0, 0, 4);
+   }
+   ```
+   **Nota de fidelidad:** `--shadow-sm` del prototipo son en realidad DOS sombras
+   apiladas (`0 1px 2px rgba(...), 0 4px 12px rgba(...)`); `-fx-effect` en una sola
+   línea de CSS solo admite un efecto simple — replicar el doble reborde exacto
+   requeriría anidar `DropShadow` en Java (`setInput(otroDropShadow)`). Recomiendo
+   aproximar con la sombra única de arriba, ya calibrada para verse parecida — la
+   diferencia es casi imperceptible y no vale el costo de mantenimiento de hacerlo en
+   Java.
+3. Revisar en `MainController.java` si algo referencia por `fx:id` los contenedores que
+   se estén envolviendo, para no romper esos bindings al anidar un nivel más de FXML.
+
+### 10.7 Selector de acento en la toolbar
+No hace falta construir nada nuevo: la app **ya tiene** los 7 acentos completos
+(`AccentPalette`, incluyendo "negro", que el mockup no mostró porque solo cubrió los 6
+cromáticos). Si quieren un acceso rápido en la toolbar además del panel de Preferencias
+existente, es cuestión de reusar `AccentPalette.swatchHex(name)` para pintar los
+círculos — agregando el 7º ("negro") para que el atajo cubra lo mismo que ya soporta la
+app, no menos.
+
+### 10.8 Resumen de riesgo y esfuerzo por cambio
+
+| Cambio | Archivos | Riesgo | Esfuerzo estimado |
+| --- | --- | --- | --- |
+| Tokens de color por motor (10.1) | `theme-light.css`, `theme-dark.css` | Bajo | 10 min |
+| Insignia de motor a color (10.2) | `app.css`, `ConnectionTreeCell.java` | Bajo | 30 min |
+| Reordenar insignia (10.3, opcional) | `ConnectionTreeCell.java` | Bajo | 5 min |
+| Revelado hover editar/eliminar, sin fundido (10.5) | `app.css` | Bajo | 15 min |
+| Revelado hover con fundido (10.5, opcional) | `ConnectionTreeCell.java` | Medio | 1-2 h |
+| Tarjetas con sombra (10.6) | `main-view.fxml`, `app.css`, revisar `MainController.java` | Medio-alto | 2-4 h |
+| Acento "negro" en atajo de toolbar (10.7, opcional) | FXML + controller de la toolbar | Bajo | 20 min |
+
+Orden sugerido: 10.1 → 10.2 → 10.5 (sin fundido) primero — son los cambios de menor
+riesgo y ya dejan la mayor parte del efecto visual del rediseño. 10.6 (tarjetas) al final,
+por ser el único que toca layout de FXML y el más fácil de romper si se apura.
