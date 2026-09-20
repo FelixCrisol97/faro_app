@@ -3789,8 +3789,8 @@ Más `9df87d6`, que es la documentación de todo esto.
 **190/190 tests** (eran 158), cero advertencias con `-Xlint:all`, recompilación desde
 cero en cada paso.
 
-**Estado de la rama:** subida a `origin/refactor/dividir-main-controller`, **5 commits
-por delante de `main` y sin mezclar** — a la espera de la prueba de humo del log (ver
+**Estado de la rama:** subida a `origin/refactor/dividir-main-controller`, **sin mezclar**
+(4 commits del refactor más los de documentación y el arreglo de A15) — a la espera de la prueba de humo del log (ver
 el final de esta entrada). `main` sigue en `62bbe09`.
 
 ### Lo que de verdad ganó, que no son las líneas
@@ -4055,7 +4055,7 @@ Tres cosas, y las tres son suyas, no del asistente:
 | Qué | Dónde está escrito | Qué hace falta |
 |---|---|---|
 | **La prueba de humo del log** del refactor C1 | Esta entrada, "Lo que falta, y es del usuario" | Abrir la app, expandir una base, correr contra dos, exportar, cambiar de pestaña, cerrar, y comparar `logs/faro-app.log` con el de antes. Es la red de seguridad real del refactor |
-| **La rama `refactor/dividir-main-controller`** | Esta entrada, "Estado de la rama" | Está subida, 5 commits por delante de `main`, **sin mezclar**. Falta decidir si se mezcla o se abre un PR — razonablemente, después de la prueba de humo |
+| **La rama `refactor/dividir-main-controller`** | Esta entrada, "Estado de la rama" | Está subida y **sin mezclar**. Falta decidir si se mezcla o se abre un PR — razonablemente, después de la prueba de humo |
 | **El punto 4 de los Puntos obligatorios** ("nunca correr la app") | Entrada del 2026-09-15, hueco 4 | Contradice lo que este archivo registra tres veces. O gana la regla y la verificación del empaquetado se limita a lo que se puede comprobar sin arrancar nada, o se le escribe una excepción angosta. **La regla es del usuario y solo él puede cambiarla** |
 
 Y un hallazgo abierto de código, ya numerado y con su fila en el análisis:
