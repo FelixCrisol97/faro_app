@@ -3,6 +3,7 @@ package com.faro.app;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -24,7 +25,6 @@ import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.UUID;
-import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -45,6 +45,8 @@ import com.faro.app.model.DbEngine;
 import com.faro.app.model.Server;
 import com.faro.app.model.ServerMode;
 import com.faro.app.query.ConnectionPoolManager;
+import com.faro.app.query.CsvExportService;
+import com.faro.app.query.CsvWriter;
 import com.faro.app.query.CsvFileNamer;
 import com.faro.app.query.ExecutionStatus;
 import com.faro.app.query.QueryExecutionService;
@@ -74,7 +76,6 @@ import javafx.animation.PauseTransition;
 import javafx.animation.Interpolator;
 import javafx.animation.RotateTransition;
 import javafx.application.Platform;
-import javafx.beans.binding.Bindings;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.concurrent.Task;
@@ -218,7 +219,9 @@ public class MainController {
     private Button closeFindBarButton;
 
     @FXML
-    private StackPane resultsContainer;
+    private VBox resultsContainer;
+    @FXML
+    private Label resultsTruncatedBanner;
 
     @FXML
     private StackPane executionContainer;
@@ -307,6 +310,17 @@ public class MainController {
     /** Alias de la base (o "N-bases" si la última corrida tocó varias) y texto SQL que produjeron el resultado que hay ahora mismo en {@link #resultsTable} — insumos para el nombre sugerido de {@link #onExportResultsCsv()}, ver {@link CsvFileNamer}. */
     private String lastResultDatabaseLabel = "";
     private String lastResultSql = "";
+    /**
+     * Las bases de la última corrida y si su resultado quedó recortado por el tope de
+     * filas en memoria (2026-09-20) — los dos insumos que necesita "Exportar CSV" para
+     * volver a leer de la base en vez de exportar lo que quedó en pantalla.
+     *
+     * <p>Vacía cuando el resultado NO vino de una corrida re-ejecutable: "Explicar
+     * plan" y "Comparar objeto" producen filas que no salen de correr este SQL contra
+     * estas bases, así que para ellas exportar sigue leyendo de la tabla.
+     */
+    private List<DatabaseEntry> lastResultDatabases = List.of();
+    private boolean lastResultTruncated;
     /** Hora en que arrancó la última corrida — se perdió al quitar los `log(...)` duplicados de {@link #onRunQuery()}, el usuario lo notó, se movió al encabezado de Ejecución en vez de repetirlo en el log. */
     private String lastExecutionStartTime = "";
     /**
@@ -504,6 +518,9 @@ public class MainController {
 
         resultsTable = ResultsTableFactory.create(preferences.fontScaleDelta());
         resultsContainer.getChildren().add(resultsTable);
+        // El grid se queda con todo el alto sobrante; el banner solo ocupa lo suyo
+        // cuando está visible (y nada cuando no, por managed=false en el FXML).
+        VBox.setVgrow(resultsTable, Priority.ALWAYS);
         exportCsvButton.setDisable(true);
 
         exportSpinAnimation = new RotateTransition(Duration.seconds(0.8), exportSpinner);
@@ -1356,6 +1373,16 @@ public class MainController {
             return;
         }
 
+        // Resultado recortado ⇒ exportar leyendo de la base, no de la tabla (2026-09-20).
+        // Lo que está en pantalla NO es el resultado completo, así que exportarlo sería
+        // entregar un archivo incompleto sin que se note — el peor de los dos errores
+        // posibles acá. Ver CsvExportService: lee y escribe fila por fila, así que el
+        // tamaño del archivo no tiene nada que ver con la memoria disponible.
+        if (lastResultTruncated && !lastResultDatabases.isEmpty()) {
+            exportStreamingToCsv(file);
+            return;
+        }
+
         // Encabezados en el hilo de la UI (barato, solo nombres de
         // columna) — pero YA NO se copia todo el resultado a una lista
         // aparte de strings escapados antes de arrancar el Task. Con un
@@ -1387,33 +1414,24 @@ public class MainController {
         Task<Void> task = new Task<>() {
             @Override
             protected Void call() throws IOException {
-                try (BufferedWriter writer = Files.newBufferedWriter(file.toPath())) {
+                try (BufferedWriter writer = Files.newBufferedWriter(file.toPath(), StandardCharsets.UTF_8)) {
                     StringBuilder line = new StringBuilder();
-                    // Los encabezados también van escapados (2026-09-10, hallazgo A10) —
-                    // antes se unían con String.join sin escapar, así que un alias con coma
-                    // (SELECT total AS "importe, IVA") partía la línea de encabezado en dos
-                    // columnas y desalineaba el archivo entero.
-                    for (String header : headers) {
-                        if (line.length() > 0) {
-                            line.append(',');
-                        }
-                        appendCsvEscaped(line, header);
-                    }
+                    // Las dos exportaciones (esta, desde la tabla, y la de
+                    // CsvExportService, desde la base) escriben con el MISMO
+                    // CsvWriter.appendRow. Antes esta armaba la fila a mano y cerraba con
+                    // writer.newLine(), que en Windows escribe CRLF mientras que la otra
+                    // escribe \n: el mismo resultado exportado por un camino o por el otro
+                    // habría salido con finales de línea distintos. Los encabezados también
+                    // van escapados (hallazgo A10) — un alias con coma partía la línea.
+                    CsvWriter.appendRow(line, headers.toArray());
                     writer.write(line.toString());
-                    writer.newLine();
 
                     int written = 0;
                     int total = rows.size();
                     for (Object[] row : rows) {
                         line.setLength(0);
-                        for (int i = 0; i < row.length; i++) {
-                            if (i > 0) {
-                                line.append(',');
-                            }
-                            appendCsvEscaped(line, row[i]);
-                        }
+                        CsvWriter.appendRow(line, row);
                         writer.write(line.toString());
-                        writer.newLine();
                         written++;
                         if (written % 500 == 0) {
                             updateMessage(written + " de " + total + " fila(s)…");
@@ -1452,42 +1470,50 @@ public class MainController {
     }
 
     /**
-     * Escribe {@code value} escapado como campo CSV directo sobre {@code out}, sin
-     * crear ninguna cadena intermedia.
+     * Exportación que NO pasa por la tabla: vuelve a leer de las bases y escribe directo
+     * a disco (2026-09-20). Es el camino cuando el resultado en pantalla quedó recortado
+     * por el tope de filas en memoria — ver {@link CsvExportService}, donde está el
+     * detalle de por qué la memoria queda plana.
      *
-     * <p><b>Por qué no devuelve un {@code String}</b> (2026-09-10, hallazgo B6 de
-     * {@code ANALISIS_OPTIMIZACION_ESTRUCTURA.md}): el {@code csvEscape} anterior sí lo
-     * hacía, y en el caso que necesita comillas armaba DOS cadenas más por celda (el
-     * {@code replace} y la concatenación). Para el resultado combinado que este
-     * proyecto maneja de verdad —3 millones de filas × 10 columnas— eso son decenas de
-     * millones de cadenas temporales que mueren de inmediato, y justo cuando el heap ya
-     * está ocupado con el resultado completo cargado. Acá el caso común (sin caracteres
-     * especiales) no asigna NADA: se copia al buffer que ya existe.
-     *
-     * <p>{@code null} se escribe como campo vacío, igual que antes. {@code \r} entra en
-     * la condición (hallazgo A10) — antes solo se miraban {@code ,}, {@code "} y
-     * {@code \n}, así que un valor con retorno de carro suelto (pasa con datos venidos
-     * de sistemas viejos) rompía la fila sin comillas que la protegieran.
+     * <p><b>Vuelve a ejecutar la consulta</b>, así que el archivo refleja la base en este
+     * momento y no el instante en que se corrió. Con datos que cambian, puede diferir de
+     * lo que se ve arriba. Es el costo inevitable de no haber guardado en memoria lo que
+     * justamente no cabía.
      */
-    static void appendCsvEscaped(StringBuilder out, Object value) {
-        if (value == null) {
-            return;
-        }
-        String text = value.toString();
-        if (text.indexOf(',') < 0 && text.indexOf('"') < 0
-                && text.indexOf('\n') < 0 && text.indexOf('\r') < 0) {
-            out.append(text);
-            return;
-        }
-        out.append('"');
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c == '"') {
-                out.append('"');
+    private void exportStreamingToCsv(File file) {
+        Task<CsvExportService.ExportSummary> task = CsvExportService.export(
+                lastResultDatabases, credentials, pool, lastResultSql,
+                preferences.maxConcurrentDatabases(), preferences.fetchSize(), file.toPath());
+
+        task.setOnRunning(e -> {
+            statusLabel.setText("Exportando el resultado completo a " + file.getName() + "…");
+            exportSpinnerLabel.setText("Exportando todo…");
+            showExportSpinner(true);
+        });
+        task.setOnSucceeded(e -> {
+            CsvExportService.ExportSummary summary = task.getValue();
+            String mensaje = "Exportado completo: " + file.getName()
+                    + " (" + String.format("%,d", summary.rowsWritten()) + " fila(s))";
+            statusLabel.setText(mensaje);
+            log(summary.errors().isEmpty() ? LogLevel.INFO : LogLevel.WARN, mensaje
+                    + (summary.errors().isEmpty() ? "" : " — " + summary.errors().size() + " base(s) con error"));
+            for (String error : summary.errors()) {
+                log(LogLevel.ERROR, "Exportar — " + error);
             }
-            out.append(c);
-        }
-        out.append('"');
+            showExportSpinner(false);
+            refreshStatusBar();
+        });
+        task.setOnFailed(e -> {
+            statusLabel.setText("Error al exportar: " + task.getException().getMessage());
+            logger.error("exportStreamingToCsv: falló exportando a {}", file.getAbsolutePath(), task.getException());
+            log(LogLevel.ERROR, "Error al exportar a " + file.getName() + ": " + task.getException().getMessage());
+            showExportSpinner(false);
+            refreshStatusBar();
+        });
+
+        Thread thread = new Thread(task, "faro-csv-export");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     /** Muestra/oculta el spinner de "Exportando…" de la barra de estado, igual que faro-java-prototipo.html — antes solo había texto plano, sin ninguna señal de que algo seguía en curso. */
@@ -1629,7 +1655,8 @@ public class MainController {
 
         Task<QueryResult> task = QueryExecutionService.execute(
                 new ArrayList<>(selected), credentials, pool, statusByDatabaseId, sql,
-                preferences.maxConcurrentDatabases(), preferences.fetchSize(), engineVersions);
+                preferences.maxConcurrentDatabases(), preferences.fetchSize(),
+                preferences.maxDisplayRows(), engineVersions);
         // Cambio de pestaña automático, a pedido del usuario: Ejecución
         // apenas arranca (para que se vea la corrida en vivo, mismo criterio
         // que "el usuario tiene que ver que se está cargando la
@@ -1681,6 +1708,9 @@ public class MainController {
             updateResultsSummary(result.rows().size());
             lastResultDatabaseLabel = resultDatabaseLabel;
             lastResultSql = sql;
+            lastResultDatabases = List.copyOf(selected);
+            lastResultTruncated = result.truncated();
+            showTruncatedBanner(result.truncated(), result.rows().size());
             if (anySucceeded) {
                 resultsTab.getTabPane().getSelectionModel().select(resultsTab);
             }
@@ -1710,6 +1740,30 @@ public class MainController {
         Thread thread = new Thread(task, "faro-query-exec");
         thread.setDaemon(true);
         thread.start();
+    }
+
+    /**
+     * Muestra u oculta el aviso de resultado recortado.
+     *
+     * <p>Va ARRIBA del grid y no en la barra de estado de abajo a propósito — el usuario
+     * ya señaló que los mensajes de abajo no se leen. Recortar en silencio sería peor que
+     * recortar: alguien podría sacar conclusiones de un resultado incompleto creyéndolo
+     * completo.
+     *
+     * <p>No dice cuántas filas quedaron fuera porque no se sabe, y averiguarlo exigiría
+     * traerlas — justo lo que el tope evita. Ver {@code QueryResult#truncated}.
+     */
+    private void showTruncatedBanner(boolean truncated, int shownRows) {
+        resultsTruncatedBanner.setVisible(truncated);
+        resultsTruncatedBanner.setManaged(truncated);
+        if (truncated) {
+            resultsTruncatedBanner.setText(
+                    "Se muestran las primeras " + String.format("%,d", shownRows) + " filas y hay más — "
+                    + "se alcanzó el tope de filas en memoria (Preferencias → Rendimiento). "
+                    + "\"Exportar CSV\" sí baja el resultado COMPLETO, no solo lo que ves acá.");
+            log(LogLevel.WARN, "Resultado recortado en " + shownRows + " fila(s) — hay más. "
+                    + "Exportar CSV trae el resultado completo.");
+        }
     }
 
     /** Habilita/deshabilita "Exportar CSV" (sin filas no hay nada que exportar) — la cuenta de filas en sí vive en el badge de la pestaña Resultados, ver {@link #setTabBadge}. */
@@ -1974,6 +2028,12 @@ public class MainController {
             updateResultsSummary(result.rows().size());
             lastResultDatabaseLabel = db.alias();
             lastResultSql = sql;
+            // Un plan de ejecución no se re-ejecuta para exportar: el SQL que lo produjo
+            // lleva EXPLAIN/SHOWPLAN delante y devolver el plan otra vez no es "el
+            // resultado completo" de nada. Exportar lee de la tabla, que acá siempre cabe.
+            lastResultDatabases = List.of();
+            lastResultTruncated = false;
+            showTruncatedBanner(false, result.rows().size());
             log("Plan de ejecución pedido para " + db.alias() + ".");
         });
         task.setOnFailed(e -> {
@@ -2242,6 +2302,11 @@ public class MainController {
             // CsvFileNamer: usa esto solo para armar el nombre del archivo).
             lastResultDatabaseLabel = selected.size() + "-bases";
             lastResultSql = "comparacion " + item.kind().label() + " " + item.name();
+            // Comparar no produce filas de un SELECT: son MD5 calculados por la app. No hay
+            // SQL que volver a correr, y el resultado es una fila por base, siempre chico.
+            lastResultDatabases = List.of();
+            lastResultTruncated = false;
+            showTruncatedBanner(false, result.rows().size());
             long distintas = result.rows().stream().filter(row -> String.valueOf(row[4]).startsWith("NO")).count();
             String resumen = distintas == 0
                     ? "Todas las bases tienen la misma versión de " + item.name() + "."

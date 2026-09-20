@@ -151,7 +151,7 @@ class QueryExecutionServiceTest {
     }
 
     private static QueryExecutionService.RunPlan plan(String... statements) {
-        return new QueryExecutionService.RunPlan(List.of(statements), 500);
+        return new QueryExecutionService.RunPlan(List.of(statements), 500, Integer.MAX_VALUE);
     }
 
     @Test
@@ -190,5 +190,37 @@ class QueryExecutionServiceTest {
     void elPlanCalculaSoloLecturaSobreTodasLasSentencias() {
         assertTrue(plan("SELECT 1", "  -- nota\n SELECT 2").allStatementsReadOnly());
         assertFalse(plan("SELECT 1", "DROP TABLE t").allStatementsReadOnly());
+    }
+
+    // ------------------------------------------------------------------
+    // Tope de filas en memoria (2026-09-20)
+    // ------------------------------------------------------------------
+    //
+    // remainingCapacity es la decisión que corta la lectura del ResultSet. El bucle en sí
+    // necesita una base real, pero la decisión es aritmética pura y es donde estaría el
+    // error: un signo cambiado acá no recorta nada (y vuelve el OutOfMemoryError) o
+    // recorta todo (y el grid sale vacío).
+
+    @Test
+    void mientrasQuepanFilasSigueLeyendo() {
+        assertEquals(200_000, QueryExecutionService.remainingCapacity(0, 200_000));
+        assertEquals(1, QueryExecutionService.remainingCapacity(199_999, 200_000));
+    }
+
+    /** Cero es la señal de cortar: no caben más. */
+    @Test
+    void alLlegarAlTopeDejaDeCaber() {
+        assertEquals(0, QueryExecutionService.remainingCapacity(200_000, 200_000));
+    }
+
+    /**
+     * Nunca negativo. Con varias bases en paralelo compartiendo el contador, dos hilos
+     * pueden pasarse del tope entre el chequeo y el incremento; si eso devolviera un
+     * número negativo, un {@code > 0} seguiría cortando bien pero cualquier uso futuro
+     * como "cuántas faltan" quedaría roto. Se satura en 0 a propósito.
+     */
+    @Test
+    void pasarseDelTopeNoDaNegativo() {
+        assertEquals(0, QueryExecutionService.remainingCapacity(200_005, 200_000));
     }
 }

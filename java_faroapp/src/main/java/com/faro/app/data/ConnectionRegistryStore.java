@@ -113,6 +113,7 @@ public final class ConnectionRegistryStore {
         prefs.addProperty("defaultQueryTimeoutSeconds", preferences.defaultQueryTimeoutSeconds());
         prefs.addProperty("darkTheme", preferences.isDarkTheme());
         prefs.addProperty("fetchSize", preferences.fetchSize());
+        prefs.addProperty("maxDisplayRows", preferences.maxDisplayRows());
         prefs.addProperty("accentName", preferences.accentName());
         prefs.addProperty("editorFontSize", preferences.editorFontSize());
         prefs.addProperty("fontScaleDelta", preferences.fontScaleDelta());
@@ -229,6 +230,9 @@ public final class ConnectionRegistryStore {
             }
             if (prefs.has("fetchSize")) {
                 preferences.setFetchSize(prefs.get("fetchSize").getAsInt());
+            }
+            if (prefs.has("maxDisplayRows")) {
+                preferences.setMaxDisplayRows(prefs.get("maxDisplayRows").getAsInt());
             }
             if (prefs.has("accentName")) {
                 preferences.setAccentName(prefs.get("accentName").getAsString());
