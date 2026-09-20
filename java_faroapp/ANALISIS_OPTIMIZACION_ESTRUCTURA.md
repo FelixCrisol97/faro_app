@@ -199,7 +199,7 @@ apareció al revisar la documentación el 2026-09-15. §D se cuenta aparte, son 
 | A11 | Baja | `inUse` puede quedar prendido para siempre si el `Task` muere antes de que las bases reporten | `MainController:1673` | **Corregido** |
 | A12 | Baja | `Main.stop()` truena con NPE si `start()` falló | `Main:78` | **Corregido** |
 | A13 | **Alta** | `fetchSize` no tiene efecto en PostgreSQL: sin `autoCommit = false` el driver materializa el resultado completo — salió del uso real, no de este análisis | `QueryExecutionService:runOne` | **Corregido** — cursor solo en scripts de solo lectura |
-| A14 | Baja | El CSV **exportado** va en UTF-8 **sin BOM**, así que Excel en español lo abre mostrando `Ã±` en vez de `ñ` — es el otro lado de A8, y estaba escrito solo en prosa dentro de ese hallazgo, sin figurar en ninguna tabla | `MainController:1832` | **Abierto** — decisión de producto, ver abajo |
+| A14 | Baja | El CSV **exportado** va en UTF-8 **sin BOM**, así que Excel en español lo abre mostrando `Ã±` en vez de `ñ` — es el otro lado de A8, y estaba escrito solo en prosa dentro de ese hallazgo, sin figurar en ninguna tabla | `MainController:1390` (era :1832 antes de dividir la clase el 2026-09-19) | **Abierto** — decisión de producto, ver abajo |
 
 ### Rendimiento (§B)
 

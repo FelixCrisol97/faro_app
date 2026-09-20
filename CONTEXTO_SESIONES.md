@@ -3655,6 +3655,9 @@ anterior: los **dos** drivers JDBC concatenados en
 el zip extraído en otra carpeta**. Comprimido con `tar.exe` (bsdtar), no con el
 compresor de Explorer contra el que advierte el README. Copiado al escritorio con
 SHA-256 comparado, porque `target/` está en `.gitignore` y VS Code lo oculta.
+(Al 2026-09-19 la copia del escritorio ya no está —el usuario la movió o la borró—
+pero el original sigue en `java_faroapp/target/dist/Faro-0.1.0-portable.zip`, con las
+mismas 386 entradas.)
 
 **Lo que cambió respecto de la vez pasada:** probar el `.exe` había escrito en el
 `~/.faro/` real del usuario. Esta vez la copia extraída se arrancó con
@@ -3710,8 +3713,8 @@ entradas esperado —386, de las cuales 380 bajo `runtime/`— porque contarlas 
 confiable que mirar el tamaño del archivo.
 
 **Comiteado y subido:** `3e94f19` a `origin/main` — el arco completo del
-2026-09-08 al 09-15, que llevaba siete días de trabajo sin comitear (47 archivos,
-+3,895/−406). `.vscode/settings.json` se dejó **fuera** a propósito: solo tiene una
+2026-09-08 al 09-15, que llevaba siete días de trabajo sin comitear (**54 archivos,
++6,798/−1,851**). `.vscode/settings.json` se dejó **fuera** a propósito: solo tiene una
 ruta absoluta de esta máquina apuntando al CMake de `flutter_faroapp`.
 
 ### Segunda pasada sobre esta misma bitácora — cuatro huecos, uno de ellos serio
@@ -3770,15 +3773,21 @@ rompe, no hay dudas sobre cuál de los dos cambios fue.
 **Un commit por paso**, en el orden que el plan de §C1 ya proponía, para poder parar
 o revertir cualquiera por separado:
 
-| Paso | Clase nueva | Líneas | Tests nuevos | `MainController` |
-|---|---|---|---|---|
-| 1 | `data/SessionPersistence` | 337 | 10 | 3,344 → 3,209 |
-| 2 | `ui/ScriptGeneratorCoordinator` | 231 | 4 | 3,209 → 3,054 |
-| 3 | `ui/QueryTabManager` | 705 | 11 (4 mudados) | 3,054 → 2,593 |
-| 4 | `ui/ConnectionTreeCoordinator` | 441 | 11 | 2,593 → **2,309** |
+| Paso | Commit | Clase nueva | Líneas | Tests nuevos | `MainController` |
+|---|---|---|---|---|---|
+| 1 | `c93b429` | `data/SessionPersistence` | 337 | 10 — `data/SessionPersistenceTest` | 3,344 → 3,209 |
+| 2 | `90b6517` | `ui/ScriptGeneratorCoordinator` | 231 | 4 — `ui/ScriptGeneratorCoordinatorTest` | 3,209 → 3,054 |
+| 3 | `f16c8e0` | `ui/QueryTabManager` | 705 | 11 — `ui/QueryTabManagerTest` (4 mudados de `MainControllerLogicTest`) | 3,054 → 2,593 |
+| 4 | `037d30d` | `ui/ConnectionTreeCoordinator` | 441 | 11 — `ui/ConnectionTreeCoordinatorTest` | 2,593 → **2,309** |
+
+Más `9df87d6`, que es la documentación de todo esto.
 
 **190/190 tests** (eran 158), cero advertencias con `-Xlint:all`, recompilación desde
 cero en cada paso.
+
+**Estado de la rama:** subida a `origin/refactor/dividir-main-controller`, **5 commits
+por delante de `main` y sin mezclar** — a la espera de la prueba de humo del log (ver
+el final de esta entrada). `main` sigue en `62bbe09`.
 
 ### Lo que de verdad ganó, que no son las líneas
 
@@ -3816,6 +3825,25 @@ Tres cosas que no se podían testear sin arrancar JavaFX y ahora tienen tests:
   exactamente el riesgo que sigue anotado como abierto para `ConnectionTreeActions` —
   así que ahora el patrón para cerrarlo ya existe en el código.
 
+### Dos cosas que solo se ven al hacerlo
+
+**El orden de construcción resultó ser una restricción real, no un detalle.** La
+primera reconstrucción del árbol (`refreshTree()`, al arrancar) ya repinta el
+encabezado de la pestaña activa. Al arrancar no hay ninguna pestaña y por eso no hace
+nada — pero para "no hacer nada" necesita que el gestor de pestañas **exista**.
+Construirlo donde estaba su código (bastante más abajo en `initialize()`) habría sido
+un `NullPointerException` en el arranque, y ningún test lo habría atrapado porque
+ninguno arranca la ventana. Por eso los dos coordinadores nuevos se construyen
+temprano, con un comentario que explica por qué están ahí y no donde uno los pondría.
+
+**Un comentario que afirmaba algo falso.** El javadoc de "Probar todas las conexiones"
+explicaba que usa `connectionTree.refresh()` y no la reconstrucción completa porque
+esta última "borraría cualquier casilla que el usuario ya haya marcado". **Eso ya no
+era cierto**: la reconstrucción conserva la selección desde que se agregó el buscador.
+Se reescribió con el motivo que sí se sostiene —para cambiar el color de un punto de
+estado no hace falta rearmar todos los `CheckBoxTreeItem`— en vez de arrastrar la
+afirmación vieja solo porque estaba escrita.
+
 ### Cómo se verificó que no cambió lógica
 
 Los pasos 3 y 4 son UI de verdad y casi no tienen tests, así que la verificación fue
@@ -3830,6 +3858,18 @@ exactamente una vez**, en vez de reemplazar a ciegas — y atrapó un caso real:
 expresión regular que cambiaba las llamadas a `selectedDatabases()` alcanzó también
 la **declaración** del método en el `Host`, que habría quedado como
 `public List<DatabaseEntry> tree.selectedDatabases()`.
+
+Dos limpiezas más de cada paso, que no se ven en el resultado pero sí en el diff: los
+**imports que quedaron huérfanos** al mudarse el código (nueve en total entre los
+cuatro pasos) y los **`{@link #...}` a métodos que ya no están en el controlador**.
+Ninguno de los dos los marca el compilador, así que se buscaron a mano contando usos
+por símbolo.
+
+Y una advertencia la introdujo el propio test nuevo: el ayudante que arma la raíz del
+árbol recibía `TreeItem<Object>...` y se lo reenviaba a `List.of(...)`, que es
+justamente lo que `-Xlint` marca como posible contaminación del heap. Se arregló
+recorriendo el arreglo en vez de reenviarlo — no suprimiendo la advertencia. El build
+vuelve a estar en cero.
 
 ### Lo que NO se hizo, y por qué
 
@@ -3865,3 +3905,59 @@ Un detalle para ese diff: las líneas de log que se mudaron de clase ahora salen
 **otro nombre de logger** (`SessionPersistence`, `ScriptGeneratorCoordinator`,
 `QueryTabManager` en lugar de `MainController`). El diff las va a marcar aunque el
 comportamiento sea idéntico.
+
+### Tercera pasada de documentación (2026-09-19) — tres iteraciones, dos errores míos
+
+Pedido: *"documenta todo lo trabajado en el contexto, que no quede nada fuera, a
+detalle, harás 3 iteraciones para verificar"*. Se hicieron con un criterio distinto
+cada una, para que no fueran la misma revisión repetida.
+
+**Iteración 1 — cobertura.** Cruzar el inventario real (los 7 commits de la ronda y
+los 13 archivos nuevos, sacados de `git`) contra lo que la bitácora nombra. Seis
+huecos, todos de continuidad y no de contenido: las clases de test no se nombraban
+(solo se decía "10 tests"), no había ningún hash de commit por paso, no se decía que
+la rama está subida y **sin mezclar**, y faltaban tres detalles que solo se ven al
+hacerlo — el orden de construcción, el comentario que afirmaba algo falso, y la
+advertencia que introdujo el propio test nuevo. Todo agregado.
+
+**Iteración 2 — veracidad.** Cada cifra contra el código y el `git` reales, no contra
+otro documento (punto 2 de los Puntos obligatorios). Se verificaron una por una: las
+2,309 líneas de `MainController`, las 337/231/705/441 de las clases nuevas, los
+10/4/11/11 tests, las 993 líneas de la sección "Diálogos", la progresión completa
+3,344 → 3,209 → 3,054 → 2,593 → 2,309 **commit por commit**, los 158 → 190 tests,
+los 5 commits de la rama, y las 386 entradas del zip con 380 bajo `runtime/`. Todas
+correctas salvo dos:
+
+1. **A14 apuntaba a `MainController:1832`; hoy está en la 1390.** Lo movió el propio
+   refactor de esta ronda. Es la única referencia `archivo:línea` de un hallazgo
+   **abierto**, o sea la única que alguien iba a usar de verdad. Corregida, dejando
+   anotado de dónde venía.
+2. **El commit `3e94f19` estaba mal medido.** La bitácora decía "47 archivos,
+   +3,895/−406"; el commit real es **54 archivos, +6,798/−1,851**. El número salió de
+   un `git diff --stat` que no contaba ni los archivos nuevos (sin trackear todavía)
+   ni los borrados ya preparados — o sea, una cifra tomada de un comando que no medía
+   lo que yo decía que medía. Corregida.
+
+**Iteración 3 — integridad estructural.** Jerarquía de encabezados (ningún `###`
+huérfano, ningún encabezado con fecha colgando en nivel 3 — el arreglo del 09-15 se
+sostiene), tablas bien formadas, referencias a otros documentos que resuelven,
+codificación sin mojibake, y finales de línea. Acá salió una tercera cosa: el archivo
+tenía **finales de línea mezclados** (3.710 CRLF y 157 LF sueltos, estos últimos en
+los bloques que se habían agregado con `cat`). Normalizado a CRLF; se comprobó que
+esa normalización sola produce **cero diff** en git, o sea que era solo del árbol de
+trabajo.
+
+### Estado al cerrar la ronda — lo que espera decisión del usuario
+
+Tres cosas, y las tres son suyas, no del asistente:
+
+| Qué | Dónde está escrito | Qué hace falta |
+|---|---|---|
+| **La prueba de humo del log** del refactor C1 | Esta entrada, "Lo que falta, y es del usuario" | Abrir la app, expandir una base, correr contra dos, exportar, cambiar de pestaña, cerrar, y comparar `logs/faro-app.log` con el de antes. Es la red de seguridad real del refactor |
+| **La rama `refactor/dividir-main-controller`** | Esta entrada, "Estado de la rama" | Está subida, 5 commits por delante de `main`, **sin mezclar**. Falta decidir si se mezcla o se abre un PR — razonablemente, después de la prueba de humo |
+| **El punto 4 de los Puntos obligatorios** ("nunca correr la app") | Entrada del 2026-09-15, hueco 4 | Contradice lo que este archivo registra tres veces. O gana la regla y la verificación del empaquetado se limita a lo que se puede comprobar sin arrancar nada, o se le escribe una excepción angosta. **La regla es del usuario y solo él puede cambiarla** |
+
+Y un hallazgo abierto de código, ya numerado y con su fila en el análisis:
+**A14**, el CSV exportado sin BOM que Excel en español abre con `Ã±`. No se arregló a
+propósito: es una línea, pero cambia los bytes de **todos** los archivos exportados y
+hay herramientas que no toleran el BOM.
