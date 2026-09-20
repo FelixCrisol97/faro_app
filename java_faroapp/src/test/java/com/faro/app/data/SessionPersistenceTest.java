@@ -2,6 +2,7 @@ package com.faro.app.data;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -241,6 +242,36 @@ class SessionPersistenceTest {
 
         assertFalse(f.session.autosaveInProgress());
         assertTrue(Files.exists(f.registryFile), "el autoguardado no llegó a escribir");
+    }
+
+    /**
+     * El mismo candado, pero cuando lo que truena es la <b>captura</b> —antes de que
+     * exista el hilo de fondo que normalmente lo suelta.
+     *
+     * <p>Encontrado revisando el código el 2026-09-19, y es <b>anterior al refactor</b>:
+     * la estructura era idéntica dentro de {@code MainController}. Si la captura lanzaba,
+     * el candado quedaba en {@code true} para siempre y la app dejaba de autoguardar el
+     * resto de la sesión avisándolo solo en {@code DEBUG} — o sea, en silencio. Encima
+     * cada cierre pasaba a esperar los 5 segundos completos. Es justo el modo de fallo
+     * que A3 existe para evitar, y solo se pudo testear una vez separada la clase.
+     */
+    @Test
+    void siLaCapturaTruenaElCandadoTampocoSeQuedaTrabado(@TempDir Path dir) {
+        Fixture f = fixture(dir, new ConnectionRegistry());
+        SessionPersistence session = new SessionPersistence(
+                () -> new ConnectionRegistry(), f.preferences, f.favorites, f.credentials,
+                () -> {
+                    throw new IllegalStateException("el árbol cambió mientras se capturaba");
+                },
+                f.erroresReportados::add,
+                f.registryFile, f.credentialsFile);
+
+        assertThrows(IllegalStateException.class, () -> session.autosave(DIRECTO),
+                "la excepción tiene que seguir propagándose, como antes");
+
+        assertFalse(session.autosaveInProgress(),
+                "el candado quedó trabado: la app dejaría de autoguardar el resto de la sesión");
+        assertEquals(1, f.erroresReportados.size(), "no se avisó del fallo");
     }
 
     /**

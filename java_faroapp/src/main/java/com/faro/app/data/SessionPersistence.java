@@ -224,26 +224,47 @@ public final class SessionPersistence {
      * <p>Un solo guardado a la vez: dos solapados escribirían el mismo archivo al mismo
      * tiempo; si el anterior no terminó, este ciclo simplemente se salta — el siguiente
      * tick llega en 2 minutos y no se pierde nada.
+     *
+     * <p><b>El candado se suelta pase lo que pase</b> (2026-09-19). En el camino normal
+     * lo suelta el hilo de fondo al terminar; el {@code finally} de acá cubre el caso en
+     * que nunca se llegue a arrancarlo — si la captura truena, o el hilo no se puede
+     * crear. Sin eso, el candado quedaba en {@code true} <b>para siempre</b>: la app
+     * dejaba de autoguardar el resto de la sesión avisándolo solo en {@code DEBUG}, o
+     * sea en silencio, y encima cada cierre esperaba los 5 segundos completos de
+     * {@link #awaitAutosave()}. Es justo el modo de fallo que A3 existe para evitar.
      */
     public void autosave(Consumer<Runnable> uiThread) {
         if (!autosaveInProgress.compareAndSet(false, true)) {
             log.debug("Autoguardado saltado — el anterior sigue en curso.");
             return;
         }
-        List<SavedQueryTab> tabs = captureOpenTabs.get();
-        Thread thread = new Thread(() -> {
-            try {
-                writeAll(tabs);
-                log.debug("Autoguardado completo.");
-            } catch (IOException | RuntimeException e) {
-                log.error("Autoguardado falló", e);
-                uiThread.accept(() -> onSaveError.accept("Autoguardado falló: " + e.getMessage()));
-            } finally {
+        boolean entregadoAlHilo = false;
+        try {
+            List<SavedQueryTab> tabs = captureOpenTabs.get();
+            Thread thread = new Thread(() -> {
+                try {
+                    writeAll(tabs);
+                    log.debug("Autoguardado completo.");
+                } catch (IOException | RuntimeException e) {
+                    log.error("Autoguardado falló", e);
+                    uiThread.accept(() -> onSaveError.accept("Autoguardado falló: " + e.getMessage()));
+                } finally {
+                    autosaveInProgress.set(false);
+                }
+            }, "faro-autosave-write");
+            thread.setDaemon(true);
+            thread.start();
+            entregadoAlHilo = true;
+        } catch (RuntimeException e) {
+            log.error("Autoguardado falló antes de empezar a escribir", e);
+            uiThread.accept(() -> onSaveError.accept("Autoguardado falló: " + e.getMessage()));
+            throw e;
+        } finally {
+            // Solo si el hilo nunca llegó a tomar el candado — si arrancó, lo suelta él.
+            if (!entregadoAlHilo) {
                 autosaveInProgress.set(false);
             }
-        }, "faro-autosave-write");
-        thread.setDaemon(true);
-        thread.start();
+        }
     }
 
     /**

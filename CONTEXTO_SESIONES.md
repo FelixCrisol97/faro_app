@@ -4007,6 +4007,47 @@ mezclado en el mismo archivo. Quedó escrito el procedimiento de tres pasos, qu�
 diferencias son esperadas al comparar, y por qué el `mvn compile` previo no es de
 adorno (sin él la comparación daría un "no hay diferencias" falso y tranquilizador).
 
+### Sexta y séptima pasada (2026-09-19) — el código, no los documentos
+
+Pedido del usuario de revisar dos veces más. Las cinco pasadas anteriores habían
+revisado **documentos**; estas dos revisaron el **código del refactor**, que es donde
+un error costaría de verdad.
+
+**Iteración 6 — el contrato con el FXML.** Es el punto ciego exacto de este refactor:
+FXML enlaza `onAction="#metodo"` y `fx:id` **por nombre y en tiempo de ejecución**. Si
+un método que el FXML nombra se movió o se renombró, no falla al compilar, no lo
+atrapa ningún test (la suite no arranca JavaFX) y revienta al abrir la ventana. Se
+cruzaron los **38 manejadores** y los **44 `fx:id`** de `main-view.fxml` contra
+`MainController`, más los manejadores de los otros cinco FXML contra su propio
+controlador. **Todos resuelven.** Los dos `fx:id` sin campo (`root` y
+`railToggleGroup`) son legales —un `fx:id` sin campo solo entra al espacio de
+nombres, y el segundo se usa como `$railToggleGroup`— y ese archivo no lo tocó el
+refactor. Pasada limpia, sin hallazgos.
+
+**Iteración 7 — ciclo de vida, y un bug real.** Primero el riesgo que ni el compilador
+ni los tests ven: que una lambda dispare cuando el campo que lee todavía es `null`. Se
+trazó el arranque: los coordinadores se construyen en las líneas 369 y 377, la primera
+llamada real a `tree` es la 478 y a `tabs` la 487, y lo que hay en medio son cuerpos de
+lambda que solo corren con el usuario. Correcto.
+
+Y ahí salió un **bug real, anterior al refactor**:
+
+> `autosave()` toma el candado `autosaveInProgress` y recién después captura las
+> pestañas y arranca el hilo de fondo. **Si la captura truena, el candado queda en
+> `true` para siempre**: el hilo que normalmente lo suelta nunca llegó a existir. A
+> partir de ahí la app deja de autoguardar el resto de la sesión avisándolo solo en
+> `DEBUG` —o sea, en silencio— y encima cada cierre pasa a esperar los 5 segundos
+> completos de `awaitAutosave()`. Es justo el modo de fallo que A3 existe para evitar.
+
+**Se verificó que es preexistente y no lo introdujo el refactor**: la estructura es
+idéntica en el `MainController` del commit `62bbe09`. Lo que cambió es que ahora se
+puede ver y, sobre todo, **testear**.
+
+Arreglado con un `try/finally` que suelta el candado solo si el hilo nunca llegó a
+tomarlo, conservando la propagación de la excepción como antes y avisando al usuario
+igual que en el fallo de escritura. **Verificado con una sonda**: revertido el
+arreglo, el test nuevo falla; restaurado, pasa. Tests: 190 → **191**.
+
 ### Estado al cerrar la ronda — lo que espera decisión del usuario
 
 Tres cosas, y las tres son suyas, no del asistente:
