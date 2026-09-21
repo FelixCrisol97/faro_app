@@ -4322,3 +4322,50 @@ la rama esperando indefinidamente tiene su propio costo: `MainController` ya cre
 otro día de divergencia. Si alguna medición sale mal, el historial está en 13 commits
 separados y revertir cualquiera por su cuenta es posible — esa fue justamente la razón
 de hacerlos así.
+
+---
+
+## 2026-09-21 — Compilado para el equipo del cliente, verificado sin arrancar la app
+
+`Faro-0.1.0-portable-2026-09-21.zip`, 61,5 MB, en el escritorio. SHA-256
+`5557E666…A8EB`, comparado contra el original en `target/dist/`.
+
+**Desde qué:** rama `diseno/rediseno-visual`, commit `b01e493` — o sea todo lo que
+tiene `main` (C1, A15, A16) **más el rediseño visual**. El nombre lleva la fecha para
+que el equipo del cliente no lo confunda con el zip anterior, que salió con el mismo
+nombre base el 2026-09-11.
+
+### Primera vez que se verifica un build sin arrancar el `.exe`
+
+Las tres veces anteriores (2026-08-27, 09-11 y 09-14) el asistente arrancó el `.exe`
+para confirmar que el zip abría, y las tres quedaron registradas como un acierto sin
+reconciliarlas con el punto 4 de los "Puntos obligatorios" ("nunca correr la app").
+La contradicción se documentó el 2026-09-15 y sigue esperando la decisión del usuario.
+Mientras tanto, **se respetó la regla escrita**: la verificación se limitó a lo que se
+puede comprobar sin arrancar nada, que es la primera de las dos salidas planteadas ese
+día.
+
+Lo que se verificó, todo sin ejecutar:
+
+- **Los dos drivers JDBC** concatenados en `META-INF/services/java.sql.Driver` dentro
+  del jar — el bug del `ServicesResourceTransformer` solo aparece empaquetado.
+- **Las clases de las tres rondas recientes** presentes en el jar: las cuatro de C1 y
+  las dos de A16.
+- **El rediseño de hoy dentro del jar**, no solo en el código fuente: las reglas de la
+  insignia por motor, de las tarjetas y del aro del punto en `app.css`; los tokens de
+  motor en `theme-dark.css`; y las clases `query-card`/`results-card` en
+  `main-view.fxml`. Sirve para descartar que el build haya salido de un
+  `target/classes` viejo — el tropiezo del compilado incremental que ya pasó dos veces.
+- **El runtime embebido**: `jvm.dll` presente, que es justo el archivo cuya ausencia
+  produce `"Failed to find JVM in '...\runtime' directory."`.
+- **El zip**: 386 entradas, 380 bajo `Faro/runtime/` — las mismas cifras del build
+  verificado anterior. Comprimido con `tar.exe`, no con el compresor de Explorer.
+
+**Lo que esto NO cubre**, y hay que decirlo al entregarlo: que la ventana abra y que
+el rediseño se vea como se pretende. Esa es la parte que solo se confirma arrancándolo,
+y le toca al usuario o al equipo del cliente. Lo que habría que mirar: las tarjetas con
+su sombra y esquinas redondeadas, las insignias PG/MSSQL en color, y el aro del punto
+de estado.
+
+Siguen sin verificar además, como en `main`: la prueba de humo del log de C1 y el pico
+de memoria de A16.
