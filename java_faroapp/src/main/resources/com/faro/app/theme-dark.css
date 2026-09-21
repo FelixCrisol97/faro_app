@@ -23,6 +23,14 @@
     -token-text-muted: #A1A1AA;
     -token-border: #3F3F46;
 
+    /* Identidad de motor — contraparte oscura de los mismos tokens (ver theme-light.css).
+       Acá los fondos suben a .18 de opacidad y el texto pasa a tonos claros: sobre
+       #18181B un #2C5877 sería ilegible. */
+    -token-engine-pg-bg: rgba(96,165,250,.18);
+    -token-engine-pg-text: #93C5FD;
+    -token-engine-mssql-bg: rgba(248,113,113,.18);
+    -token-engine-mssql-text: #FCA5A5;
+
     -token-success-base: #34D399;
     -token-error-base: #F87171;
     -token-warn-base: #B45309;

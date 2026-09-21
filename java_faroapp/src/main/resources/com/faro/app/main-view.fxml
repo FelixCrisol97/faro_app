@@ -171,7 +171,13 @@
                 </VBox>
             </HBox>
         <SplitPane styleClass="panel-center" orientation="VERTICAL" dividerPositions="0.25">
-            <VBox spacing="6">
+            <!-- Tarjeta de consulta (2026-09-20, §10.6 del handoff de rediseño visual).
+                 El StackPane exterior existe SOLO para el margen: sin él la tarjeta
+                 ocuparía todo el panel del SplitPane y su sombra quedaría pegada al
+                 borde, sin nada donde proyectarse. El VBox interior es la tarjeta y
+                 conserva su padding original como padding interno. -->
+            <StackPane styleClass="card-host">
+            <VBox spacing="6" styleClass="query-card">
                 <padding><Insets top="12" right="12" bottom="8" left="12"/></padding>
                 <HBox fx:id="findBar" styleClass="find-bar" spacing="6" alignment="CENTER_LEFT" visible="false" managed="false">
                     <TextField fx:id="findField" styleClass="text-field" promptText="Buscar en el script…" HBox.hgrow="ALWAYS" onAction="#onFindNext"/>
@@ -182,6 +188,7 @@
                 </HBox>
                 <TabPane fx:id="queryTabPane" styleClass="query-tabs" VBox.vgrow="ALWAYS" tabClosingPolicy="ALL_TABS"/>
             </VBox>
+            </StackPane>
             <!-- Resultados/Ejecución/Diagnóstico como 3 pestañas separadas,
                  igual que faro-java-prototipo.html (btResultados/btEjecucion/
                  btMensajes). En una entrada anterior de esta sesión se
@@ -190,7 +197,12 @@
                  pedir después que TODO el diseño volviera a igualar el
                  prototipo (2026-08-22), incluyendo esto explícitamente, se
                  revierte a las 3 pestañas originales del diseño real. -->
-            <StackPane>
+            <!-- Misma tarjeta para los resultados. Acá el contenido SÍ llega hasta el
+                 borde (el TabPane no tiene margen propio), por eso app.css redondea
+                 además las esquinas de la fila de pestañas y del área de contenido:
+                 si no, sus rectángulos taparían las esquinas redondeadas de la tarjeta. -->
+            <StackPane styleClass="card-host">
+            <StackPane styleClass="results-card">
                 <TabPane styleClass="results-tabs" tabClosingPolicy="UNAVAILABLE">
                     <Tab fx:id="resultsTab" text="Resultados">
                         <!-- VBox y no StackPane (2026-09-20): el aviso de resultado
@@ -232,6 +244,7 @@
                     <padding><Insets top="4" right="10" bottom="0" left="0"/></padding>
                     <Button fx:id="exportCsvButton" text="Exportar CSV" styleClass="button-secondary" onAction="#onExportResultsCsv"/>
                 </HBox>
+            </StackPane>
             </StackPane>
         </SplitPane>
         </SplitPane>

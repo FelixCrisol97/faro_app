@@ -554,6 +554,23 @@
     -fx-padding: 1 4 1 4;
 }
 
+/* Color por motor (2026-09-20, §10.2 del handoff de rediseño) — hasta ahora la
+   insignia era gris para los dos motores y solo el texto los distinguía. El texto NO
+   cambia: el handoff dibujaba un cuadrito de 22x22 con "Pg"/"MS", pero DbEngine#badge()
+   devuelve "PG"/"MSSQL" y cambiarlo sería una decisión de producto, no de estilo. Así
+   que la insignia sigue siendo una píldora de ancho automático y solo gana color.
+   La clase base de arriba aporta fuente, tamaño, radio y padding; estas dos solo pisan
+   los dos colores. */
+.tree-engine-badge-postgres {
+    -fx-background-color: -token-engine-pg-bg;
+    -fx-text-fill: -token-engine-pg-text;
+}
+
+.tree-engine-badge-mssql {
+    -fx-background-color: -token-engine-mssql-bg;
+    -fx-text-fill: -token-engine-mssql-text;
+}
+
 /* Explorador de esquema (Etapa C, 2026-08-25) — fila de categoría ("Tablas",
    "Vistas", etc.) bajo una base expandida, calcado del prototipo real
    (faro-java-prototipo.html, líneas 246-262): label + badge de conteo
@@ -581,9 +598,36 @@
 
 /* Punto de estado de conexión — mismo lenguaje de color que success/warn/
    error en app_colors.dart. */
-.tree-status-dot-connected { -fx-fill: -token-success-base; }
-.tree-status-dot-failed    { -fx-fill: -token-error-base; }
-.tree-status-dot-testing   { -fx-fill: -token-warn-base; }
+/* El anillo (2026-09-20, §4 del handoff de rediseño) es el equivalente del
+   `box-shadow: 0 0 0 3px` del prototipo: NO es una sombra de elevación sino un
+   aro sólido del mismo tono suave del estado. En JavaFX un aro así sobre un
+   Circle es su stroke, no un efecto.
+
+   2px y no los 3 del documento: ahí el punto mide 8px y acá 10 (se subió a mano
+   el 2026-08-28, "se veía muy chico" contra la casilla). Con 3px de aro el punto
+   entero pasaría de 10 a 16px y empujaría el resto de la fila, que ya está
+   calibrada. 2px da el mismo efecto sin mover nada.
+
+   El estado "unknown" queda sin aro a propósito: es la ausencia de información,
+   no un estado que valga la pena destacar. */
+.tree-status-dot-connected {
+    -fx-fill: -token-success-base;
+    -fx-stroke: -token-success-soft;
+    -fx-stroke-width: 2;
+}
+
+.tree-status-dot-failed {
+    -fx-fill: -token-error-base;
+    -fx-stroke: -token-error-soft;
+    -fx-stroke-width: 2;
+}
+
+.tree-status-dot-testing {
+    -fx-fill: -token-warn-base;
+    -fx-stroke: -token-warn-soft;
+    -fx-stroke-width: 2;
+}
+
 .tree-status-dot-unknown   { -fx-fill: -token-gray-border; }
 
 /* Etiqueta "SIN RESTRICCIONES" — reemplaza al candado (2026-08-22, para
@@ -1422,4 +1466,43 @@
     -fx-text-fill: -token-warn-soft-text;
     -fx-background-color: -token-warn-soft;
     -fx-padding: 6 10 6 10;
+}
+
+/* ---- Tarjetas de Consulta y Resultados (2026-09-20, §10.6 del handoff de
+   rediseño visual) ---------------------------------------------------------
+
+   Hasta ahora el centro de la ventana era superficie plana contra el fondo, sin
+   ningún contenedor: el editor y los resultados se distinguían solo por el
+   divisor del SplitPane. El rediseño los vuelve dos tarjetas con sombra.
+
+   `.card-host` existe SOLO para el margen. Una tarjeta necesita aire alrededor
+   para que su sombra tenga dónde proyectarse; sin él ocuparía todo el panel y la
+   sombra quedaría cortada contra el borde. */
+.card-host {
+    -fx-background-color: transparent;
+    -fx-padding: 10;
+}
+
+/* La sombra: el prototipo define --shadow-sm como DOS sombras apiladas
+   (0 1px 2px + 0 4px 12px). `-fx-effect` solo admite un efecto simple por regla,
+   y apilarlas de verdad exigiría anidar DropShadow en Java — código que habría
+   que mantener sincronizado con esta hoja a mano. Se aproxima con una sola,
+   calibrada para el mismo peso visual. */
+.query-card, .results-card {
+    -fx-background-color: -token-surface;
+    -fx-background-radius: 14; /* --radius-container */
+    -fx-effect: dropshadow(gaussian, rgba(15, 23, 42, 0.10), 12, 0, 0, 4);
+}
+
+/* La fila de pestañas y el área de contenido de Resultados son rectángulos
+   opacos que llegan al borde de la tarjeta, así que sin esto taparían sus
+   esquinas redondeadas con las suyas rectas. La de Consulta no lo necesita: su
+   contenido va dentro del padding de la tarjeta y nunca llega a la esquina. */
+.results-card .results-tabs .tab-header-area,
+.results-card .results-tabs .tab-header-background {
+    -fx-background-radius: 14 14 0 0;
+}
+
+.results-card .results-tabs .tab-content-area {
+    -fx-background-radius: 0 0 14 14;
 }
