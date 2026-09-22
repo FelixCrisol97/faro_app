@@ -3905,6 +3905,9 @@ diálogos y convertido el coordinador en un segundo `MainController`.
 sumaron los suyos) y la predicción se cumplió a medias: 2 se mudaron, pero siguen
 igual de sueltos en su clase nueva, y en `MainController` quedan 5.
 
+> **Al 2026-09-20 son 16, y 6 en `MainController`**: A16 (`0e8380b`) agregó el hilo de
+> la exportación en streaming. El trabajo de rendimiento empeoró C3 en uno.
+
 ### Lo que falta, y es del usuario
 
 **La prueba de humo del log.** Es la red de seguridad real que el propio §C1 propone y
@@ -4315,7 +4318,8 @@ Las dos primeras son de **medir**, y las dos piden una base con volumen:
    contradiciendo lo que este archivo registra tres veces.
 
 Y en el análisis quedan **C2** (los 7 mapas estáticos de `SchemaIntrospector`) y **C3**
-(los 15 `new Thread` sueltos) abiertos a propósito, con su razón escrita.
+(los 16 `new Thread` sueltos —decía 15, pero ya eran 16 al escribir esto: A16 agregó
+uno, ver la entrada del 2026-09-21 (estado)—) abiertos a propósito, con su razón escrita.
 
 ### Por qué se mezcla antes de esas mediciones
 
@@ -4507,3 +4511,92 @@ de estado.
 
 Siguen sin verificar además, como en `main`: la prueba de humo del log de C1 y el pico
 de memoria de A16.
+
+---
+
+## 2026-09-21 (estado) — Todo lo pendiente hoy, en un solo lugar, y el mapa de la ronda
+
+Pedido: *"verifica nuevamente que todo esté documentado"*. La verificación encontró
+que el **trabajo** estaba todo registrado, pero con dos huecos de navegación:
+
+- La tabla "lo que espera decisión del usuario" es del 2026-09-19 y la ronda siguió
+  después: **no decía nada del rediseño** —ni sus seis grupos de pendientes, ni
+  verificar cómo se ve, ni qué hacer con dos ramas que sobran—. Quien la leyera para
+  saber qué falta se habría llevado una lista incompleta.
+- Ocho commits de la ronda no se citaban por hash en ningún lado. Todos son de
+  documentación, y dos de ellos **no pueden citarse a sí mismos**: un commit no conoce
+  su propio hash hasta existir.
+
+Y salieron dos cosas más. **Una cifra vieja**: los `new Thread` sueltos (C3) eran 16 y
+no los 15 que decían tres lugares — A16 agregó el de la exportación en streaming, en
+`MainController`, donde quedan 6 y no 5. En la entrada de cierre del 2026-09-20 la cifra
+ya era falsa al escribirse, porque esa entrada es posterior a A16. Corregido en los tres
+lugares. Y cinco referencias en `ANALISIS_OPTIMIZACION_ESTRUCTURA.md` y
+`OPTIMIZACION_RENDIMIENTO.md` que daban como **ubicación** la rama
+`refactor/dividir-main-controller`, que se borró al mezclarla. Ahora apuntan a `main`
+(`81532c5`).
+
+Esta sección es la lista vigente. La tabla del 2026-09-19 queda como historia.
+
+### Lo que espera tu decisión — todo, hoy
+
+**Medir, no programar.** Las tres piden abrir la app, que el punto 4 de los Puntos
+obligatorios no le deja hacer al asistente:
+
+| Qué | Dónde está el detalle |
+|---|---|
+| **Prueba de humo del log** del refactor C1: comparar `faro-app.log` antes y después con la misma secuencia de uso. Ojo: el log rota por día, hay que apartarlo entre corridas | Entrada del 2026-09-15/19, "Lo que falta, y es del usuario" |
+| **Pico de memoria** de A16: VisualVM contra `bodegas-test`, con una consulta de más de 200.000 filas | Entrada del 2026-09-20, A16 |
+| **Cómo se ve el rediseño**: las tarjetas con sombra, las insignias PG/MSSQL en color y el aro del punto de estado. Nadie lo ha visto en pantalla | Entrada del 2026-09-20, rediseño |
+
+**Decidir:**
+
+| Qué | Dónde está el detalle |
+|---|---|
+| **Los pendientes del rediseño** — seis grupos: lo que choca con tu regla de no esconder controles, lo que revertiría decisiones tuyas (tema oscuro, acento negro), funcionalidad nueva, lo que quitaría, y el alcance (el handoff cubre una sola pantalla) | `java_faroapp/REDISENO_PENDIENTES.md` |
+| **El punto 4 de los Puntos obligatorios** ("nunca correr la app"), que contradice lo que este archivo registra tres veces | Entrada del 2026-09-15, hueco 4 |
+| **A14** — el CSV exportado sin BOM, que Excel en español abre con `Ã±`. Una línea, pero cambia los bytes de todos los archivos exportados | `ANALISIS_OPTIMIZACION_ESTRUCTURA.md`, fila A14 |
+| **Dos ramas que sobran**: `diseno/rediseno-visual` (local y remota), ya contenida entera en `main`; y `origin/claude/gracious-noether-f228xh`, que **no se debe mezclar nunca** — es anterior al refactor y borraría seis clases de código y cinco de test | Entrada del 2026-09-20, rediseño |
+
+**Abiertos a propósito, sin decisión pendiente:** C2 (los 7 mapas estáticos de
+`SchemaIntrospector`) y C3 (los `new Thread` sueltos: **16**, uno más que antes de A16), con su razón
+escrita en el análisis.
+
+### Estado del código
+
+`main` contiene todo. **196 tests** en verde, cero advertencias con `-Xlint:all`.
+`MainController` en 2.374 líneas (eran 3.344 al empezar la ronda). Del análisis, 33 de
+40 hallazgos corregidos.
+
+El último compilado entregado es `Faro-0.1.0-portable-2026-09-21.zip` (61,5 MB), en el
+escritorio y en `java_faroapp/target/dist/`. Salió de `b01e493`, que ya tiene todo lo
+que hoy está en `main` salvo documentación.
+
+### Mapa de la ronda — los 21 commits, del más viejo al más nuevo
+
+| Commit | Qué | Entrada que lo describe |
+|---|---|---|
+| `c93b429` | C1 paso 1 — `SessionPersistence` | 2026-09-15/19 |
+| `90b6517` | C1 paso 2 — `ScriptGeneratorCoordinator` | 2026-09-15/19 |
+| `f16c8e0` | C1 paso 3 — `QueryTabManager` | 2026-09-15/19 |
+| `037d30d` | C1 paso 4 — `ConnectionTreeCoordinator` | 2026-09-15/19 |
+| `9df87d6` | Documentación de C1 | 2026-09-15/19 |
+| `77342ff` | Documentación: iteraciones 1 a 3 | 2026-09-15/19, "Tercera pasada" |
+| `18d7f90` | Documentación: iteraciones 4 y 5 | 2026-09-15/19, "Cuarta y quinta pasada" |
+| `f9138dd` | Iteraciones 6 y 7, y el arreglo de A15 | 2026-09-15/19, "Sexta y séptima pasada" |
+| `ecf83b7` | Se quita de la bitácora un conteo de commits que envejecía con cada commit | — |
+| `0e8380b` | A16 — exportación en streaming + tope de filas | 2026-09-20, A16 |
+| `b8e4576` | A16 — solo la última sentencia con resultado | 2026-09-20, A16 |
+| `2d7eb29` | Documentación de A16 | 2026-09-20, A16 |
+| `6cbb84c` | Documentación de la consolidación de ramas | 2026-09-20, A16, "Dónde vive esto" |
+| `4f91ede` | Cierre de rama antes del merge | 2026-09-20 (cierre) |
+| `81532c5` | **Merge a `main`**: C1 + A15 + A16 | 2026-09-20 (cierre) |
+| `b8b61e3` | Rediseño visual — lo implementado | 2026-09-20, rediseño |
+| `b01e493` | `REDISENO_PENDIENTES.md` | 2026-09-20, rediseño |
+| `9511145` | Registro del compilado para el cliente | 2026-09-21, compilado |
+| `61fe0d7` | Documentación del rediseño y su handoff traído a la rama | 2026-09-20, rediseño |
+| `9906aa0` | **Merge a `main`**: el rediseño | 2026-09-20, rediseño |
+| `ff9a1e4` | Nota de que el rediseño quedó mezclado | 2026-09-20, rediseño |
+
+El commit que agrega esta misma sección no figura en la tabla: no puede conocer su
+propio hash antes de existir.

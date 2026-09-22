@@ -278,7 +278,7 @@ Cualquiera de las tres es un cambio de UX que te toca decidir a ti, no algo
 que se pueda "optimizar" sin tu decisión — por eso quedan como
 recomendación, no como código ya hecho.
 
-> **Cerrado el 2026-09-20** (rama `refactor/dividir-main-controller`, hallazgo A16 de
+> **Cerrado el 2026-09-20** (en `main` desde `81532c5`, hallazgo A16 de
 > `ANALISIS_OPTIMIZACION_ESTRUCTURA.md`). El usuario eligió, y se implementaron
 > **dos de las tres** juntas, porque una sola no alcanzaba:
 >

@@ -175,7 +175,7 @@ implementado siguen abiertos.
 ## Resumen — 40 hallazgos
 
 Contados contra las tablas de abajo, no de memoria: **16 de §A + 13 de §B + 11 de
-§C**. De los 40, **33 corregidos** (C1 y A15 el 2026-09-19; A16 el 2026-09-20, todos en la rama
+§C**. De los 40, **33 corregidos** (C1 y A15 el 2026-09-19; A16 el 2026-09-20, todos mezclados a `main` el 2026-09-20 en `81532c5`, desde la rama
 `refactor/dividir-main-controller`); C10 documentado; B13 cerrado como decisión
 consciente; B11 descartado; C11 sin acción (era un error de este mismo documento);
 y **3 abiertos** — C2 y C3 a propósito (ver el final del documento) y A14, que
@@ -225,9 +225,9 @@ apareció al revisar la documentación el 2026-09-15. §D se cuenta aparte, son 
 
 | # | Qué | Estado |
 |---|---|---|
-| C1 | `MainController`: **3,344** líneas (eran 2,621 al abrir el análisis), 14 responsabilidades — plan de división concreto | **Hecho, los 4 pasos del plan** (rama `refactor/dividir-main-controller`, 2026-09-15/19) — 3,344 → **2,309** líneas. No llega a las ~1,650 que prometía el plan: ver §C1, "Cómo quedó" |
+| C1 | `MainController`: **3,344** líneas (eran 2,621 al abrir el análisis), 14 responsabilidades — plan de división concreto | **Hecho, los 4 pasos del plan** (2026-09-15/19, en `main` desde `81532c5`) — 3,344 → **2,309** líneas. No llega a las ~1,650 que prometía el plan: ver §C1, "Cómo quedó" |
 | C2 | `SchemaIntrospector`: 7 mapas estáticos mutables como estado global de la app | **Abierto a propósito** — ídem |
-| C3 | 12 `new Thread(...)` sueltos, sin un punto común | **Abierto a propósito** — hoy son **15**; 2 se mudaron con C1 y en `MainController` quedan 5 |
+| C3 | 12 `new Thread(...)` sueltos, sin un punto común | **Abierto a propósito** — hoy son **16**: 2 se mudaron con C1, y A16 agregó uno (`faro-csv-export`); en `MainController` quedan 6 |
 | C4 | Duplicación real: 5 líneas repetidas 6 veces, 5 copias del mismo `stream`, 2 métodos gemelos | **Corregido** — C4.1 (con A2), C4.2 (`selectedDatabases()`) y C4.3 (`bindSelectionDependentUi`) |
 | C5 | Imports totalmente cualificados en línea, inconsistente con el resto | **Corregido** — verificado: no queda ninguno en todo `src/main` |
 | C6 | Código y recursos muertos: 51 KB de CSS sin usar + 3 métodos/constructores sin llamador | **Corregido** |
@@ -1344,7 +1344,7 @@ detecta una regresión estructural mucho mejor que revisar pantalla por pantalla
 Es la técnica que ya se usó para verificar el arreglo del #1 ("Corrida real de
 la app, con el log como evidencia, 2026-09-07 23:09").
 
-### Cómo quedó (2026-09-15/19, rama `refactor/dividir-main-controller`)
+### Cómo quedó (2026-09-15/19, mezclado a `main` en `81532c5`)
 
 Los cuatro pasos, en el orden del plan y **un commit por paso**, para poder parar o
 revertir cualquiera por separado:
@@ -2121,9 +2121,9 @@ completo.
 
 | # | Qué falta | Por qué no se hizo |
 |---|---|---|
-| ~~**C1**~~ | ~~Dividir `MainController`~~ — **hecho el 2026-09-15/19** en la rama `refactor/dividir-main-controller`, un commit por paso. **Queda pendiente la prueba de humo del log**, que es del usuario: ver §C1, "Cómo quedó" | Se hizo en una ronda propia, sin arreglos funcionales mezclados, justo por el motivo que figuraba acá |
+| ~~**C1**~~ | ~~Dividir `MainController`~~ — **hecho el 2026-09-15/19**, un commit por paso, y mezclado a `main` en `81532c5`. **Queda pendiente la prueba de humo del log**, que es del usuario: ver §C1, "Cómo quedó" | Se hizo en una ronda propia, sin arreglos funcionales mezclados, justo por el motivo que figuraba acá |
 | **C2** | Los 7 mapas estáticos de `SchemaIntrospector` | Es la causa raíz de A4 (los cachés que no se invalidaban) y lo que impide testear esos cachés. Conviene hacerlo **la próxima vez que haya que tocar esa clase por otro motivo**, no como cambio suelto |
-| **C3** | Los `new Thread(...)` sueltos — **15** hoy, no 12 | Sin techo común de recursos. La predicción de que "se moverían solos al dividir C1" se cumplió a medias: 2 se mudaron (a `SessionPersistence` y `ScriptGeneratorCoordinator`), pero siguen igual de sueltos en su clase nueva, y en `MainController` quedan 5 |
+| **C3** | Los `new Thread(...)` sueltos — **16** hoy, no 12 | Sin techo común de recursos. La predicción de que "se moverían solos al dividir C1" se cumplió a medias: 2 se mudaron (a `SessionPersistence` y `ScriptGeneratorCoordinator`), pero siguen igual de sueltos en su clase nueva, y en `MainController` quedan 5 |
 | **Riesgo de `ConnectionTreeActions`** | 13 componentes posicionales, seis de ellos `Consumer<DatabaseEntry>` | Ver la sección de arriba. Verificado correcto hoy. **El patrón para cerrarlo ya existe en el código**: `QueryTabManager.Host` (paso 3 de C1) resolvió el mismo problema con una interfaz de métodos con nombre en vez de lambdas posicionales |
 | **A14** | El BOM del CSV exportado | Apareció al revisar la documentación el 2026-09-15: estaba descrito dentro del cuerpo de A8 pero no figuraba en ninguna tabla, así que A8 marcado como corregido daba a entender que el tema del CSV estaba cerrado de los dos lados. **No lo está.** El arreglo es una línea, pero **cambia los bytes de todos los archivos exportados**: hay herramientas que no toleran el BOM, así que es decisión del usuario y no un arreglo que deba entrar solo |
 
