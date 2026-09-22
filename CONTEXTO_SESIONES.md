@@ -3799,6 +3799,9 @@ mezclar**, a la espera de la prueba de humo del log (ver el final de esta entrad
 > `MainController` hoy tiene **2.374**: A16 le sumó el banner de resultado recortado y
 > la elección del camino de exportación.
 
+> **Mezclada a `main` el 2026-09-20** (`81532c5`, con `--no-ff`), junto con A15 y A16,
+> y la rama borrada después. Los dos párrafos de arriba describen el estado de antes.
+
 ### Lo que de verdad ganó, que no son las líneas
 
 Tres cosas que no se podían testear sin arrancar JavaFX y ahora tienen tests:
@@ -4063,7 +4066,7 @@ Cuatro cosas, y las cuatro son suyas, no del asistente. Las dos primeras son de
 |---|---|---|
 | **La prueba de humo del log** del refactor C1 | Esta entrada, "Lo que falta, y es del usuario" | Abrir la app, expandir una base, correr contra dos, exportar, cambiar de pestaña, cerrar, y comparar `logs/faro-app.log` con el de antes. Es la red de seguridad real del refactor, y ahí está el procedimiento con la trampa del archivo que rota por día |
 | **Medir el pico de memoria** de A16 | Entrada del 2026-09-20 | Contra `bodegas-test` con VisualVM, con una consulta que pase de las 200.000 filas, antes y después. Es lo único que confirma que el techo de verdad desapareció; pide una base con volumen, igual que el cursor de A13 |
-| **La rama `refactor/dividir-main-controller`** | Esta entrada, "Estado de la rama" | Está subida y **sin mezclar**, y hoy trae el refactor **y** A16. Falta decidir si se mezcla a `main` o se abre un PR — razonablemente, después de las dos mediciones de arriba |
+| ~~**La rama `refactor/dividir-main-controller`**~~ | Esta entrada, "Estado de la rama" | **Cerrado el 2026-09-20**: el usuario decidió mezclar antes de las dos mediciones —son mediciones sobre la app corriendo, y la app se corre desde `main`—. Mezclada con `--no-ff` en `81532c5` y la rama borrada, local y remota. Ver la entrada "2026-09-20 (cierre)" |
 | **El punto 4 de los Puntos obligatorios** ("nunca correr la app") | Entrada del 2026-09-15, hueco 4 | Contradice lo que este archivo registra tres veces. O gana la regla y la verificación del empaquetado se limita a lo que se puede comprobar sin arrancar nada, o se le escribe una excepción angosta. **La regla es del usuario y solo él puede cambiarla** |
 
 Y un hallazgo abierto de código, ya numerado y con su fila en el análisis:
@@ -4322,6 +4325,136 @@ la rama esperando indefinidamente tiene su propio costo: `MainController` ya cre
 otro día de divergencia. Si alguna medición sale mal, el historial está en 13 commits
 separados y revertir cualquiera por su cuenta es posible — esa fue justamente la razón
 de hacerlos así.
+
+---
+
+## 2026-09-20 — Rediseño visual: solo lo que es estilo, y la lista de lo que no
+
+Pedido, textual: *"en él puse especificaciones muy concretas para el diseño de la app,
+ya que el diseño actualmente es muy básico… si hay algo que modifique funcionalidad
+documéntalo como pendiente… así como funcionalidad que este archivo MD pudiera quitar…
+al final lo que quiero es meter el diseño que indica este MD, sin modificar la
+funcionalidad que ya tenemos"*.
+
+El criterio quedó explícito desde el pedido y guió todo lo demás: **estilo sí,
+funcionalidad no**. Lo que cambiaría comportamiento, quitaría algo, o chocaría con
+una decisión ya tomada, no se implementa — va a una lista para que decida el usuario.
+
+### De dónde salió el documento, y un riesgo que hay que dejar escrito
+
+El handoff (`Migración_Flutter_Java/entrega/rediseno-visual-handoff.md`, 523 líneas)
+estaba en la rama remota `origin/claude/gracious-noether-f228xh`. Se trajo **solo ese
+archivo**, sin mezclar la rama.
+
+> **Esa rama NO se debe mezclar.** Es anterior al refactor de C1 y a A16, así que un
+> merge de ella **borraría** seis clases de código —`SessionPersistence`,
+> `QueryTabManager`, `ConnectionTreeCoordinator`, `ScriptGeneratorCoordinator`,
+> `CsvExportService`, `CsvWriter`— y cinco de test: las de las cuatro primeras más
+> `CsvWriterTest` (`CsvExportService` no tiene test propio: su bucle necesita una
+> base real). Verificado con `git diff --name-status` contra `main`. No es que la rama las quite a propósito:
+> simplemente nació antes de que existieran, y git lo lee como una eliminación. Su
+> único contenido útil era el handoff, y ese ya está en `diseno/rediseno-visual`.
+
+Al principio el handoff se leyó desde una copia temporal y no se trajo a la rama —
+`REDISENO_PENDIENTES.md` lo citaba como fuente por una ruta que en esa rama no
+existía. Se corrigió en la pasada de documentación del 2026-09-21.
+
+### Contrastado contra el código, no asumido
+
+Antes de tocar nada se verificó cada punto sospechoso del handoff contra el código
+real. Salieron dos choques grandes que el documento no mencionaba:
+
+- **Los colores del tema oscuro** del handoff (`#0F172A`, familia "slate") son
+  exactamente los que el usuario pidió cambiar por "zinc" (`#09090B`) el 2026-08-28:
+  *"quisiera que fuera más oscuro, tiene un color medio azul oscuro"*. El tema
+  **claro** sí coincide byte a byte con el handoff, así que ahí no había nada que
+  hacer.
+- **Ocultar editar/eliminar hasta pasar el mouse** contradice el punto 5 de los
+  Puntos obligatorios de este mismo archivo, y el README documenta lo contrario como
+  característica: *"e ícono de editar siempre visible"*.
+
+Y tres verificaciones de alcance: la app no tiene barra de título propia (usa la del
+sistema), el panel izquierdo es un `SplitPane` redimensionable y no un ancho fijo, y
+las columnas del grid son dinámicas (`ResultsTableFactory` las arma con
+`getColumns().setAll(...)` en cada resultado).
+
+### Lo que se implementó — rama `diseno/rediseno-visual`, commit `b8b61e3`
+
+En el orden que el propio handoff recomienda en §10.8, menor riesgo primero:
+
+| § | Qué | Archivos |
+|---|---|---|
+| 10.1 | Tokens de identidad de motor (`-token-engine-pg-*` / `-token-engine-mssql-*`), en los dos temas | `theme-light.css`, `theme-dark.css` |
+| 10.2 | La insignia de motor pasa de gris para los dos a color por motor | `app.css`, `ConnectionTreeCell.java` |
+| 10.6 | Editor y Resultados como dos tarjetas con sombra | `main-view.fxml`, `app.css` |
+| 4 | Aro en el punto de estado de conexión | `app.css` |
+
+Tres decisiones de fidelidad, documentadas en el propio código:
+
+- **El texto de la insignia no cambió.** El handoff dibuja `"Pg"`/`"MS"` en un
+  cuadrito fijo; `DbEngine.badge()` devuelve `"PG"`/`"MSSQL"`. Cambiarlo sería
+  producto — el mismo handoff lo advierte en §10.2. La clase de color se alterna con
+  el criterio del candado: **mutar la lista de estilos solo si cambió**, porque esto
+  corre en cada repintado de cada fila visible.
+- **El aro usa 2px y no los 3 del documento.** En el mockup el punto mide 8px; acá 10,
+  subido a mano el 2026-08-28 porque "se veía muy chico". Con 3px el punto pasaría de
+  10 a 16px y empujaría una fila ya calibrada.
+- **La sombra es una y no dos.** `--shadow-sm` son dos sombras apiladas;
+  `-fx-effect` admite un efecto por regla, y apilarlas exigiría anidar `DropShadow` en
+  Java. Se aproximó con una, como recomienda el mismo documento.
+
+**Las tarjetas necesitaron dos cosas que el handoff no decía.** Un contenedor
+exterior (`.card-host`) solo para el margen — sin él la tarjeta ocupa todo el panel y
+la sombra no tiene dónde proyectarse. Y en Resultados, redondear también las esquinas
+de la fila de pestañas y del área de contenido: son rectángulos opacos que llegan al
+borde y taparían las esquinas de la tarjeta. Antes de envolver se verificó que ningún
+`fx:id` quedara afectado y que `MainController` no referencie el `SplitPane` ni sus
+items.
+
+### Lo que no se implementó — `REDISENO_PENDIENTES.md`, commit `b01e493`
+
+Seis grupos, en orden de importancia:
+
+1. **Choca con una regla del proyecto** — ocultar editar/eliminar hasta el hover.
+2. **Revertiría decisiones ya tomadas** — el tema oscuro "slate"; el texto sobre el
+   acento como `#FFFFFF` fijo, que rompería el acento **negro** (quedaría blanco sobre
+   blanco, el bug exacto que `-token-accent-on` arregló el 2026-09-10); y los 6
+   acentos del handoff contra los 7 que tiene la app.
+3. **Funcionalidad nueva** — barra de título propia con botones de ventana, selector
+   de acento en la toolbar, barra "Ln/Col" bajo el editor, píldoras por base dentro de
+   Resultados (hoy eso vive en Ejecución), link de agregar conexión al pie del panel.
+4. **Lo que quitaría** — la tabla de 4 columnas fijas, incompatible con columnas
+   dinámicas; y el panel de 288px fijo, que quita poder redimensionarlo.
+5. **Decisiones que el handoff deja abiertas** — dónde va la insignia (se dejó donde
+   está: moverla arriesga un alineado calibrado a mano en varias rondas), el fundido,
+   la sombra doble.
+6. **Alcance** — el §9 del handoff admite que cubre **una sola pantalla** en un solo
+   estado. "Meter el diseño en toda la app" no se puede solo con este documento: para
+   los cinco diálogos, el estado vacío y Ejecución/Diagnóstico haría falta otro handoff
+   igual de detallado.
+
+### Una lección de comunicación
+
+Después de entregar esto, el usuario escribió *"no me queda claro qué cambios
+hiciste"*. El resumen había explicado el **por qué** de cada decisión y la lista de
+pendientes, pero nunca mostró el **qué** concreto. Lo que lo aclaró fue el diff real,
+archivo por archivo, con una tabla de antes/ahora: 3 cambios visuales y 1 documento.
+
+Al entregar trabajo visual, la primera respuesta tiene que ser el antes/después
+concreto; el razonamiento va después, para quien lo quiera.
+
+### Verificación
+
+**196/196 tests**, cero advertencias. `StyleClassCoverageTest` validó las cinco clases
+CSS nuevas — que es justo para lo que se escribió. El FXML se validó como XML bien
+formado, y los `fx:id` de los paneles envueltos siguen resolviendo.
+
+**Lo que no está verificado es lo visual**: cómo se ven las tarjetas, las insignias y
+el aro. Eso solo se confirma abriendo la app, y el punto 4 de los Puntos obligatorios
+no le deja hacerlo al asistente.
+
+**La rama `diseno/rediseno-visual` no está mezclada a `main`.** Con ella se armó el
+compilado del 2026-09-21 (ver la entrada siguiente).
 
 ---
 
