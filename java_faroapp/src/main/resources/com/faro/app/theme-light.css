@@ -29,6 +29,17 @@
     -token-text-muted: #475569;
     -token-border: #E2E8F0;
 
+    /* Identidad de motor (2026-09-20, §1.3 del handoff de rediseño visual) — el único
+       grupo de tokens que ese documento agrega y que no existía. Distingue PostgreSQL de
+       SQL Server por color en la insignia de cada fila del árbol, que hasta ahora era
+       gris para los dos y solo se diferenciaba por el texto ("PG"/"MSSQL").
+       Valores del prototipo, sin inventar: azul apagado de Postgres y rojo de SQL Server,
+       los dos como fondo translúcido para que no compitan con el acento. */
+    -token-engine-pg-bg: rgba(51,103,145,.12);
+    -token-engine-pg-text: #2C5877;
+    -token-engine-mssql-bg: rgba(204,41,39,.12);
+    -token-engine-mssql-text: #B91C1C;
+
     -token-success-base: #059669;
     -token-error-base: #DC2626;
     -token-warn-base: #B45309;

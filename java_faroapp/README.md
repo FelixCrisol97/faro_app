@@ -90,13 +90,25 @@ Verifica antes de transferir que el comprimido pese cerca de los **~61 MB** espe
 - **Logging**: SLF4J + Logback, archivo rotativo en `logs/faro-app.log`.
 - **Tests**: JUnit 5, solo lógica pura (nada que dependa de JavaFX o de una base real).
 
+## Diseño visual
+
+La app sigue los tokens del prototipo original (`faro-java-prototipo.html`): colores, tipografías (Sora, Manrope, JetBrains Mono), radios y sombras viven como variables `-token-*` en `theme-light.css` / `theme-dark.css`, y `app.css` las usa. Tema claro u oscuro y siete colores de acento, elegibles en Preferencias → Apariencia.
+
+**Rediseño visual (2026-09-20)**, a partir de `Migración_Flutter_Java/entrega/rediseno-visual-handoff.md`. Se aplicó **solo lo que es estilo**, sin tocar funcionalidad:
+
+- **Editor y Resultados son dos tarjetas** con esquinas redondeadas y sombra, en vez de superficie plana pegada al fondo.
+- **La insignia de motor va en color por motor.** El texto (`PG`/`MSSQL`) no cambió.
+- **El punto de estado de conexión lleva un aro** del mismo tono, más suave.
+
+Lo que ese documento pide y **no** se aplicó —porque cambiaría funcionalidad, quitaría algo, o choca con una decisión ya tomada— está en `REDISENO_PENDIENTES.md`, esperando decisión. El caso más claro: el handoff pide ocultar editar/eliminar hasta pasar el mouse, y eso contradice la regla del proyecto de que ningún control dependa de un gesto escondido.
+
 ## Ventana y navegación
 
 Barra de menú completa (Archivo/Editar/Consulta/Conexiones/Ver/Herramientas/Ayuda) con todos sus ítems conectados a una acción real, más una barra de herramientas con los atajos más usados (Ejecutar F5, Abrir, Guardar, Formatear, Favorito). Panel izquierdo con un riel de íconos fijo (Conexiones/Historial/Favoritos/Preferencias) que alterna qué panel se muestra en el mismo espacio, sin duplicar la lista de conexiones en varias pantallas.
 
 ## Árbol de conexiones y explorador de esquema
 
-Árbol de servidores ("grupos", libres y opcionales) → bases de datos (`ConnectionTreeBuilder`/`ConnectionTreeCell`/`ConnectionRegistry`). Cada fila de base muestra: casilla de selección, punto de estado de conexión (con tooltip), alias (clic sencillo marca/desmarca la casilla, doble clic abre Editar) + `host:puerto` como segunda línea, candado de modo (clicable — alterna Solo lectura ↔ Sin restricciones directo, sin abrir ningún diálogo), badge de motor (PG/MSSQL), e ícono de editar siempre visible. Buscador de bases arriba del árbol, junto con "Todas"/"Ninguna" y "+" agregar, todo en una sola fila.
+Árbol de servidores ("grupos", libres y opcionales) → bases de datos (`ConnectionTreeBuilder`/`ConnectionTreeCell`/`ConnectionRegistry`). Cada fila de base muestra: casilla de selección, punto de estado de conexión (con tooltip), alias (clic sencillo marca/desmarca la casilla, doble clic abre Editar) + `host:puerto` como segunda línea, candado de modo (clicable — alterna Solo lectura ↔ Sin restricciones directo, sin abrir ningún diálogo), badge de motor (PG/MSSQL) **en color por motor** —azul para PostgreSQL, rojo para SQL Server—, e ícono de editar siempre visible. El punto de estado lleva además un aro suave del mismo color. Buscador de bases arriba del árbol, junto con "Todas"/"Ninguna" y "+" agregar, todo en una sola fila.
 
 **Grupos** — "Conexiones → Nuevo grupo de conexiones…" crea un grupo vacío; clic derecho en una base → "Mover a grupo…" la mueve a un grupo existente, a "(Sin grupo)", o a uno nuevo (pide el nombre aparte).
 

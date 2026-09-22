@@ -5,6 +5,7 @@ import java.util.Locale;
 import java.util.function.IntSupplier;
 
 import com.faro.app.model.DatabaseEntry;
+import com.faro.app.model.DbEngine;
 import com.faro.app.model.Server;
 import com.faro.app.model.ServerMode;
 import com.faro.app.ui.SchemaTreeNode.GenerateAction;
@@ -133,6 +134,10 @@ public class ConnectionTreeCell extends TreeCell<Object> {
     /** Candado del modo (2026-08-28) — reemplaza el texto "SIN RESTRICCIONES"/"SOLO LECTURA" de antes, pedido explícito del usuario ("se me hace muy [pesado], hay forma de usar iconos"). Cerrado = solo lectura, abierto = sin restricciones — mismo lenguaje visual que Lucide `lock`/`lock-open` (ver Icons.java), con tooltip para quien de verdad necesite el texto exacto. */
     private final SVGPath modeIcon = new SVGPath();
     private final Tooltip modeTooltip = new Tooltip();
+    /** Clases de color de la insignia de motor — ver {@link #applyEngineBadgeColor}. */
+    private static final String ENGINE_BADGE_POSTGRES = "tree-engine-badge-postgres";
+    private static final String ENGINE_BADGE_MSSQL = "tree-engine-badge-mssql";
+
     private final Label engineBadge = new Label();
     private final SVGPath editIcon = new SVGPath();
     private final StackPane editButton;
@@ -920,6 +925,7 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         aliasLabel.setText(db.alias());
         hostLabel.setText(db.host() + ":" + db.port());
         engineBadge.setText(db.engine().badge());
+        applyEngineBadgeColor(db);
 
         // Candado del modo — SIEMPRE visible (a diferencia del texto "SIN
         // RESTRICCIONES" que reemplaza, que solo aparecía en el caso no-lectura):
@@ -949,6 +955,30 @@ public class ConnectionTreeCell extends TreeCell<Object> {
         }
 
         editTarget = db;
+    }
+
+    /**
+     * Pinta la insignia de motor con el color de ese motor (2026-09-20, §10.2 del handoff
+     * de rediseño visual). Antes era gris para los dos y solo el texto los distinguía.
+     *
+     * <p><b>El texto no cambia.</b> El handoff dibujaba un cuadrito fijo con "Pg"/"MS",
+     * pero {@code DbEngine#badge()} devuelve "PG"/"MSSQL" — cambiarlo sería una decisión
+     * de producto, no de estilo, así que la insignia sigue siendo una píldora de ancho
+     * automático y solo gana color.
+     *
+     * <p>Mismo criterio de mutación que {@code modeIcon} unas líneas más abajo: se toca la
+     * lista de clases <b>solo si de verdad cambió</b>. Esto corre en cada repintado de
+     * cada fila visible, y {@code getStyleClass()} es una lista observable — agregar y
+     * quitar a ciegas dispararía un recálculo de CSS por fila y por repintado.
+     */
+    private void applyEngineBadgeColor(DatabaseEntry db) {
+        boolean isPostgres = db.engine() == DbEngine.POSTGRES;
+        String wanted = isPostgres ? ENGINE_BADGE_POSTGRES : ENGINE_BADGE_MSSQL;
+        String other = isPostgres ? ENGINE_BADGE_MSSQL : ENGINE_BADGE_POSTGRES;
+        if (!engineBadge.getStyleClass().contains(wanted)) {
+            engineBadge.getStyleClass().remove(other);
+            engineBadge.getStyleClass().add(wanted);
+        }
     }
 
     private void unbindCheckbox() {
