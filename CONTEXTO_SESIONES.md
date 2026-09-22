@@ -4456,6 +4456,11 @@ no le deja hacerlo al asistente.
 **La rama `diseno/rediseno-visual` no está mezclada a `main`.** Con ella se armó el
 compilado del 2026-09-21 (ver la entrada siguiente).
 
+> **Mezclada a `main` el 2026-09-21** (`9906aa0`, con `--no-ff`) a pedido del usuario,
+> después de dos pasadas de verificación sobre esta misma bitácora. Lo visual sigue sin
+> verificar: nadie abrió la app con estos cambios. El párrafo de arriba describe el estado
+> de antes.
+
 ---
 
 ## 2026-09-21 — Compilado para el equipo del cliente, verificado sin arrancar la app
