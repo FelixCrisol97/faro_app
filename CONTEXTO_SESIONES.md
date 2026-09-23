@@ -4357,7 +4357,14 @@ archivo**, sin mezclar la rama.
 > `CsvWriterTest` (`CsvExportService` no tiene test propio: su bucle necesita una
 > base real). Verificado con `git diff --name-status` contra `main`. No es que la rama las quite a propósito:
 > simplemente nació antes de que existieran, y git lo lee como una eliminación. Su
-> único contenido útil era el handoff, y ese ya está en `diseno/rediseno-visual`.
+> único contenido útil era el handoff, y ese ya está en `main`.
+>
+> **Dejó de ser cierto el 2026-09-22.** Esa rama ganó dos commits nuevos con un archivo
+> que `main` NO tiene: `especificaciones-diseno-completas.md` (526 líneas, una
+> especificación de diseño de TODA la app con catálogo de animaciones). Se descubrió
+> justo al ir a borrarla: el usuario había aprobado borrarla basándose en la frase de
+> arriba, que para entonces ya era falsa. **No se borró.** La advertencia de no
+> mezclarla sigue en pie por lo mismo de siempre: es anterior al refactor.
 
 Al principio el handoff se leyó desde una copia temporal y no se trajo a la rama —
 `REDISENO_PENDIENTES.md` lo citaba como fuente por una ruta que en esa rama no
@@ -4556,7 +4563,7 @@ obligatorios no le deja hacer al asistente:
 | **Los pendientes del rediseño** — seis grupos: lo que choca con tu regla de no esconder controles, lo que revertiría decisiones tuyas (tema oscuro, acento negro), funcionalidad nueva, lo que quitaría, y el alcance (el handoff cubre una sola pantalla) | `java_faroapp/REDISENO_PENDIENTES.md` |
 | **El punto 4 de los Puntos obligatorios** ("nunca correr la app"), que contradice lo que este archivo registra tres veces | Entrada del 2026-09-15, hueco 4 |
 | **A14** — el CSV exportado sin BOM, que Excel en español abre con `Ã±`. Una línea, pero cambia los bytes de todos los archivos exportados | `ANALISIS_OPTIMIZACION_ESTRUCTURA.md`, fila A14 |
-| **Dos ramas que sobran**: `diseno/rediseno-visual` (local y remota), ya contenida entera en `main`; y `origin/claude/gracious-noether-f228xh`, que **no se debe mezclar nunca** — es anterior al refactor y borraría seis clases de código y cinco de test | Entrada del 2026-09-20, rediseño |
+| ~~**Dos ramas que sobran**~~ → **una**, y con novedad. `diseno/rediseno-visual` se borró el 2026-09-22 (estaba entera en `main`). `origin/claude/gracious-noether-f228xh` **no se borró**: al ir a hacerlo apareció que tiene dos commits nuevos del 2026-09-22 con `especificaciones-diseno-completas.md` (526 líneas), que `main` no tiene. **Sigue sin poder mezclarse** —es anterior al refactor—, así que para aprovechar ese archivo hay que traerlo solo a él, como se hizo con el handoff | Entrada del 2026-09-20, rediseño |
 
 **Abiertos a propósito, sin decisión pendiente:** C2 (los 7 mapas estáticos de
 `SchemaIntrospector`) y C3 (los `new Thread` sueltos: **16**, uno más que antes de A16), con su razón
